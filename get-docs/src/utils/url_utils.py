@@ -1,0 +1,109 @@
+from urllib.parse import (
+    urljoin,
+    urlparse,
+    urlunparse,
+)
+
+ASSET_EXTENSIONS = frozenset(
+    {
+        ".pdf",
+        ".zip",
+        ".tar",
+        ".gz",
+        ".rar",
+        ".7z",
+        ".png",
+        ".jpg",
+        ".jpeg",
+        ".gif",
+        ".svg",
+        ".webp",
+        ".ico",
+        ".css",
+        ".js",
+        ".woff",
+        ".woff2",
+        ".ttf",
+        ".eot",
+        ".mp3",
+        ".mp4",
+        ".avi",
+        ".mov",
+        ".wmv",
+        ".xml",
+        ".json",
+        ".yaml",
+        ".yml",
+        ".toml",
+        ".exe",
+        ".dmg",
+        ".deb",
+        ".rpm",
+    }
+)
+
+IGNORED_SCHEMES = frozenset(
+    {
+        "mailto",
+        "javascript",
+        "tel",
+        "ftp",
+        "data",
+    }
+)
+
+
+def normalize_url(url: str) -> str:
+    parsed = urlparse(
+        url
+    )  # e.g. ParseResult(scheme='https', netloc='fastapi.tiangolo.com', path='', params='', query='', fragment='')
+
+    path = parsed.path
+    if path != "/" and path.endswith("/"):
+        path = path.rstrip("/")
+    if not path:
+        path = "/"
+
+    scheme = parsed.scheme.lower()
+    netloc = parsed.netloc.lower()
+
+    return urlunparse((scheme, netloc, path, "", "", ""))
+
+
+def extract_domain(url: str) -> str:
+    return urlparse(url).netloc.lower()
+
+
+def extract_path(url: str) -> str:
+    return urlparse(url).path
+
+
+def resolve_relative(base_url: str, relative_url: str) -> str:
+    return urljoin(base_url, relative_url)
+
+
+def is_same_domain(url: str, base_url: str) -> bool:
+    return extract_domain(url) == extract_domain(base_url)
+
+
+def path_starts_with(url: str, prefix: str) -> bool:
+    path = extract_path(url)
+    if not prefix.endswith("/"):
+        prefix = prefix + "/"
+    if not path.endswith("/"):
+        path = path + "/"
+    return path.startswith(prefix) or path == prefix.rstrip("/")
+
+
+def is_asset_url(url: str) -> bool:
+    parsed = urlparse(url)
+
+    if parsed.scheme in IGNORED_SCHEMES:
+        return True
+
+    path = parsed.path.lower()
+    for ext in ASSET_EXTENSIONS:
+        if path.endswith(ext):
+            return True
+
+    return False
