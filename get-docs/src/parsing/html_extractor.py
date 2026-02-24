@@ -1,4 +1,7 @@
-from bs4 import BeautifulSoup, Tag
+import html
+import re
+
+from bs4 import BeautifulSoup, NavigableString, Tag
 
 # tags that are unlikely to contain documentation content
 NOISE_TAGS = {
@@ -57,6 +60,11 @@ CONTENT_SELECTORS = [
     ".page-content",
 ]
 
+_STYLING_TAG_RE = re.compile(
+    r"</?(?:font|span|b|i|u|em|strong|mark|small|s|del|ins)(?:\s[^>]*)?>",
+    re.IGNORECASE,
+)
+
 
 def _find_largest_text_block(soup: BeautifulSoup) -> Tag | None:
     """fallback to the div with the max character count"""
@@ -114,6 +122,32 @@ def _strip_noise(container: Tag) -> None:
 
     for el in to_remove:
         el.decompose()
+
+    _clean_code_blocks(container)
+
+
+def _clean_code_blocks(container: Tag) -> None:
+    """extract clean, plain-text code from <pre> blocks."""
+    for pre in container.find_all("pre"):
+        code = pre.find("code")
+        code_classes = code.get("class", []) if code else []
+
+        raw = pre.decode_contents()
+        # strip styling/highlighting tags and <code> wrappers, keep text
+        cleaned = _STYLING_TAG_RE.sub("", raw)
+        cleaned = re.sub(r"</?code[^>]*>", "", cleaned, flags=re.IGNORECASE)
+        # unescape twice because sometimes the text is double-wrapped in html codes
+        cleaned = html.unescape(cleaned)
+        cleaned = _STYLING_TAG_RE.sub("", cleaned)
+        cleaned = html.unescape(cleaned)
+
+        # rebuild the block but keep the language class
+        pre.clear()
+        new_code = Tag(name="code")
+        if code_classes:
+            new_code["class"] = code_classes
+        new_code.append(NavigableString(cleaned))
+        pre.append(new_code)
 
 
 def extract_title(html: str) -> str:

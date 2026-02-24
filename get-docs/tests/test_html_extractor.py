@@ -285,6 +285,25 @@ class TestEdgeCases:
         assert "fastapi" in code_text
         assert "FastAPI" in code_text
 
+    def test_code_block_strips_double_encoded_html(self):
+        html = (
+            "<article><pre><code>"
+            '<span class="go">&lt;font color="#4E9A06"&gt;hello&lt;/font&gt;</span>'
+            "</code></pre></article>"
+        )
+        result = extract_content(html)
+        text = result.find("pre").get_text()
+        assert "hello" in text
+        assert "<font" not in text
+        assert "&lt;" not in text
+
+    def test_code_block_preserves_language_class(self):
+        html = '<article><pre><code class="language-python"><span class="n">x</span> = 1</code></pre></article>'
+        result = extract_content(html)
+        code = result.find("code")
+        assert code is not None
+        assert "language-python" in code.get("class", [])
+
     def test_content_with_no_standard_container(self):
         html = """
         <html><body>
