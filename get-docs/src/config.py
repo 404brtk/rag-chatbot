@@ -9,5 +9,4 @@ class Settings(BaseSettings):
     LOG_LEVEL = "INFO"
 
 
-
 settings = Settings()
