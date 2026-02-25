@@ -70,7 +70,6 @@ class TestStripNoise:
         assert "content" in result.get_text()
 
     def test_removes_buttons(self):
-        """buttons are UI noise (copy, toggle, etc.)"""
         html = '<main><button>Copy</button><button class="toggle">Menu</button><p>content</p></main>'
         result = extract_content(html)
         assert "Copy" not in result.get_text()
@@ -339,3 +338,230 @@ class TestEdgeCases:
         html = "<main><p>content</p></main>"
         result = extract_content(html, css_selector="#nonexistent")
         assert result is None
+
+
+class TestFlattenTabbedContent:
+    def test_mkdocs_material_basic(self):
+        html = """
+        <article>
+            <h2>API</h2>
+            <div class="tabbed-set tabbed-alternate" data-tabs="1:2">
+                <input checked="checked" id="tab-vars" name="__tabbed_1" type="radio"/>
+                <input id="tab-php" name="__tabbed_1" type="radio"/>
+                <div class="tabbed-labels">
+                    <label for="tab-vars">Variables</label>
+                    <label for="tab-php">PHP</label>
+                </div>
+                <div class="tabbed-content">
+                    <div class="tabbed-block">
+                        <table><tr><td>AMOUNT</td><td>required</td></tr></table>
+                    </div>
+                    <div class="tabbed-block">
+                        <pre><code>echo "hello";</code></pre>
+                    </div>
+                </div>
+            </div>
+        </article>
+        """
+        result = extract_content(html)
+        text = result.get_text()
+
+        assert "AMOUNT" in text
+        assert "hello" in text
+        assert result.find("strong", string="Variables")
+        assert result.find("strong", string="PHP")
+        assert result.select("div.tabbed-set") == []
+        assert result.select("input[type='radio']") == []
+
+    def test_mkdocs_material_three_tabs(self):
+        html = """
+        <article>
+            <div class="tabbed-set" data-tabs="1:3">
+                <input checked="checked" id="t1" name="__tabbed_1" type="radio"/>
+                <input id="t2" name="__tabbed_1" type="radio"/>
+                <input id="t3" name="__tabbed_1" type="radio"/>
+                <div class="tabbed-labels">
+                    <label for="t1">Python</label>
+                    <label for="t2">PHP</label>
+                    <label for="t3">JavaScript</label>
+                </div>
+                <div class="tabbed-content">
+                    <div class="tabbed-block"><p>param table</p></div>
+                    <div class="tabbed-block"><pre><code>curl_init();</code></pre></div>
+                    <div class="tabbed-block"><pre><code>axios.post()</code></pre></div>
+                </div>
+            </div>
+        </article>
+        """
+        result = extract_content(html)
+        text = result.get_text()
+
+        assert "param table" in text
+        assert "curl_init();" in text
+        assert "axios.post()" in text
+        assert result.find("strong", string="Python")
+        assert result.find("strong", string="PHP")
+        assert result.find("strong", string="JavaScript")
+
+    def test_mkdocs_material_multiple_tabsets(self):
+        html = """
+        <article>
+            <div class="tabbed-set" data-tabs="1:2">
+                <input checked="checked" id="a1" name="__tabbed_1" type="radio"/>
+                <input id="a2" name="__tabbed_1" type="radio"/>
+                <div class="tabbed-labels">
+                    <label for="a1">Python</label>
+                    <label for="a2">Ruby</label>
+                </div>
+                <div class="tabbed-content">
+                    <div class="tabbed-block"><pre><code>print("hi")</code></pre></div>
+                    <div class="tabbed-block"><pre><code>puts "hi"</code></pre></div>
+                </div>
+            </div>
+            <p>some text between</p>
+            <div class="tabbed-set" data-tabs="2:2">
+                <input checked="checked" id="b1" name="__tabbed_2" type="radio"/>
+                <input id="b2" name="__tabbed_2" type="radio"/>
+                <div class="tabbed-labels">
+                    <label for="b1">curl</label>
+                    <label for="b2">httpie</label>
+                </div>
+                <div class="tabbed-content">
+                    <div class="tabbed-block"><pre><code>curl http://x</code></pre></div>
+                    <div class="tabbed-block"><pre><code>http GET http://x</code></pre></div>
+                </div>
+            </div>
+        </article>
+        """
+        result = extract_content(html)
+        text = result.get_text()
+
+        assert 'print("hi")' in text
+        assert 'puts "hi"' in text
+        assert "curl http://x" in text
+        assert "http GET http://x" in text
+        assert "some text between" in text
+
+    def test_sphinx_tabs(self):
+        html = """
+        <article>
+            <div class="sphinx-tabs">
+                <div class="sphinx-tabs-tab" id="tab-py">Python</div>
+                <div class="sphinx-tabs-tab" id="tab-js">JavaScript</div>
+                <div class="sphinx-tabs-panel" aria-labelledby="tab-py">
+                    <pre><code>import os</code></pre>
+                </div>
+                <div class="sphinx-tabs-panel" aria-labelledby="tab-js">
+                    <pre><code>const fs = require('fs')</code></pre>
+                </div>
+            </div>
+        </article>
+        """
+        result = extract_content(html)
+        text = result.get_text()
+
+        assert "import os" in text
+        assert "require('fs')" in text
+        assert result.find("strong", string="Python")
+        assert result.find("strong", string="JavaScript")
+        assert result.select("div.sphinx-tabs") == []
+
+    def test_bootstrap_tabs(self):
+        html = """
+        <article>
+            <ul class="nav nav-tabs">
+                <li class="active"><a data-toggle="tab" href="#win">Windows</a></li>
+                <li><a data-toggle="tab" href="#mac">macOS</a></li>
+            </ul>
+            <div class="tab-content">
+                <div class="tab-pane active" id="win"><p>choco install pkg</p></div>
+                <div class="tab-pane" id="mac"><p>brew install pkg</p></div>
+            </div>
+        </article>
+        """
+        result = extract_content(html)
+        text = result.get_text()
+
+        assert "choco install pkg" in text
+        assert "brew install pkg" in text
+        assert result.find("strong", string="Windows")
+        assert result.find("strong", string="macOS")
+        assert result.select("ul.nav-tabs") == []
+        assert result.select("div.tab-content") == []
+
+    def test_aria_tabs(self):
+        html = """
+        <article>
+            <div class="tabs-wrapper">
+                <div role="tablist">
+                    <button role="tab" aria-selected="true">Linux</button>
+                    <button role="tab">Docker</button>
+                </div>
+                <div role="tabpanel"><p>apt-get install pkg</p></div>
+                <div role="tabpanel" hidden><p>docker pull img</p></div>
+            </div>
+        </article>
+        """
+        result = extract_content(html)
+        text = result.get_text()
+
+        assert "apt-get install pkg" in text
+        assert "docker pull img" in text
+        assert result.find("strong", string="Linux")
+        assert result.find("strong", string="Docker")
+
+    def test_no_tabs_does_nothing(self):
+        html = "<article><h1>Title</h1><p>Just text.</p></article>"
+        result = extract_content(html)
+        assert "Title" in result.get_text()
+        assert "Just text." in result.get_text()
+
+    def test_more_panels_than_labels(self):
+        html = """
+        <article>
+            <div class="tabbed-set" data-tabs="1:2">
+                <input checked="checked" id="x1" name="__tabbed_1" type="radio"/>
+                <div class="tabbed-labels">
+                    <label for="x1">Only Label</label>
+                </div>
+                <div class="tabbed-content">
+                    <div class="tabbed-block"><p>first</p></div>
+                    <div class="tabbed-block"><p>second</p></div>
+                </div>
+            </div>
+        </article>
+        """
+        result = extract_content(html)
+        text = result.get_text()
+
+        assert "first" in text
+        assert "second" in text
+        assert result.find("strong", string="Only Label")
+        assert result.find("strong", string="Tab 2")
+
+    def test_tabs_with_surrounding_content(self):
+        html = """
+        <article>
+            <h2>Before</h2>
+            <div class="tabbed-set" data-tabs="1:2">
+                <input checked="checked" id="s1" name="__tabbed_1" type="radio"/>
+                <input id="s2" name="__tabbed_1" type="radio"/>
+                <div class="tabbed-labels">
+                    <label for="s1">A</label>
+                    <label for="s2">B</label>
+                </div>
+                <div class="tabbed-content">
+                    <div class="tabbed-block"><p>alpha</p></div>
+                    <div class="tabbed-block"><p>bravo</p></div>
+                </div>
+            </div>
+            <h2>After</h2>
+        </article>
+        """
+        result = extract_content(html)
+        text = result.get_text()
+
+        assert "Before" in text
+        assert "alpha" in text
+        assert "bravo" in text
+        assert "After" in text

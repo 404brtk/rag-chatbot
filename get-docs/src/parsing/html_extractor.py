@@ -89,6 +89,96 @@ def _auto_detect_content(soup: BeautifulSoup) -> Tag | None:
     return _find_largest_text_block(soup)
 
 
+def _build_labeled_fragments(
+    labels: list[str],
+    panels: list[Tag],
+) -> list[Tag]:
+    """Pair each tab label with its panel content and return them as flat elements."""
+    fragments: list[Tag] = []
+
+    for i, panel in enumerate(panels):
+        label_text = labels[i] if i < len(labels) else f"Tab {i + 1}"
+
+        p = Tag(name="p")
+        strong = Tag(name="strong")
+        strong.string = label_text
+        p.append(strong)
+        fragments.append(p)
+
+        for child in list(panel.children):
+            if isinstance(child, Tag):
+                child.extract()
+                fragments.append(child)
+            elif isinstance(child, NavigableString) and child.strip():
+                wrapper = Tag(name="p")
+                wrapper.string = child.strip()
+                fragments.append(wrapper)
+
+    return fragments
+
+
+def _replace_with_labeled_panels(
+    target: Tag,
+    labels: list[str],
+    panels: list[Tag],
+) -> None:
+    """Swap a tab container for its flattened labeled contents."""
+    fragments = _build_labeled_fragments(labels, panels)
+
+    for frag in fragments:
+        target.insert_before(frag)
+    target.decompose()
+
+
+def _flatten_tabbed_content(container: Tag) -> None:
+    """Unpack tabbed UI into plain labeled sections so nothing is lost.
+
+    Doc sites commonly hide code examples behind tabs (e.g. Python vs JS).
+    The content is all in the DOM, just toggled by CSS — we flatten it out.
+    """
+
+    # Material for MkDocs
+    for tabset in container.select("div.tabbed-set"):
+        labels = [
+            label.get_text(strip=True)
+            for label in tabset.select(".tabbed-labels > label")
+        ]
+        panels = tabset.select(".tabbed-content > .tabbed-block")
+        _replace_with_labeled_panels(tabset, labels, panels)
+
+    # Sphinx Tabs
+    for tabset in container.select("div.sphinx-tabs"):
+        labels = [tab.get_text(strip=True) for tab in tabset.select(".sphinx-tabs-tab")]
+        panels = tabset.select(".sphinx-tabs-panel")
+        _replace_with_labeled_panels(tabset, labels, panels)
+
+    # Bootstrap
+    for nav in container.select("ul.nav-tabs"):
+        tab_content = nav.find_next_sibling(class_="tab-content")
+        if not tab_content:
+            continue
+        labels = [a.get_text(strip=True) for a in nav.select("a")]
+        panels = tab_content.select(".tab-pane")
+        _replace_with_labeled_panels(tab_content, labels, panels)
+        nav.decompose()
+
+    # ARIA tabs
+    for tablist in container.select("[role='tablist']"):
+        labels = [tab.get_text(strip=True) for tab in tablist.select("[role='tab']")]
+        parent = tablist.parent
+        if not parent:
+            continue
+        panels = parent.select("[role='tabpanel']")
+        if not panels:
+            continue
+        fragments = _build_labeled_fragments(labels, panels)
+        for frag in fragments:
+            tablist.insert_before(frag)
+        for panel in panels:
+            panel.decompose()
+        tablist.decompose()
+
+
 def _flatten_definition_lists(container: Tag) -> None:
     """Flatten <dl> tags into regular paragraph and block siblings.
 
@@ -112,6 +202,10 @@ def _flatten_definition_lists(container: Tag) -> None:
 
 def _strip_noise(container: Tag) -> None:
     """remove non-functional elements, hidden styles and noise patterns"""
+
+    # flatten tabs first while the DOM structure is still intact
+    _flatten_tabbed_content(container)
+
     for tag_name in NOISE_TAGS:
         for element in container.find_all(tag_name):
             element.decompose()
