@@ -304,6 +304,22 @@ class TestEdgeCases:
         assert code is not None
         assert "language-python" in code.get("class", [])
 
+    def test_definition_list_flattened(self):
+        html = """
+        <article>
+            <dl class="py method">
+                <dt>Path.resolve(strict=False)</dt>
+                <dd><p>Make the path absolute.</p>
+                <pre><code>>>> p.resolve()</code></pre></dd>
+            </dl>
+        </article>
+        """
+        result = extract_content(html)
+        assert result.find("dl") is None
+        assert "Path.resolve(strict=False)" in result.get_text()
+        assert "Make the path absolute." in result.get_text()
+        assert result.find("pre") is not None
+
     def test_content_with_no_standard_container(self):
         html = """
         <html><body>

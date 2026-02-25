@@ -89,6 +89,27 @@ def _auto_detect_content(soup: BeautifulSoup) -> Tag | None:
     return _find_largest_text_block(soup)
 
 
+def _flatten_definition_lists(container: Tag) -> None:
+    """Flatten <dl> tags into regular paragraph and block siblings.
+
+    This prevents Markitdown from misinterpreting nested code blocks.
+    """
+    for dl in container.find_all("dl"):
+        for child in list(dl.children):
+            if isinstance(child, Tag) and child.name == "dt":
+                # convert term to a bold paragraph to preserve styling
+                p = Tag(name="p")
+                strong = Tag(name="strong")
+                strong.string = child.get_text()
+                p.append(strong)
+                dl.insert_before(p)
+            elif isinstance(child, Tag) and child.name == "dd":
+                # promote contents to siblings to avoid indentation issues
+                for dd_child in list(child.children):
+                    dl.insert_before(dd_child)
+        dl.decompose()
+
+
 def _strip_noise(container: Tag) -> None:
     """remove non-functional elements, hidden styles and noise patterns"""
     for tag_name in NOISE_TAGS:
@@ -123,6 +144,7 @@ def _strip_noise(container: Tag) -> None:
     for el in to_remove:
         el.decompose()
 
+    _flatten_definition_lists(container)
     _clean_code_blocks(container)
 
 
