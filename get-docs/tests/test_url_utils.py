@@ -6,6 +6,8 @@ from src.utils.url_utils import (
     is_same_domain,
     path_starts_with,
     is_asset_url,
+    is_absolute_url,
+    strip_git_suffix,
 )
 
 
@@ -116,3 +118,40 @@ class TestIsAssetUrl:
 
     def test_css(self):
         assert is_asset_url("https://example.com/style.css") is True
+
+
+class TestIsAbsoluteUrl:
+    def test_https(self):
+        assert is_absolute_url("https://example.com/page") is True
+
+    def test_http(self):
+        assert is_absolute_url("http://example.com/page") is True
+
+    def test_relative_path(self):
+        assert is_absolute_url("docs/page.md") is False
+
+    def test_absolute_path_no_scheme(self):
+        assert is_absolute_url("/docs/page") is False
+
+    def test_protocol_relative(self):
+        assert is_absolute_url("//example.com/page") is False
+
+    def test_empty(self):
+        assert is_absolute_url("") is False
+
+
+class TestStripGitSuffix:
+    def test_with_git_suffix(self):
+        assert strip_git_suffix("my-repo.git") == "my-repo"
+
+    def test_without_git_suffix(self):
+        assert strip_git_suffix("my-repo") == "my-repo"
+
+    def test_git_in_name(self):
+        assert strip_git_suffix("my-git-repo") == "my-git-repo"
+
+    def test_only_git(self):
+        assert strip_git_suffix(".git") == ""
+
+    def test_empty(self):
+        assert strip_git_suffix("") == ""

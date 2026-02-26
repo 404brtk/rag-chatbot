@@ -107,3 +107,13 @@ def is_asset_url(url: str) -> bool:
             return True
 
     return False
+
+
+def is_absolute_url(url: str) -> bool:
+    return url.startswith(("http://", "https://"))
+
+
+def strip_git_suffix(name: str) -> str:
+    if name.endswith(".git"):
+        return name[:-4]
+    return name
