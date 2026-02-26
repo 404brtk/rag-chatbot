@@ -4,47 +4,51 @@ import re
 from bs4 import BeautifulSoup, NavigableString, Tag
 
 # tags that are unlikely to contain documentation content
-NOISE_TAGS = {
-    "nav",
-    "header",
-    "footer",
-    "aside",
-    "script",
-    "style",
-    "noscript",
-    "button",
-}
+NOISE_TAGS = frozenset(
+    {
+        "nav",
+        "header",
+        "footer",
+        "aside",
+        "script",
+        "style",
+        "noscript",
+        "button",
+    }
+)
 
 # substrings to skip during parsing
-NOISE_CLASSES_IDS = {
-    "sidebar",
-    "navigation",
-    "breadcrumb",
-    "breadcrumbs",
-    "toc",
-    "table-of-contents",
-    "tableofcontents",
-    "edit-on-github",
-    "edit-page",
-    "pagination",
-    "prev-next",
-    "page-nav",
-    "footer",
-    "header",
-    "nav",
-    "menu",
-    "search",
-    "ads",
-    "banner",
-    "cookie",
-    "linenos",
-    "linenodiv",
-    "clipboard",
-    "copy",
-}
+NOISE_CLASSES_IDS = frozenset(
+    {
+        "sidebar",
+        "navigation",
+        "breadcrumb",
+        "breadcrumbs",
+        "toc",
+        "table-of-contents",
+        "tableofcontents",
+        "edit-on-github",
+        "edit-page",
+        "pagination",
+        "prev-next",
+        "page-nav",
+        "footer",
+        "header",
+        "nav",
+        "menu",
+        "search",
+        "ads",
+        "banner",
+        "cookie",
+        "linenos",
+        "linenodiv",
+        "clipboard",
+        "copy",
+    }
+)
 
-# selectors for extracting primary text; the first valid match is used
-CONTENT_SELECTORS = [
+# selectors for extracting primary text; the first valid match is used (order matters)
+CONTENT_SELECTORS = (
     "article",
     "[role='main']",
     "main",
@@ -58,7 +62,7 @@ CONTENT_SELECTORS = [
     ".post-content",
     ".entry-content",
     ".page-content",
-]
+)
 
 _STYLING_TAG_RE = re.compile(
     r"</?(?:font|span|b|i|u|em|strong|mark|small|s|del|ins)(?:\s[^>]*)?>",
