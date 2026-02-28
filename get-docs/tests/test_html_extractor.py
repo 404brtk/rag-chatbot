@@ -1,4 +1,9 @@
-from src.parsing.html_extractor import extract_content, extract_links, extract_title
+from src.parsing.html_extractor import (
+    extract_content,
+    extract_hreflang_urls,
+    extract_links,
+    extract_title,
+)
 
 
 class TestExtractContent:
@@ -664,3 +669,113 @@ class TestExtractLinks:
             "https://docs.example.com/docs",
             "https://docs.example.com/api",
         ]
+
+
+class TestExtractHreflangUrls:
+    BASE = "https://fastapi.tiangolo.com/"
+
+    def test_returns_alternate_language_urls(self):
+        html = """<html><head>
+        <link rel="alternate" hreflang="en" href="https://fastapi.tiangolo.com/">
+        <link rel="alternate" hreflang="de" href="https://fastapi.tiangolo.com/de/">
+        <link rel="alternate" hreflang="es" href="https://fastapi.tiangolo.com/es/">
+        <link rel="alternate" hreflang="fr" href="https://fastapi.tiangolo.com/fr/">
+        </head><body><p>content</p></body></html>"""
+        result = extract_hreflang_urls(html, self.BASE)
+        assert "https://fastapi.tiangolo.com/de" in result
+        assert "https://fastapi.tiangolo.com/es" in result
+        assert "https://fastapi.tiangolo.com/fr" in result
+
+    def test_excludes_self_url(self):
+        html = """<html><head>
+        <link rel="alternate" hreflang="en" href="https://fastapi.tiangolo.com/">
+        <link rel="alternate" hreflang="de" href="https://fastapi.tiangolo.com/de/">
+        </head><body></body></html>"""
+        result = extract_hreflang_urls(html, self.BASE)
+        assert "https://fastapi.tiangolo.com" not in result
+        assert "https://fastapi.tiangolo.com/" not in result
+        assert "https://fastapi.tiangolo.com/de" in result
+
+    def test_excludes_x_default_when_same_as_base(self):
+        html = """<html><head>
+        <link rel="alternate" hreflang="x-default" href="https://fastapi.tiangolo.com/">
+        <link rel="alternate" hreflang="ja" href="https://fastapi.tiangolo.com/ja/">
+        </head><body></body></html>"""
+        result = extract_hreflang_urls(html, self.BASE)
+        assert "https://fastapi.tiangolo.com" not in result
+        assert "https://fastapi.tiangolo.com/ja" in result
+
+    def test_returns_empty_when_no_hreflang_tags(self):
+        html = """<html><head>
+        <link rel="stylesheet" href="/style.css">
+        </head><body><p>no translations</p></body></html>"""
+        result = extract_hreflang_urls(html, self.BASE)
+        assert result == set()
+
+    def test_resolves_relative_hrefs(self):
+        html = """<html><head>
+        <link rel="alternate" hreflang="pt-br" href="/pt-br/">
+        <link rel="alternate" hreflang="en" href="/">
+        </head><body></body></html>"""
+        result = extract_hreflang_urls(html, self.BASE)
+        assert "https://fastapi.tiangolo.com/pt-br" in result
+        assert "https://fastapi.tiangolo.com" not in result
+
+    def test_normalizes_trailing_slashes(self):
+        html = """<html><head>
+        <link rel="alternate" hreflang="zh" href="https://fastapi.tiangolo.com/zh/">
+        <link rel="alternate" hreflang="zh" href="https://fastapi.tiangolo.com/zh">
+        </head><body></body></html>"""
+        result = extract_hreflang_urls(html, self.BASE)
+        assert len(result) == 1
+        assert "https://fastapi.tiangolo.com/zh" in result
+
+    def test_ignores_empty_href(self):
+        html = """<html><head>
+        <link rel="alternate" hreflang="de" href="">
+        <link rel="alternate" hreflang="fr" href="   ">
+        </head><body></body></html>"""
+        result = extract_hreflang_urls(html, self.BASE)
+        assert result == set()
+
+    def test_ignores_non_absolute_urls(self):
+        html = """<html><head>
+        <link rel="alternate" hreflang="de" href="javascript:void(0)">
+        <link rel="alternate" hreflang="fr" href="mailto:x@y.com">
+        </head><body></body></html>"""
+        result = extract_hreflang_urls(html, self.BASE)
+        assert result == set()
+
+    def test_subpath_page_with_translations(self):
+        base = "https://fastapi.tiangolo.com/tutorial/first-steps"
+        html = """<html><head>
+        <link rel="alternate" hreflang="en" href="https://fastapi.tiangolo.com/tutorial/first-steps/">
+        <link rel="alternate" hreflang="ko" href="https://fastapi.tiangolo.com/ko/tutorial/first-steps/">
+        <link rel="alternate" hreflang="ru" href="https://fastapi.tiangolo.com/ru/tutorial/first-steps/">
+        </head><body></body></html>"""
+        result = extract_hreflang_urls(html, base)
+        assert "https://fastapi.tiangolo.com/ko/tutorial/first-steps" in result
+        assert "https://fastapi.tiangolo.com/ru/tutorial/first-steps" in result
+        assert "https://fastapi.tiangolo.com/tutorial/first-steps" not in result
+
+    def test_django_style_language_paths(self):
+        base = "https://docs.djangoproject.com/en/6.0/"
+        html = """<html><head>
+        <link rel="alternate" hreflang="en" href="https://docs.djangoproject.com/en/6.0/">
+        <link rel="alternate" hreflang="fr" href="https://docs.djangoproject.com/fr/6.0/">
+        <link rel="alternate" hreflang="pt-br" href="https://docs.djangoproject.com/pt-br/6.0/">
+        </head><body></body></html>"""
+        result = extract_hreflang_urls(html, base)
+        assert "https://docs.djangoproject.com/fr/6.0" in result
+        assert "https://docs.djangoproject.com/pt-br/6.0" in result
+        assert "https://docs.djangoproject.com/en/6.0" not in result
+
+    def test_only_link_tags_with_rel_alternate_and_hreflang(self):
+        html = """<html><head>
+        <link rel="alternate" type="application/rss+xml" href="https://fastapi.tiangolo.com/feed.xml">
+        <link rel="canonical" href="https://fastapi.tiangolo.com/">
+        </head><body>
+        <a href="https://fastapi.tiangolo.com/de/" hreflang="de">German</a>
+        </body></html>"""
+        result = extract_hreflang_urls(html, self.BASE)
+        assert result == set()

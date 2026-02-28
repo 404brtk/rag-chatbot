@@ -278,6 +278,28 @@ def _clean_code_blocks(container: Tag) -> None:
         pre.append(new_code)
 
 
+def extract_hreflang_urls(html: str, base_url: str) -> set[str]:
+    """Extract alternate-language URLs declared via ``<link rel="alternate" hreflang="...">`` tags"""
+    soup = BeautifulSoup(html, "html.parser")
+    base_normalized = normalize_url(base_url)
+    urls: set[str] = set()
+
+    for link in soup.find_all("link", attrs={"rel": "alternate", "hreflang": True}):
+        href = link.get("href", "").strip()
+        if not href:
+            continue
+
+        resolved = resolve_relative(base_url, href)
+        if not is_absolute_url(resolved):
+            continue
+
+        normalized = normalize_url(resolved)
+        if normalized != base_normalized:
+            urls.add(normalized)
+
+    return urls
+
+
 def extract_links(html: str, base_url: str) -> list[str]:
     soup = BeautifulSoup(html, "html.parser")
     seen: set[str] = set()
