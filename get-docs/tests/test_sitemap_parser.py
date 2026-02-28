@@ -1,6 +1,7 @@
+import httpx
 import pytest
 
-from src.core.sitemap_parser import SitemapParser
+from src.core.sitemap_parser import SitemapParser, fetch_sitemap_urls
 
 
 SITEMAP_NS = "http://www.sitemaps.org/schemas/sitemap/0.9"
@@ -310,3 +311,79 @@ class TestCombined:
         assert subs[0].lastmod == "2024-06-01"
         assert subs[2].lastmod is None
         assert parser.get_urls() == []
+
+
+def _mock_response(
+    status_code: int = 200,
+    text: str = "",
+    content_type: str = "text/xml; charset=utf-8",
+) -> httpx.Response:
+    return httpx.Response(
+        status_code=status_code,
+        text=text,
+        headers={"content-type": content_type},
+        request=httpx.Request("GET", "https://example.com"),
+    )
+
+
+class TestFetchSitemapUrls:
+    @pytest.mark.asyncio
+    async def test_simple_urlset(self, mocker):
+        xml = """<?xml version="1.0"?>
+        <urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
+            <url><loc>https://example.com/a</loc></url>
+            <url><loc>https://example.com/b</loc></url>
+        </urlset>"""
+        client = mocker.AsyncMock(spec=httpx.AsyncClient)
+        client.get = mocker.AsyncMock(return_value=_mock_response(text=xml))
+
+        urls = await fetch_sitemap_urls("https://example.com/sitemap.xml", client)
+        assert urls == ["https://example.com/a", "https://example.com/b"]
+
+    @pytest.mark.asyncio
+    async def test_sitemapindex_recurses(self, mocker):
+        index_xml = """<?xml version="1.0"?>
+        <sitemapindex xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
+            <sitemap><loc>https://example.com/sitemap-1.xml</loc></sitemap>
+        </sitemapindex>"""
+        child_xml = """<?xml version="1.0"?>
+        <urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
+            <url><loc>https://example.com/page1</loc></url>
+        </urlset>"""
+        client = mocker.AsyncMock(spec=httpx.AsyncClient)
+        client.get = mocker.AsyncMock(
+            side_effect=[_mock_response(text=index_xml), _mock_response(text=child_xml)]
+        )
+
+        urls = await fetch_sitemap_urls("https://example.com/sitemap.xml", client)
+        assert urls == ["https://example.com/page1"]
+
+    @pytest.mark.asyncio
+    async def test_returns_empty_on_404(self, mocker):
+        client = mocker.AsyncMock(spec=httpx.AsyncClient)
+        client.get = mocker.AsyncMock(return_value=_mock_response(status_code=404))
+
+        urls = await fetch_sitemap_urls("https://example.com/sitemap.xml", client)
+        assert urls == []
+
+    @pytest.mark.asyncio
+    async def test_returns_empty_on_network_error(self, mocker):
+        client = mocker.AsyncMock(spec=httpx.AsyncClient)
+        client.get = mocker.AsyncMock(side_effect=httpx.ConnectError("fail"))
+
+        urls = await fetch_sitemap_urls("https://example.com/sitemap.xml", client)
+        assert urls == []
+
+    @pytest.mark.asyncio
+    async def test_max_depth_stops_recursion(self, mocker):
+        index_xml = """<?xml version="1.0"?>
+        <sitemapindex xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
+            <sitemap><loc>https://example.com/deeper.xml</loc></sitemap>
+        </sitemapindex>"""
+        client = mocker.AsyncMock(spec=httpx.AsyncClient)
+        client.get = mocker.AsyncMock(return_value=_mock_response(text=index_xml))
+
+        urls = await fetch_sitemap_urls(
+            "https://example.com/sitemap.xml", client, max_depth=1
+        )
+        assert urls == []

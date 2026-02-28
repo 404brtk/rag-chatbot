@@ -1,5 +1,6 @@
 from dataclasses import dataclass
 import xml.etree.ElementTree as ET
+import httpx
 
 
 @dataclass
@@ -84,3 +85,30 @@ class SitemapParser:
     def is_index(self) -> bool:
         """True if this was a sitemap index (contains sub-sitemaps, not pages)."""
         return len(self._sub_sitemaps) > 0
+
+
+async def fetch_sitemap_urls(
+    sitemap_url: str,
+    client: httpx.AsyncClient,
+    timeout: float = 10,
+    max_depth: int = 3,
+) -> list[str]:
+    if max_depth <= 0:
+        return []
+
+    try:
+        resp = await client.get(sitemap_url, follow_redirects=True, timeout=timeout)
+        if resp.status_code != 200:
+            return []
+    except (httpx.HTTPError, httpx.TimeoutException):
+        return []
+
+    parser = SitemapParser(resp.text)
+
+    if not parser.is_index():
+        return [entry.loc for entry in parser.get_urls()]
+
+    urls: list[str] = []
+    for sub in parser.get_sub_sitemaps():
+        urls.extend(await fetch_sitemap_urls(sub.loc, client, timeout, max_depth - 1))
+    return urls
