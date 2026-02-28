@@ -2,7 +2,8 @@ import re
 from dataclasses import dataclass, field
 import httpx
 
-from src.utils.url_utils import is_absolute_url, resolve_relative
+from src.core.robots_parser import RobotsParser, fetch_robots_txt
+from src.utils.url_utils import extract_path, is_absolute_url, resolve_relative
 
 
 @dataclass
@@ -109,10 +110,21 @@ _LLMS_TXT_PATHS = (
 async def fetch_llms_txt(
     base_url: str,
     client: httpx.AsyncClient,
+    robots: RobotsParser | None = None,
     timeout: float = 10,
 ) -> LlmsTxtResult | None:
+    if robots is None:
+        robots = await fetch_robots_txt(base_url, client, timeout)
+
     for path, is_full in _LLMS_TXT_PATHS:
         url = resolve_relative(base_url, path)
+
+        url_path = extract_path(url)
+        if not robots.is_allowed(url_path):
+            continue
+        if robots.is_ai_input_allowed(url_path) is False:
+            continue
+
         try:
             resp = await client.get(url, follow_redirects=True, timeout=timeout)
             if resp.status_code != 200:

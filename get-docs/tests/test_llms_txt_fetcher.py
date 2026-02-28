@@ -1,4 +1,8 @@
-from src.core.llms_txt_fetcher import parse_llms_txt
+import httpx
+import pytest
+
+from src.core.llms_txt_fetcher import fetch_llms_txt, parse_llms_txt
+from src.core.robots_parser import RobotsParser
 
 
 class TestTitle:
@@ -301,3 +305,84 @@ Acquire more customers and improve conversion by offering the most popular payme
 
         payment = [lnk for lnk in result.links if lnk.section == "Payment Methods"]
         assert len(payment) == 2
+
+
+def _mock_response(
+    status_code: int = 200,
+    text: str = "",
+    content_type: str = "text/plain; charset=utf-8",
+) -> httpx.Response:
+    return httpx.Response(
+        status_code=status_code,
+        text=text,
+        headers={"content-type": content_type},
+        request=httpx.Request("GET", "https://example.com"),
+    )
+
+
+class TestFetchLlmsTxtRobotsCheck:
+    @pytest.mark.asyncio
+    async def test_skips_when_ai_input_disallowed(self, mocker):
+        robots = RobotsParser("User-agent: *\nAllow: /\nContent-Signal: ai-input=no")
+        client = mocker.AsyncMock(spec=httpx.AsyncClient)
+
+        result = await fetch_llms_txt("https://example.com", client, robots=robots)
+
+        assert result is None
+        client.get.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_skips_when_path_disallowed(self, mocker):
+        robots = RobotsParser(
+            "User-agent: *\nDisallow: /llms-full.txt\nDisallow: /llms.txt"
+        )
+        client = mocker.AsyncMock(spec=httpx.AsyncClient)
+
+        result = await fetch_llms_txt("https://example.com", client, robots=robots)
+
+        assert result is None
+        client.get.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_fetches_robots_when_none_provided(self, mocker):
+        llms_content = "# Docs\n> Summary\n## API\n- [Ref](https://example.com/api)\n"
+
+        def side_effect(url, **kw):
+            if "robots.txt" in url:
+                return _mock_response(text="User-agent: *\nAllow: /")
+            return _mock_response(text=llms_content)
+
+        client = mocker.AsyncMock(spec=httpx.AsyncClient)
+        client.get = mocker.AsyncMock(side_effect=side_effect)
+
+        result = await fetch_llms_txt("https://example.com", client)
+
+        assert result is not None
+        assert result.title == "Docs"
+        calls = [str(c) for c in client.get.call_args_list]
+        assert any("robots.txt" in c for c in calls)
+
+    @pytest.mark.asyncio
+    async def test_allows_when_robots_permits(self, mocker):
+        robots = RobotsParser("User-agent: *\nAllow: /")
+        content = "# Docs\n> Summary\n"
+        client = mocker.AsyncMock(spec=httpx.AsyncClient)
+        client.get = mocker.AsyncMock(return_value=_mock_response(text=content))
+
+        result = await fetch_llms_txt("https://example.com", client, robots=robots)
+
+        assert result is not None
+        assert result.title == "Docs"
+
+    @pytest.mark.asyncio
+    async def test_partial_disallow_tries_allowed_path(self, mocker):
+        robots = RobotsParser("User-agent: *\nDisallow: /llms-full.txt")
+        content = "# Fallback\n"
+        client = mocker.AsyncMock(spec=httpx.AsyncClient)
+        client.get = mocker.AsyncMock(return_value=_mock_response(text=content))
+
+        result = await fetch_llms_txt("https://example.com", client, robots=robots)
+
+        assert result is not None
+        assert result.title == "Fallback"
+        assert result.is_full is False
