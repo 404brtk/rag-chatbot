@@ -3,6 +3,14 @@ import re
 
 from bs4 import BeautifulSoup, NavigableString, Tag
 
+from src.utils.url_utils import (
+    is_absolute_url,
+    is_asset_url,
+    is_same_domain,
+    normalize_url,
+    resolve_relative,
+)
+
 # tags that are unlikely to contain documentation content
 NOISE_TAGS = frozenset(
     {
@@ -268,6 +276,33 @@ def _clean_code_blocks(container: Tag) -> None:
             new_code["class"] = code_classes
         new_code.append(NavigableString(cleaned))
         pre.append(new_code)
+
+
+def extract_links(html: str, base_url: str) -> list[str]:
+    soup = BeautifulSoup(html, "html.parser")
+    seen: set[str] = set()
+    result: list[str] = []
+
+    for a in soup.find_all("a", href=True):
+        href = a["href"].strip()
+        if not href or href.startswith("#"):
+            continue
+
+        url = resolve_relative(base_url, href)
+
+        if not is_absolute_url(url):
+            continue
+        if is_asset_url(url):
+            continue
+        if not is_same_domain(url, base_url):
+            continue
+
+        normalized = normalize_url(url)
+        if normalized not in seen:
+            seen.add(normalized)
+            result.append(normalized)
+
+    return result
 
 
 def extract_title(html: str) -> str:

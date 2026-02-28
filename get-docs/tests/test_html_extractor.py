@@ -1,4 +1,4 @@
-from src.parsing.html_extractor import extract_content, extract_title
+from src.parsing.html_extractor import extract_content, extract_links, extract_title
 
 
 class TestExtractContent:
@@ -565,3 +565,102 @@ class TestFlattenTabbedContent:
         assert "alpha" in text
         assert "bravo" in text
         assert "After" in text
+
+
+class TestExtractLinks:
+    BASE = "https://docs.example.com/intro"
+
+    def test_basic_link_extraction(self):
+        html = '<a href="/guide">Guide</a><a href="/api">API</a>'
+        links = extract_links(html, self.BASE)
+        assert "https://docs.example.com/guide" in links
+        assert "https://docs.example.com/api" in links
+
+    def test_resolves_relative_urls(self):
+        html = '<a href="tutorial">Tutorial</a>'
+        links = extract_links(html, self.BASE)
+        assert "https://docs.example.com/tutorial" in links
+
+    def test_absolute_same_domain_kept(self):
+        html = '<a href="https://docs.example.com/faq">FAQ</a>'
+        links = extract_links(html, self.BASE)
+        assert "https://docs.example.com/faq" in links
+
+    def test_cross_domain_filtered(self):
+        html = '<a href="https://other.com/page">Other</a>'
+        links = extract_links(html, self.BASE)
+        assert len(links) == 0
+
+    def test_asset_urls_filtered(self):
+        html = """
+        <a href="/doc.pdf">PDF</a>
+        <a href="/style.css">CSS</a>
+        <a href="/image.png">PNG</a>
+        <a href="/guide">Guide</a>
+        """
+        links = extract_links(html, self.BASE)
+        assert links == ["https://docs.example.com/guide"]
+
+    def test_mailto_filtered(self):
+        html = '<a href="mailto:a@b.com">Email</a>'
+        links = extract_links(html, self.BASE)
+        assert len(links) == 0
+
+    def test_javascript_filtered(self):
+        html = '<a href="javascript:void(0)">Click</a>'
+        links = extract_links(html, self.BASE)
+        assert len(links) == 0
+
+    def test_fragment_only_filtered(self):
+        html = '<a href="#section">Section</a>'
+        links = extract_links(html, self.BASE)
+        assert len(links) == 0
+
+    def test_empty_href_filtered(self):
+        html = '<a href="">Empty</a>'
+        links = extract_links(html, self.BASE)
+        assert len(links) == 0
+
+    def test_deduplicates_links(self):
+        html = '<a href="/guide">One</a><a href="/guide">Two</a><a href="/guide/">Three</a>'
+        links = extract_links(html, self.BASE)
+        assert links.count("https://docs.example.com/guide") == 1
+
+    def test_preserves_discovery_order(self):
+        html = '<a href="/c">C</a><a href="/a">A</a><a href="/b">B</a>'
+        links = extract_links(html, self.BASE)
+        assert links == [
+            "https://docs.example.com/c",
+            "https://docs.example.com/a",
+            "https://docs.example.com/b",
+        ]
+
+    def test_strips_query_and_fragment(self):
+        html = '<a href="/guide?v=2#top">Guide</a>'
+        links = extract_links(html, self.BASE)
+        assert links == ["https://docs.example.com/guide"]
+
+    def test_no_a_tags_returns_empty(self):
+        html = "<p>No links here</p>"
+        links = extract_links(html, self.BASE)
+        assert links == []
+
+    def test_a_without_href_ignored(self):
+        html = '<a name="anchor">Anchor</a>'
+        links = extract_links(html, self.BASE)
+        assert links == []
+
+    def test_mixed_valid_and_invalid(self):
+        html = """
+        <a href="/docs">Docs</a>
+        <a href="https://other.com">Other</a>
+        <a href="mailto:x@y.com">Mail</a>
+        <a href="/api">API</a>
+        <a href="#top">Top</a>
+        <a href="/logo.png">Logo</a>
+        """
+        links = extract_links(html, self.BASE)
+        assert links == [
+            "https://docs.example.com/docs",
+            "https://docs.example.com/api",
+        ]
