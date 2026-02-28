@@ -1,5 +1,8 @@
+import httpx
+import pytest
+
 from src.models.enums import ContentSignal
-from src.core.robots_parser import RobotsParser
+from src.core.robots_parser import RobotsParser, fetch_robots_txt
 
 
 class TestIsAllowed:
@@ -386,3 +389,49 @@ class TestCombined:
         assert specific.is_ai_input_allowed() is True
         assert specific.get_content_signal(ContentSignal.AI_TRAIN) is False
         assert specific.get_crawl_delay() is None
+
+
+def _mock_response(
+    status_code: int = 200,
+    text: str = "",
+    content_type: str = "text/plain; charset=utf-8",
+) -> httpx.Response:
+    return httpx.Response(
+        status_code=status_code,
+        text=text,
+        headers={"content-type": content_type},
+        request=httpx.Request("GET", "https://example.com"),
+    )
+
+
+class TestFetchRobotsTxt:
+    @pytest.mark.asyncio
+    async def test_fetches_and_parses(self, mocker):
+        content = "User-agent: *\nDisallow: /private/\nCrawl-delay: 2"
+        client = mocker.AsyncMock(spec=httpx.AsyncClient)
+        client.get = mocker.AsyncMock(return_value=_mock_response(text=content))
+
+        parser = await fetch_robots_txt("https://example.com", client)
+
+        assert parser.is_allowed("/public/") is True
+        assert parser.is_allowed("/private/secret") is False
+        assert parser.get_crawl_delay() == 2.0
+
+    @pytest.mark.asyncio
+    async def test_returns_permissive_on_404(self, mocker):
+        client = mocker.AsyncMock(spec=httpx.AsyncClient)
+        client.get = mocker.AsyncMock(return_value=_mock_response(status_code=404))
+
+        parser = await fetch_robots_txt("https://example.com", client)
+
+        assert parser.is_allowed("/anything") is True
+        assert parser.get_crawl_delay() is None
+
+    @pytest.mark.asyncio
+    async def test_returns_permissive_on_network_error(self, mocker):
+        client = mocker.AsyncMock(spec=httpx.AsyncClient)
+        client.get = mocker.AsyncMock(side_effect=httpx.ConnectError("fail"))
+
+        parser = await fetch_robots_txt("https://example.com", client)
+
+        assert parser.is_allowed("/anything") is True
