@@ -2,9 +2,10 @@ from pydantic import BaseModel, HttpUrl
 
 
 class CrawlOptions(BaseModel):
-    max_depth = 3  # recursion limit for following page links
-    delay_seconds = 1.5
-    max_pages = 100
+    max_depth: int = 3
+    delay_seconds: float = 1.5
+    max_pages: int = 100
+    max_concurrent: int = 10
 
 
 class CrawlRequest(BaseModel):
