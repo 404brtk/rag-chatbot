@@ -1,10 +1,13 @@
 import asyncio
+import logging
 import re
 from dataclasses import dataclass, field
 
 import httpx
 
 from src.utils.url_utils import strip_git_suffix
+
+logger = logging.getLogger("get-docs")
 
 # GitHub repo URL patterns:
 #   https://github.com/owner/repo
@@ -93,6 +96,47 @@ DEFAULT_BRANCHES = ("main", "master")
 
 _API_BASE = "https://api.github.com"
 _RAW_BASE = "https://raw.githubusercontent.com"
+
+
+# SPDX license ids we consider safe to fetch docs from
+# it includes permissive and copyleft oss licenses
+# repos with no license or unrecognized licenses are skipped.
+ALLOWED_LICENSES = frozenset(
+    {
+        # Permissive
+        "MIT",
+        "Apache-2.0",
+        "BSD-2-Clause",
+        "BSD-3-Clause",
+        "ISC",
+        "Unlicense",
+        "Zlib",
+        "PostgreSQL",
+        "0BSD",
+        "BlueOak-1.0.0",
+        "BSL-1.0",
+        # Weak Copyleft
+        "MPL-2.0",
+        "EPL-2.0",
+        "LGPL-2.1-only",
+        "LGPL-2.1-or-later",
+        "LGPL-3.0-only",
+        "LGPL-3.0-or-later",
+        # Strong Copyleft
+        "GPL-2.0-only",
+        "GPL-2.0-or-later",
+        "GPL-3.0-only",
+        "GPL-3.0-or-later",
+        "AGPL-3.0-only",
+        "AGPL-3.0-or-later",
+        # Creative Commons / Documentation
+        "CC0-1.0",
+        "CC-BY-3.0",
+        "CC-BY-4.0",
+        "CC-BY-SA-4.0",
+        "Artistic-2.0",
+    }
+)
 
 # English subfolder names to look for, in priority order
 _ENGLISH_FOLDERS = ("en", "en-us", "en-gb")
@@ -193,6 +237,29 @@ def _is_doc_file(path: str, doc_folder: str | None) -> bool:
     return False
 
 
+async def _fetch_repo_license(
+    client: httpx.AsyncClient,
+    owner: str,
+    repo: str,
+    timeout: float,
+) -> str | None:
+    url = f"{_API_BASE}/repos/{owner}/{repo}"
+    headers = {"Accept": "application/vnd.github+json"}
+    try:
+        resp = await client.get(
+            url, headers=headers, follow_redirects=True, timeout=timeout
+        )
+        if resp.status_code != 200:
+            return None
+        data = resp.json()
+        license_obj = data.get("license")
+        if not license_obj:
+            return None
+        return license_obj.get("spdx_id")
+    except (httpx.HTTPError, httpx.TimeoutException):
+        return None
+
+
 async def _fetch_tree(
     client: httpx.AsyncClient,
     owner: str,
@@ -249,6 +316,12 @@ async def fetch_github_docs(
         return None
 
     owner, repo = parsed
+
+    # check license before fetching any content
+    spdx_id = await _fetch_repo_license(client, owner, repo, timeout)
+    if not spdx_id or spdx_id == "NOASSERTION" or spdx_id not in ALLOWED_LICENSES:
+        logger.info(f"Skipping {owner}/{repo}: license {spdx_id!r} not in allowed set")
+        return None
 
     branches_to_try = [branch] if branch else list(DEFAULT_BRANCHES)
     tree_entries: list[dict] | None = None
