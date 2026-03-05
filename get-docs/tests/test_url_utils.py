@@ -4,7 +4,6 @@ from src.utils.url_utils import (
     extract_path,
     resolve_relative,
     is_same_domain,
-    path_starts_with,
     is_asset_url,
     is_absolute_url,
     strip_git_suffix,
@@ -87,17 +86,6 @@ class TestIsSameDomain:
         assert (
             is_same_domain("https://sub.example.com/", "https://example.com/") is False
         )
-
-
-class TestPathStartsWith:
-    def test_match(self):
-        assert path_starts_with("https://example.com/docs/tutorial", "/docs") is True
-
-    def test_no_match(self):
-        assert path_starts_with("https://example.com/blog/post", "/docs") is False
-
-    def test_root(self):
-        assert path_starts_with("https://example.com/anything", "/") is True
 
 
 class TestIsAssetUrl:

@@ -86,15 +86,6 @@ def is_same_domain(url: str, base_url: str) -> bool:
     return extract_domain(url) == extract_domain(base_url)
 
 
-def path_starts_with(url: str, prefix: str) -> bool:
-    path = extract_path(url)
-    if not prefix.endswith("/"):
-        prefix = prefix + "/"
-    if not path.endswith("/"):
-        path = path + "/"
-    return path.startswith(prefix) or path == prefix.rstrip("/")
-
-
 def is_asset_url(url: str) -> bool:
     parsed = urlparse(url)
 
