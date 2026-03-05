@@ -7,6 +7,7 @@ class GetDocsOptions(BaseModel):
     max_pages: int = 100
     max_concurrent: int = 10
     timeout: float = 15.0
+    max_files: int = 500
 
 
 class GetDocsRequest(BaseModel):
