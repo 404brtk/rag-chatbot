@@ -96,6 +96,7 @@ DEFAULT_BRANCHES = ("main", "master")
 
 _API_BASE = "https://api.github.com"
 _RAW_BASE = "https://raw.githubusercontent.com"
+_GITHUB_BATCH_SIZE = 20
 
 
 # SPDX license ids we consider safe to fetch docs from
@@ -364,9 +365,8 @@ async def fetch_github_docs(
     )
 
     # batch fetch to avoid overwhelming the server
-    batch_size = 20
-    for i in range(0, len(doc_paths), batch_size):
-        batch = doc_paths[i : i + batch_size]
+    for i in range(0, len(doc_paths), _GITHUB_BATCH_SIZE):
+        batch = doc_paths[i : i + _GITHUB_BATCH_SIZE]
         tasks = [
             _fetch_raw_file(client, owner, repo, resolved_branch, path, timeout)
             for path in batch
