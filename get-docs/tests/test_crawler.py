@@ -9,26 +9,7 @@ from src.core.crawler import (
     _fetch_page,
 )
 from src.core.robots_parser import RobotsParser
-
-
-def _mock_response(
-    status_code: int = 200,
-    text: str = "",
-    content_type: str = "text/html; charset=utf-8",
-) -> httpx.Response:
-    return httpx.Response(
-        status_code=status_code,
-        text=text,
-        headers={"content-type": content_type},
-        request=httpx.Request("GET", "https://example.com"),
-    )
-
-
-def _html_page(title: str) -> str:
-    return (
-        f"<html><head><title>{title}</title></head>"
-        f"<body><main><h1>{title}</h1></main></body></html>"
-    )
+from tests.conftest import html_page, mock_response
 
 
 class TestFetchPage:
@@ -36,7 +17,7 @@ class TestFetchPage:
     async def test_success(self, mocker):
         client = mocker.AsyncMock(spec=httpx.AsyncClient)
         client.get = mocker.AsyncMock(
-            return_value=_mock_response(text="<html>ok</html>")
+            return_value=mock_response(text="<html>ok</html>")
         )
 
         url, html, error = await _fetch_page("https://example.com", client, 10)
@@ -46,7 +27,7 @@ class TestFetchPage:
     @pytest.mark.asyncio
     async def test_non_200_returns_error(self, mocker):
         client = mocker.AsyncMock(spec=httpx.AsyncClient)
-        client.get = mocker.AsyncMock(return_value=_mock_response(status_code=403))
+        client.get = mocker.AsyncMock(return_value=mock_response(status_code=403))
 
         url, html, error = await _fetch_page("https://example.com", client, 10)
         assert html is None
@@ -56,7 +37,7 @@ class TestFetchPage:
     async def test_non_html_returns_error(self, mocker):
         client = mocker.AsyncMock(spec=httpx.AsyncClient)
         client.get = mocker.AsyncMock(
-            return_value=_mock_response(text="binary", content_type="application/pdf")
+            return_value=mock_response(text="binary", content_type="application/pdf")
         )
 
         url, html, error = await _fetch_page("https://example.com", client, 10)
@@ -95,9 +76,9 @@ class TestCrawlSitemap:
         </urlset>"""
 
         responses = {
-            "https://example.com/sitemap.xml": _mock_response(text=sitemap_xml),
-            "https://example.com/docs/intro": _mock_response(text=_html_page("Intro")),
-            "https://example.com/docs/guide": _mock_response(text=_html_page("Guide")),
+            "https://example.com/sitemap.xml": mock_response(text=sitemap_xml),
+            "https://example.com/docs/intro": mock_response(text=html_page("Intro")),
+            "https://example.com/docs/guide": mock_response(text=html_page("Guide")),
         }
         client = mocker.AsyncMock(spec=httpx.AsyncClient)
         client.get = mocker.AsyncMock(side_effect=lambda url, **kw: responses[url])
@@ -118,8 +99,8 @@ class TestCrawlSitemap:
         </urlset>"""
 
         responses = {
-            "https://example.com/sitemap.xml": _mock_response(text=sitemap_xml),
-            "https://example.com/page": _mock_response(text=_html_page("Page")),
+            "https://example.com/sitemap.xml": mock_response(text=sitemap_xml),
+            "https://example.com/page": mock_response(text=html_page("Page")),
         }
         client = mocker.AsyncMock(spec=httpx.AsyncClient)
         client.get = mocker.AsyncMock(side_effect=lambda url, **kw: responses[url])
@@ -140,8 +121,8 @@ class TestCrawlSitemap:
         </urlset>"""
 
         responses = {
-            "https://example.com/sitemap.xml": _mock_response(text=sitemap_xml),
-            "https://example.com/public": _mock_response(text=_html_page("Public")),
+            "https://example.com/sitemap.xml": mock_response(text=sitemap_xml),
+            "https://example.com/public": mock_response(text=html_page("Public")),
         }
         client = mocker.AsyncMock(spec=httpx.AsyncClient)
         client.get = mocker.AsyncMock(side_effect=lambda url, **kw: responses[url])
@@ -167,9 +148,9 @@ class TestCrawlSitemap:
         client = mocker.AsyncMock(spec=httpx.AsyncClient)
         client.get = mocker.AsyncMock(
             side_effect=lambda url, **kw: (
-                _mock_response(text=sitemap_xml)
+                mock_response(text=sitemap_xml)
                 if "sitemap" in url
-                else _mock_response(text=_html_page("Page"))
+                else mock_response(text=html_page("Page"))
             )
         )
 
@@ -194,8 +175,8 @@ class TestCrawlSitemap:
         </urlset>"""
 
         responses = {
-            "https://example.com/sitemap.xml": _mock_response(text=sitemap_xml),
-            "https://example.com/page": _mock_response(text=_html_page("Page")),
+            "https://example.com/sitemap.xml": mock_response(text=sitemap_xml),
+            "https://example.com/page": mock_response(text=html_page("Page")),
         }
         client = mocker.AsyncMock(spec=httpx.AsyncClient)
         client.get = mocker.AsyncMock(side_effect=lambda url, **kw: responses[url])
@@ -216,9 +197,9 @@ class TestCrawlSitemap:
         </urlset>"""
 
         responses = {
-            "https://example.com/sitemap.xml": _mock_response(text=sitemap_xml),
-            "https://example.com/ok": _mock_response(text=_html_page("OK")),
-            "https://example.com/broken": _mock_response(status_code=500),
+            "https://example.com/sitemap.xml": mock_response(text=sitemap_xml),
+            "https://example.com/ok": mock_response(text=html_page("OK")),
+            "https://example.com/broken": mock_response(status_code=500),
         }
         client = mocker.AsyncMock(spec=httpx.AsyncClient)
         client.get = mocker.AsyncMock(side_effect=lambda url, **kw: responses[url])
@@ -243,10 +224,8 @@ class TestCrawlSitemap:
         </urlset>"""
 
         responses = {
-            "https://example.com/sitemap.xml": _mock_response(text=sitemap_xml),
-            "https://example.com/public/page": _mock_response(
-                text=_html_page("Public")
-            ),
+            "https://example.com/sitemap.xml": mock_response(text=sitemap_xml),
+            "https://example.com/public/page": mock_response(text=html_page("Public")),
         }
         client = mocker.AsyncMock(spec=httpx.AsyncClient)
         client.get = mocker.AsyncMock(side_effect=lambda url, **kw: responses[url])
@@ -268,7 +247,7 @@ class TestCrawlSitemap:
         </urlset>"""
 
         responses = {
-            "https://example.com/sitemap.xml": _mock_response(text=sitemap_xml),
+            "https://example.com/sitemap.xml": mock_response(text=sitemap_xml),
         }
         client = mocker.AsyncMock(spec=httpx.AsyncClient)
         client.get = mocker.AsyncMock(side_effect=lambda url, **kw: responses[url])

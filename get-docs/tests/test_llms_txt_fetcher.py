@@ -3,6 +3,7 @@ import pytest
 
 from src.core.llms_txt_fetcher import fetch_llms_txt, parse_llms_txt
 from src.core.robots_parser import RobotsParser
+from tests.conftest import mock_response
 
 
 class TestTitle:
@@ -307,19 +308,6 @@ Acquire more customers and improve conversion by offering the most popular payme
         assert len(payment) == 2
 
 
-def _mock_response(
-    status_code: int = 200,
-    text: str = "",
-    content_type: str = "text/plain; charset=utf-8",
-) -> httpx.Response:
-    return httpx.Response(
-        status_code=status_code,
-        text=text,
-        headers={"content-type": content_type},
-        request=httpx.Request("GET", "https://example.com"),
-    )
-
-
 class TestFetchLlmsTxtRobotsCheck:
     @pytest.mark.asyncio
     async def test_skips_when_ai_input_disallowed(self, mocker):
@@ -349,8 +337,10 @@ class TestFetchLlmsTxtRobotsCheck:
 
         def side_effect(url, **kw):
             if "robots.txt" in url:
-                return _mock_response(text="User-agent: *\nAllow: /")
-            return _mock_response(text=llms_content)
+                return mock_response(
+                    text="User-agent: *\nAllow: /", content_type="text/plain"
+                )
+            return mock_response(text=llms_content, content_type="text/plain")
 
         client = mocker.AsyncMock(spec=httpx.AsyncClient)
         client.get = mocker.AsyncMock(side_effect=side_effect)
@@ -367,7 +357,9 @@ class TestFetchLlmsTxtRobotsCheck:
         robots = RobotsParser("User-agent: *\nAllow: /")
         content = "# Docs\n> Summary\n"
         client = mocker.AsyncMock(spec=httpx.AsyncClient)
-        client.get = mocker.AsyncMock(return_value=_mock_response(text=content))
+        client.get = mocker.AsyncMock(
+            return_value=mock_response(text=content, content_type="text/plain")
+        )
 
         result = await fetch_llms_txt("https://example.com", client, robots=robots)
 
@@ -379,7 +371,9 @@ class TestFetchLlmsTxtRobotsCheck:
         robots = RobotsParser("User-agent: *\nDisallow: /llms-full.txt")
         content = "# Fallback\n"
         client = mocker.AsyncMock(spec=httpx.AsyncClient)
-        client.get = mocker.AsyncMock(return_value=_mock_response(text=content))
+        client.get = mocker.AsyncMock(
+            return_value=mock_response(text=content, content_type="text/plain")
+        )
 
         result = await fetch_llms_txt("https://example.com", client, robots=robots)
 
