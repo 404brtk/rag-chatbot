@@ -1,5 +1,6 @@
 from src.utils.url_utils import (
     normalize_url,
+    extract_origin,
     extract_domain,
     extract_path,
     resolve_relative,
@@ -7,6 +8,7 @@ from src.utils.url_utils import (
     is_asset_url,
     is_absolute_url,
     strip_git_suffix,
+    url_path_parents,
 )
 
 
@@ -34,6 +36,28 @@ class TestNormalizeUrl:
 
     def test_empty_path_becomes_root(self):
         assert normalize_url("https://example.com") == "https://example.com/"
+
+
+class TestExtractOrigin:
+    def test_root_url(self):
+        assert extract_origin("https://example.com") == "https://example.com"
+
+    def test_strips_path(self):
+        assert (
+            extract_origin("https://example.com/docs/en/home") == "https://example.com"
+        )
+
+    def test_preserves_subdomain(self):
+        assert (
+            extract_origin("https://docs.example.com/tutorial")
+            == "https://docs.example.com"
+        )
+
+    def test_preserves_port(self):
+        assert extract_origin("http://localhost:8000/docs") == "http://localhost:8000"
+
+    def test_lowercases(self):
+        assert extract_origin("HTTPS://Example.COM/Docs") == "https://example.com"
 
 
 class TestExtractDomain:
@@ -143,3 +167,43 @@ class TestStripGitSuffix:
 
     def test_empty(self):
         assert strip_git_suffix("") == ""
+
+
+class TestUrlPathParents:
+    def test_deep_path(self):
+        assert url_path_parents("https://example.com/docs/en/home") == [
+            "https://example.com/docs/en/home",
+            "https://example.com/docs/en",
+            "https://example.com/docs",
+            "https://example.com",
+        ]
+
+    def test_root_url(self):
+        assert url_path_parents("https://example.com") == [
+            "https://example.com",
+        ]
+
+    def test_root_with_slash(self):
+        assert url_path_parents("https://example.com/") == [
+            "https://example.com",
+        ]
+
+    def test_single_segment(self):
+        assert url_path_parents("https://example.com/docs") == [
+            "https://example.com/docs",
+            "https://example.com",
+        ]
+
+    def test_trailing_slash(self):
+        assert url_path_parents("https://example.com/docs/en/") == [
+            "https://example.com/docs/en",
+            "https://example.com/docs",
+            "https://example.com",
+        ]
+
+    def test_preserves_port(self):
+        assert url_path_parents("http://localhost:8000/a/b") == [
+            "http://localhost:8000/a/b",
+            "http://localhost:8000/a",
+            "http://localhost:8000",
+        ]

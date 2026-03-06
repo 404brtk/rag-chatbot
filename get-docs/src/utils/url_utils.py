@@ -70,6 +70,11 @@ def normalize_url(url: str) -> str:
     return urlunparse((scheme, netloc, path, "", "", ""))
 
 
+def extract_origin(url: str) -> str:
+    parsed = urlparse(url)
+    return f"{parsed.scheme.lower()}://{parsed.netloc.lower()}"
+
+
 def extract_domain(url: str) -> str:
     return urlparse(url).netloc.lower()
 
@@ -102,6 +107,31 @@ def is_asset_url(url: str) -> bool:
 
 def is_absolute_url(url: str) -> bool:
     return url.startswith(("http://", "https://"))
+
+
+def url_path_parents(url: str) -> list[str]:
+    """Walk up url path segments from the given path level to origin root.
+
+    https://example.com/docs/en/home → [
+        "https://example.com/docs/en/home",
+        "https://example.com/docs/en",
+        "https://example.com/docs",
+        "https://example.com",
+    ]
+    """
+    parsed = urlparse(url)
+    origin = f"{parsed.scheme.lower()}://{parsed.netloc.lower()}"
+    path = parsed.path.rstrip("/")
+
+    parents: list[str] = []
+    while path:
+        parents.append(origin + path)
+        path = path.rsplit("/", 1)[0]
+
+    if not parents or parents[-1] != origin:
+        parents.append(origin)
+
+    return parents
 
 
 def strip_git_suffix(name: str) -> str:
