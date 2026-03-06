@@ -648,6 +648,64 @@ class TestFetchGithubDocsLicenseGate:
         assert result is None
 
 
+class TestFetchGithubDocsRootOnly:
+    def _make_client(self, mocker, tree_paths):
+        client = mocker.AsyncMock(spec=httpx.AsyncClient)
+
+        async def mock_get(url, **kwargs):
+            if "/repos/" in url and "/git/trees/" not in url:
+                return mock_response(
+                    json_data={
+                        "license": {"spdx_id": "MIT"},
+                        "default_branch": "main",
+                    }
+                )
+            if "/git/trees/" in url:
+                return mock_response(
+                    json_data={
+                        "tree": [{"path": p, "type": "blob"} for p in tree_paths]
+                    }
+                )
+            if "raw.githubusercontent.com" in url:
+                return mock_response(text="# Content")
+            return mock_response(status_code=404)
+
+        client.get = mocker.AsyncMock(side_effect=mock_get)
+        return client
+
+    @pytest.mark.asyncio
+    async def test_root_only_returns_none_when_no_doc_folder(self, mocker):
+        tree = ["README.md", "AGENTS.md", "src/main.py"]
+        client = self._make_client(mocker, tree)
+        result = await fetch_github_docs(
+            "https://github.com/owner/repo", client, root_only=True
+        )
+        assert result is None
+
+    @pytest.mark.asyncio
+    async def test_root_only_returns_docs_when_doc_folder_exists(self, mocker):
+        tree = ["docs/intro.md", "docs/guide.md", "README.md", "src/main.py"]
+        client = self._make_client(mocker, tree)
+        result = await fetch_github_docs(
+            "https://github.com/owner/repo", client, root_only=True
+        )
+        assert result is not None
+        assert len(result.files) == 2
+
+    @pytest.mark.asyncio
+    async def test_root_only_skips_nested_doc_folder(self, mocker):
+        tree = [
+            "packages/web/src/content/docs/intro.md",
+            "README.md",
+            "src/main.py",
+        ]
+        client = self._make_client(mocker, tree)
+        result = await fetch_github_docs(
+            "https://github.com/owner/repo", client, root_only=True
+        )
+        assert result is None
+
+
 class TestAllowedLicenses:
     def test_common_permissive_licenses_included(self):
         for lic in ("MIT", "Apache-2.0", "BSD-2-Clause", "BSD-3-Clause", "ISC"):

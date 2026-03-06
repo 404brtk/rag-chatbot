@@ -412,6 +412,10 @@ async def fetch_github_docs(
         doc_folder = doc_folder_override
     else:
         doc_folder = _find_doc_folder(all_paths, root_only=root_only)
+
+    if doc_folder is None and root_only:
+        return None
+
     doc_folder, lang_excludes = _narrow_to_english(all_paths, doc_folder)
 
     doc_paths = [p for p in all_paths if _is_doc_file(p, doc_folder)]
