@@ -279,7 +279,7 @@ class TestSitemapFallbackPathWalking:
         client.get = mocker.AsyncMock(side_effect=side_effect)
 
         result = await crawl_sitemap(
-            "https://example.com/docs/en/home",
+            "https://example.com/docs",
             client,
             robots=robots,
             delay_seconds=0,
@@ -293,26 +293,146 @@ class TestSitemapFallbackPathWalking:
 
         sitemap_xml = """<?xml version="1.0"?>
         <urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
-            <url><loc>https://example.com/page</loc></url>
+            <url><loc>https://example.com/docs/en/intro</loc></url>
         </urlset>"""
 
         def side_effect(url, **kw):
             if url == "https://example.com/sitemap.xml":
                 return mock_response(text=sitemap_xml)
-            if url == "https://example.com/page":
-                return mock_response(text=html_page("Page"))
+            if url == "https://example.com/docs/en/intro":
+                return mock_response(text=html_page("Intro"))
             return mock_response(status_code=404)
 
         client = mocker.AsyncMock(spec=httpx.AsyncClient)
         client.get = mocker.AsyncMock(side_effect=side_effect)
 
         result = await crawl_sitemap(
-            "https://example.com/docs/en/home",
+            "https://example.com/docs/en",
             client,
             robots=robots,
             delay_seconds=0,
         )
         assert len(result.pages) == 1
+
+
+class TestSitemapScopeFiltering:
+    @pytest.mark.asyncio
+    async def test_filters_urls_outside_seed_prefix(self, mocker):
+        robots = RobotsParser("Sitemap: https://example.com/sitemap.xml")
+
+        sitemap_xml = """<?xml version="1.0"?>
+        <urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
+            <url><loc>https://example.com/docs/en/intro</loc></url>
+            <url><loc>https://example.com/docs/en/guide</loc></url>
+            <url><loc>https://example.com/docs/de/intro</loc></url>
+            <url><loc>https://example.com/careers/apply</loc></url>
+        </urlset>"""
+
+        def side_effect(url, **kw):
+            if url == "https://example.com/sitemap.xml":
+                return mock_response(text=sitemap_xml)
+            if url.startswith("https://example.com/docs/en/"):
+                return mock_response(text=html_page("Doc"))
+            return mock_response(status_code=404)
+
+        client = mocker.AsyncMock(spec=httpx.AsyncClient)
+        client.get = mocker.AsyncMock(side_effect=side_effect)
+
+        result = await crawl_sitemap(
+            "https://example.com/docs/en",
+            client,
+            robots=robots,
+            delay_seconds=0,
+        )
+        assert len(result.pages) == 2
+        urls = {p.url for p in result.pages}
+        assert "https://example.com/docs/en/intro" in urls
+        assert "https://example.com/docs/en/guide" in urls
+
+    @pytest.mark.asyncio
+    async def test_seed_page_itself_is_included(self, mocker):
+        robots = RobotsParser("Sitemap: https://example.com/sitemap.xml")
+
+        sitemap_xml = """<?xml version="1.0"?>
+        <urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
+            <url><loc>https://example.com/docs/en</loc></url>
+            <url><loc>https://example.com/docs/en/guide</loc></url>
+            <url><loc>https://example.com/docs/de/guide</loc></url>
+        </urlset>"""
+
+        def side_effect(url, **kw):
+            if url == "https://example.com/sitemap.xml":
+                return mock_response(text=sitemap_xml)
+            return mock_response(text=html_page("Page"))
+
+        client = mocker.AsyncMock(spec=httpx.AsyncClient)
+        client.get = mocker.AsyncMock(side_effect=side_effect)
+
+        result = await crawl_sitemap(
+            "https://example.com/docs/en",
+            client,
+            robots=robots,
+            delay_seconds=0,
+        )
+        assert len(result.pages) == 2
+        urls = {p.url for p in result.pages}
+        assert "https://example.com/docs/en" in urls
+        assert "https://example.com/docs/en/guide" in urls
+
+    @pytest.mark.asyncio
+    async def test_root_seed_keeps_all_urls(self, mocker):
+        robots = RobotsParser("Sitemap: https://example.com/sitemap.xml")
+
+        sitemap_xml = """<?xml version="1.0"?>
+        <urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
+            <url><loc>https://example.com/docs/en/intro</loc></url>
+            <url><loc>https://example.com/blog/post</loc></url>
+            <url><loc>https://example.com/careers</loc></url>
+        </urlset>"""
+
+        def side_effect(url, **kw):
+            if url == "https://example.com/sitemap.xml":
+                return mock_response(text=sitemap_xml)
+            return mock_response(text=html_page("Page"))
+
+        client = mocker.AsyncMock(spec=httpx.AsyncClient)
+        client.get = mocker.AsyncMock(side_effect=side_effect)
+
+        result = await crawl_sitemap(
+            "https://example.com",
+            client,
+            robots=robots,
+            delay_seconds=0,
+        )
+        assert len(result.pages) == 3
+
+    @pytest.mark.asyncio
+    async def test_no_prefix_substring_match(self, mocker):
+        """Ensure /docs/en doesn't match /docs/english."""
+        robots = RobotsParser("Sitemap: https://example.com/sitemap.xml")
+
+        sitemap_xml = """<?xml version="1.0"?>
+        <urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
+            <url><loc>https://example.com/docs/en/intro</loc></url>
+            <url><loc>https://example.com/docs/english/intro</loc></url>
+        </urlset>"""
+
+        def side_effect(url, **kw):
+            if url == "https://example.com/sitemap.xml":
+                return mock_response(text=sitemap_xml)
+            return mock_response(text=html_page("Page"))
+
+        client = mocker.AsyncMock(spec=httpx.AsyncClient)
+        client.get = mocker.AsyncMock(side_effect=side_effect)
+
+        result = await crawl_sitemap(
+            "https://example.com/docs/en",
+            client,
+            robots=robots,
+            delay_seconds=0,
+        )
+        assert len(result.pages) == 1
+        assert result.pages[0].url == "https://example.com/docs/en/intro"
 
 
 class TestDataclasses:

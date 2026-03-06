@@ -4,7 +4,13 @@ import httpx
 
 from src.core.robots_parser import RobotsParser, fetch_robots_txt
 from src.core.sitemap_parser import fetch_sitemap_urls
-from src.utils.url_utils import extract_path, normalize_url, url_path_parents
+from src.utils.url_utils import (
+    extract_path,
+    is_url_within_scope,
+    make_url_prefix,
+    normalize_url,
+    url_path_parents,
+)
 
 
 @dataclass
@@ -74,6 +80,8 @@ async def crawl_sitemap(
     for src in sitemap_sources:
         all_page_urls.extend(await fetch_sitemap_urls(src, client, timeout))
 
+    prefix = make_url_prefix(base_url)
+
     seen: set[str] = set()
     filtered: list[str] = []
     for url in all_page_urls:
@@ -81,6 +89,8 @@ async def crawl_sitemap(
         if norm in seen:
             continue
         seen.add(norm)
+        if not is_url_within_scope(norm, prefix):
+            continue
         path = extract_path(norm)
         if not robots.is_allowed(path):
             continue
