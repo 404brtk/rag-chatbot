@@ -258,6 +258,63 @@ class TestCrawlSitemap:
         assert len(result.pages) == 0
 
 
+class TestSitemapFallbackPathWalking:
+    @pytest.mark.asyncio
+    async def test_finds_sitemap_at_subpath(self, mocker):
+        robots = RobotsParser("")
+
+        sitemap_xml = """<?xml version="1.0"?>
+        <urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
+            <url><loc>https://example.com/docs/intro</loc></url>
+        </urlset>"""
+
+        def side_effect(url, **kw):
+            if url == "https://example.com/docs/sitemap.xml":
+                return mock_response(text=sitemap_xml)
+            if url == "https://example.com/docs/intro":
+                return mock_response(text=html_page("Intro"))
+            return mock_response(status_code=404)
+
+        client = mocker.AsyncMock(spec=httpx.AsyncClient)
+        client.get = mocker.AsyncMock(side_effect=side_effect)
+
+        result = await crawl_sitemap(
+            "https://example.com/docs/en/home",
+            client,
+            robots=robots,
+            delay_seconds=0,
+        )
+        assert len(result.pages) == 1
+        assert result.pages[0].url == "https://example.com/docs/intro"
+
+    @pytest.mark.asyncio
+    async def test_finds_sitemap_at_root_from_deep_url(self, mocker):
+        robots = RobotsParser("")
+
+        sitemap_xml = """<?xml version="1.0"?>
+        <urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
+            <url><loc>https://example.com/page</loc></url>
+        </urlset>"""
+
+        def side_effect(url, **kw):
+            if url == "https://example.com/sitemap.xml":
+                return mock_response(text=sitemap_xml)
+            if url == "https://example.com/page":
+                return mock_response(text=html_page("Page"))
+            return mock_response(status_code=404)
+
+        client = mocker.AsyncMock(spec=httpx.AsyncClient)
+        client.get = mocker.AsyncMock(side_effect=side_effect)
+
+        result = await crawl_sitemap(
+            "https://example.com/docs/en/home",
+            client,
+            robots=robots,
+            delay_seconds=0,
+        )
+        assert len(result.pages) == 1
+
+
 class TestDataclasses:
     def test_crawl_page_fields(self):
         p = CrawlPage(url="https://example.com", html="<html></html>")

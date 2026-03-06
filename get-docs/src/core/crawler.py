@@ -4,7 +4,7 @@ import httpx
 
 from src.core.robots_parser import RobotsParser, fetch_robots_txt
 from src.core.sitemap_parser import fetch_sitemap_urls
-from src.utils.url_utils import extract_path, normalize_url
+from src.utils.url_utils import extract_path, normalize_url, url_path_parents
 
 
 @dataclass
@@ -58,7 +58,17 @@ async def crawl_sitemap(
 
     sitemap_sources = robots.get_sitemaps()
     if not sitemap_sources:
-        sitemap_sources = [normalize_url(base_url).rstrip("/") + "/sitemap.xml"]
+        for parent in url_path_parents(base_url):
+            candidate = parent.rstrip("/") + "/sitemap.xml"
+            try:
+                resp = await client.get(
+                    candidate, follow_redirects=True, timeout=timeout
+                )
+                if resp.status_code == 200:
+                    sitemap_sources = [candidate]
+                    break
+            except (httpx.HTTPError, httpx.TimeoutException):
+                continue
 
     all_page_urls: list[str] = []
     for src in sitemap_sources:
