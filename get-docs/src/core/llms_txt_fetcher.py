@@ -3,7 +3,12 @@ from dataclasses import dataclass, field
 import httpx
 
 from src.core.robots_parser import RobotsParser, fetch_robots_txt
-from src.utils.url_utils import extract_path, is_absolute_url, resolve_relative
+from src.utils.url_utils import (
+    extract_path,
+    is_absolute_url,
+    resolve_relative,
+    url_path_parents,
+)
 
 
 @dataclass
@@ -116,32 +121,33 @@ async def fetch_llms_txt(
     if robots is None:
         robots = await fetch_robots_txt(base_url, client, timeout)
 
-    for path, is_full in _LLMS_TXT_PATHS:
-        url = resolve_relative(base_url, path)
+    for parent in url_path_parents(base_url):
+        for filename, is_full in _LLMS_TXT_PATHS:
+            url = parent.rstrip("/") + "/" + filename
 
-        url_path = extract_path(url)
-        if not robots.is_allowed(url_path):
-            continue
-        if robots.is_ai_input_allowed(url_path) is False:
-            continue
-
-        try:
-            resp = await client.get(url, follow_redirects=True, timeout=timeout)
-            if resp.status_code != 200:
+            url_path = extract_path(url)
+            if not robots.is_allowed(url_path):
+                continue
+            if robots.is_ai_input_allowed(url_path) is False:
                 continue
 
-            content_type = resp.headers.get("content-type", "")
+            try:
+                resp = await client.get(url, follow_redirects=True, timeout=timeout)
+                if resp.status_code != 200:
+                    continue
 
-            if "text/html" in content_type:
+                content_type = resp.headers.get("content-type", "")
+
+                if "text/html" in content_type:
+                    continue
+
+                text = resp.text.strip()
+                if not text:
+                    continue
+
+                return parse_llms_txt(text, source_url=url, is_full=is_full)
+
+            except (httpx.HTTPError, httpx.TimeoutException):
                 continue
-
-            text = resp.text.strip()
-            if not text:
-                continue
-
-            return parse_llms_txt(text, source_url=url, is_full=is_full)
-
-        except (httpx.HTTPError, httpx.TimeoutException):
-            continue
 
     return None

@@ -356,27 +356,100 @@ class TestFetchLlmsTxtRobotsCheck:
     async def test_allows_when_robots_permits(self, mocker):
         robots = RobotsParser("User-agent: *\nAllow: /")
         content = "# Docs\n> Summary\n"
+
+        def side_effect(url, **kw):
+            if url == "https://example.com/llms-full.txt":
+                return mock_response(text=content, content_type="text/plain")
+            return mock_response(status_code=404)
+
         client = mocker.AsyncMock(spec=httpx.AsyncClient)
-        client.get = mocker.AsyncMock(
-            return_value=mock_response(text=content, content_type="text/plain")
-        )
+        client.get = mocker.AsyncMock(side_effect=side_effect)
 
         result = await fetch_llms_txt("https://example.com", client, robots=robots)
 
         assert result is not None
         assert result.title == "Docs"
+        assert result.source_url == "https://example.com/llms-full.txt"
+
+    @pytest.mark.asyncio
+    async def test_deep_url_finds_llms_txt_at_root(self, mocker):
+        robots = RobotsParser("User-agent: *\nAllow: /")
+        content = "# Root Docs\n> Found at root\n"
+
+        def side_effect(url, **kw):
+            if url == "https://example.com/llms-full.txt":
+                return mock_response(text=content, content_type="text/plain")
+            return mock_response(status_code=404)
+
+        client = mocker.AsyncMock(spec=httpx.AsyncClient)
+        client.get = mocker.AsyncMock(side_effect=side_effect)
+
+        result = await fetch_llms_txt(
+            "https://example.com/docs/en/home", client, robots=robots
+        )
+
+        assert result is not None
+        assert result.title == "Root Docs"
+        assert result.source_url == "https://example.com/llms-full.txt"
+
+    @pytest.mark.asyncio
+    async def test_deep_url_finds_llms_txt_at_subpath(self, mocker):
+        robots = RobotsParser("User-agent: *\nAllow: /")
+        content = "# Subpath Docs\n"
+
+        def side_effect(url, **kw):
+            if url == "https://example.com/docs/llms.txt":
+                return mock_response(text=content, content_type="text/plain")
+            return mock_response(status_code=404)
+
+        client = mocker.AsyncMock(spec=httpx.AsyncClient)
+        client.get = mocker.AsyncMock(side_effect=side_effect)
+
+        result = await fetch_llms_txt(
+            "https://example.com/docs/en/home", client, robots=robots
+        )
+
+        assert result is not None
+        assert result.title == "Subpath Docs"
+        assert result.source_url == "https://example.com/docs/llms.txt"
+
+    @pytest.mark.asyncio
+    async def test_closer_path_wins_over_root(self, mocker):
+        robots = RobotsParser("User-agent: *\nAllow: /")
+
+        def side_effect(url, **kw):
+            if url == "https://example.com/docs/llms.txt":
+                return mock_response(text="# Closer\n", content_type="text/plain")
+            if url == "https://example.com/llms.txt":
+                return mock_response(text="# Root\n", content_type="text/plain")
+            return mock_response(status_code=404)
+
+        client = mocker.AsyncMock(spec=httpx.AsyncClient)
+        client.get = mocker.AsyncMock(side_effect=side_effect)
+
+        result = await fetch_llms_txt(
+            "https://example.com/docs/en/home", client, robots=robots
+        )
+
+        assert result is not None
+        assert result.title == "Closer"
 
     @pytest.mark.asyncio
     async def test_partial_disallow_tries_allowed_path(self, mocker):
         robots = RobotsParser("User-agent: *\nDisallow: /llms-full.txt")
         content = "# Fallback\n"
+
+        def side_effect(url, **kw):
+            if url == "https://example.com/llms.txt":
+                return mock_response(text=content, content_type="text/plain")
+            return mock_response(status_code=404)
+
         client = mocker.AsyncMock(spec=httpx.AsyncClient)
-        client.get = mocker.AsyncMock(
-            return_value=mock_response(text=content, content_type="text/plain")
-        )
+        client.get = mocker.AsyncMock(side_effect=side_effect)
 
         result = await fetch_llms_txt("https://example.com", client, robots=robots)
 
         assert result is not None
         assert result.title == "Fallback"
         assert result.is_full is False
+        assert result.source_url == "https://example.com/llms.txt"
