@@ -7,7 +7,7 @@ from src.core.github_fetcher import (
     GitHubFetchResult,
     parse_github_url,
     fetch_github_docs,
-    _fetch_repo_license,
+    _fetch_repo_meta,
     _is_doc_file,
     _find_doc_folder,
     _narrow_to_english,
@@ -386,51 +386,78 @@ class TestSkipLists:
             assert f == f.lower(), f"DOC_FOLDERS entry not lowercase: {f}"
 
 
-class TestFetchRepoLicense:
+class TestFetchRepoMeta:
     @pytest.mark.asyncio
-    async def test_returns_spdx_id(self, mocker):
+    async def test_returns_spdx_id_and_branch(self, mocker):
         client = mocker.AsyncMock(spec=httpx.AsyncClient)
         client.get = mocker.AsyncMock(
             return_value=mock_response(
-                json_data={"license": {"spdx_id": "MIT", "name": "MIT License"}}
+                json_data={
+                    "license": {"spdx_id": "MIT", "name": "MIT License"},
+                    "default_branch": "main",
+                }
             )
         )
-        result = await _fetch_repo_license(client, "owner", "repo", 10)
-        assert result == "MIT"
+        meta = await _fetch_repo_meta(client, "owner", "repo", 10)
+        assert meta.spdx_id == "MIT"
+        assert meta.default_branch == "main"
 
     @pytest.mark.asyncio
     async def test_returns_none_when_no_license(self, mocker):
         client = mocker.AsyncMock(spec=httpx.AsyncClient)
         client.get = mocker.AsyncMock(
-            return_value=mock_response(json_data={"license": None})
+            return_value=mock_response(
+                json_data={"license": None, "default_branch": "main"}
+            )
         )
-        result = await _fetch_repo_license(client, "owner", "repo", 10)
-        assert result is None
+        meta = await _fetch_repo_meta(client, "owner", "repo", 10)
+        assert meta.spdx_id is None
+        assert meta.default_branch == "main"
 
     @pytest.mark.asyncio
     async def test_returns_none_on_404(self, mocker):
         client = mocker.AsyncMock(spec=httpx.AsyncClient)
         client.get = mocker.AsyncMock(return_value=mock_response(status_code=404))
-        result = await _fetch_repo_license(client, "owner", "repo", 10)
-        assert result is None
+        meta = await _fetch_repo_meta(client, "owner", "repo", 10)
+        assert meta.spdx_id is None
+        assert meta.default_branch is None
 
     @pytest.mark.asyncio
     async def test_returns_none_on_timeout(self, mocker):
         client = mocker.AsyncMock(spec=httpx.AsyncClient)
         client.get = mocker.AsyncMock(side_effect=httpx.TimeoutException("timeout"))
-        result = await _fetch_repo_license(client, "owner", "repo", 10)
-        assert result is None
+        meta = await _fetch_repo_meta(client, "owner", "repo", 10)
+        assert meta.spdx_id is None
+        assert meta.default_branch is None
 
     @pytest.mark.asyncio
     async def test_returns_noassertion(self, mocker):
         client = mocker.AsyncMock(spec=httpx.AsyncClient)
         client.get = mocker.AsyncMock(
             return_value=mock_response(
-                json_data={"license": {"spdx_id": "NOASSERTION"}}
+                json_data={
+                    "license": {"spdx_id": "NOASSERTION"},
+                    "default_branch": "dev",
+                }
             )
         )
-        result = await _fetch_repo_license(client, "owner", "repo", 10)
-        assert result == "NOASSERTION"
+        meta = await _fetch_repo_meta(client, "owner", "repo", 10)
+        assert meta.spdx_id == "NOASSERTION"
+        assert meta.default_branch == "dev"
+
+    @pytest.mark.asyncio
+    async def test_non_standard_default_branch(self, mocker):
+        client = mocker.AsyncMock(spec=httpx.AsyncClient)
+        client.get = mocker.AsyncMock(
+            return_value=mock_response(
+                json_data={
+                    "license": {"spdx_id": "MIT"},
+                    "default_branch": "dev",
+                }
+            )
+        )
+        meta = await _fetch_repo_meta(client, "owner", "repo", 10)
+        assert meta.default_branch == "dev"
 
 
 class TestFetchGithubDocsLicenseGate:
@@ -440,7 +467,9 @@ class TestFetchGithubDocsLicenseGate:
         async def mock_get(url, **kwargs):
             if "/repos/" in url and "/git/trees/" not in url:
                 license_obj = {"spdx_id": license_spdx_id} if license_spdx_id else None
-                return mock_response(json_data={"license": license_obj})
+                return mock_response(
+                    json_data={"license": license_obj, "default_branch": "main"}
+                )
             if "/git/trees/" in url:
                 return mock_response(
                     json_data={

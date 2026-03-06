@@ -91,9 +91,6 @@ SKIP_DIRS = frozenset(
     }
 )
 
-# default branches to try, in order
-DEFAULT_BRANCHES = ("main", "master")
-
 _API_BASE = "https://api.github.com"
 _RAW_BASE = "https://raw.githubusercontent.com"
 _GITHUB_BATCH_SIZE = 20
@@ -238,12 +235,18 @@ def _is_doc_file(path: str, doc_folder: str | None) -> bool:
     return False
 
 
-async def _fetch_repo_license(
+@dataclass
+class _RepoMeta:
+    spdx_id: str | None
+    default_branch: str | None
+
+
+async def _fetch_repo_meta(
     client: httpx.AsyncClient,
     owner: str,
     repo: str,
     timeout: float,
-) -> str | None:
+) -> _RepoMeta:
     url = f"{_API_BASE}/repos/{owner}/{repo}"
     headers = {"Accept": "application/vnd.github+json"}
     try:
@@ -251,14 +254,14 @@ async def _fetch_repo_license(
             url, headers=headers, follow_redirects=True, timeout=timeout
         )
         if resp.status_code != 200:
-            return None
+            return _RepoMeta(spdx_id=None, default_branch=None)
         data = resp.json()
         license_obj = data.get("license")
-        if not license_obj:
-            return None
-        return license_obj.get("spdx_id")
+        spdx_id = license_obj.get("spdx_id") if license_obj else None
+        default_branch = data.get("default_branch")
+        return _RepoMeta(spdx_id=spdx_id, default_branch=default_branch)
     except (httpx.HTTPError, httpx.TimeoutException):
-        return None
+        return _RepoMeta(spdx_id=None, default_branch=None)
 
 
 async def _fetch_tree(
@@ -319,25 +322,27 @@ async def fetch_github_docs(
     owner, repo = parsed
 
     # check license before fetching any content
-    spdx_id = await _fetch_repo_license(client, owner, repo, timeout)
-    if not spdx_id or spdx_id == "NOASSERTION" or spdx_id not in ALLOWED_LICENSES:
-        logger.info(f"Skipping {owner}/{repo}: license {spdx_id!r} not in allowed set")
+    meta = await _fetch_repo_meta(client, owner, repo, timeout)
+    if (
+        not meta.spdx_id
+        or meta.spdx_id == "NOASSERTION"
+        or meta.spdx_id not in ALLOWED_LICENSES
+    ):
+        logger.info(
+            f"Skipping {owner}/{repo}: license {meta.spdx_id!r} not in allowed set"
+        )
         return None
 
-    branches_to_try = [branch] if branch else list(DEFAULT_BRANCHES)
-    tree_entries: list[dict] | None = None
-    resolved_branch: str | None = None
+    resolved_branch = branch or meta.default_branch
+    if not resolved_branch:
+        return None
 
-    for b in branches_to_try:
-        try:
-            tree_entries = await _fetch_tree(client, owner, repo, b, timeout)
-            if tree_entries is not None:
-                resolved_branch = b
-                break
-        except (httpx.HTTPError, httpx.TimeoutException):
-            continue
+    try:
+        tree_entries = await _fetch_tree(client, owner, repo, resolved_branch, timeout)
+    except (httpx.HTTPError, httpx.TimeoutException):
+        return None
 
-    if tree_entries is None or resolved_branch is None:
+    if tree_entries is None:
         return None
 
     all_paths = [entry["path"] for entry in tree_entries if entry.get("type") == "blob"]
