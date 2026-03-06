@@ -49,7 +49,7 @@ async def crawl_sitemap(
     client: httpx.AsyncClient,
     robots: RobotsParser | None = None,
     timeout: float = 15,
-    max_pages: int = 100,
+    max_pages: int = 300,
     max_concurrent: int = 10,
     delay_seconds: float = 1.5,
 ) -> CrawlResult:

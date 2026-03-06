@@ -319,7 +319,7 @@ async def fetch_github_docs(
     client: httpx.AsyncClient,
     branch: str | None = None,
     timeout: float = 15,
-    max_files: int = 500,
+    max_files: int = 300,
 ) -> GitHubFetchResult | None:
     """Fetch documentation files from a GitHub repository.
 

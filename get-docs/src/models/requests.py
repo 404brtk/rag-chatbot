@@ -4,10 +4,10 @@ from pydantic import BaseModel, HttpUrl, model_validator
 class GetDocsOptions(BaseModel):
     max_depth: int = 3
     delay_seconds: float = 1.5
-    max_pages: int = 100
+    max_web_pages: int = 300
+    max_github_files: int = 300
     max_concurrent: int = 10
     timeout: float = 15.0
-    max_files: int = 500
 
 
 class GetDocsRequest(BaseModel):
