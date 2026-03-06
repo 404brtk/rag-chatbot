@@ -119,9 +119,8 @@ def url_path_parents(url: str) -> list[str]:
         "https://example.com",
     ]
     """
-    parsed = urlparse(url)
-    origin = f"{parsed.scheme.lower()}://{parsed.netloc.lower()}"
-    path = parsed.path.rstrip("/")
+    origin = extract_origin(url)
+    path = urlparse(url).path.rstrip("/")
 
     parents: list[str] = []
     while path:
@@ -132,6 +131,22 @@ def url_path_parents(url: str) -> list[str]:
         parents.append(origin)
 
     return parents
+
+
+def make_url_prefix(url: str) -> str:
+    origin = extract_origin(url)
+    path = urlparse(url).path.rstrip("/")
+
+    if path:
+        last_segment = path.rsplit("/", 1)[-1]
+        if "." in last_segment:
+            path = path.rsplit("/", 1)[0].rstrip("/")
+
+    return origin + path if path else origin
+
+
+def is_url_within_scope(url: str, prefix: str) -> bool:
+    return url == prefix or url.startswith(prefix + "/")
 
 
 def strip_git_suffix(name: str) -> str:

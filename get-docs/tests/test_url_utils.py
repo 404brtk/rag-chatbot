@@ -9,6 +9,8 @@ from src.utils.url_utils import (
     is_absolute_url,
     strip_git_suffix,
     url_path_parents,
+    make_url_prefix,
+    is_url_within_scope,
 )
 
 
@@ -207,3 +209,137 @@ class TestUrlPathParents:
             "http://localhost:8000/a",
             "http://localhost:8000",
         ]
+
+
+class TestMakeUrlPrefix:
+    def test_deep_path(self):
+        assert (
+            make_url_prefix("https://example.com/docs/en/home")
+            == "https://example.com/docs/en/home"
+        )
+
+    def test_trailing_slash(self):
+        assert (
+            make_url_prefix("https://example.com/docs/en/")
+            == "https://example.com/docs/en"
+        )
+
+    def test_root_url(self):
+        assert make_url_prefix("https://example.com/") == "https://example.com"
+
+    def test_root_no_slash(self):
+        assert make_url_prefix("https://example.com") == "https://example.com"
+
+    def test_strips_html_extension(self):
+        assert (
+            make_url_prefix("https://example.com/docs/page.html")
+            == "https://example.com/docs"
+        )
+
+    def test_strips_md_extension(self):
+        assert (
+            make_url_prefix("https://example.com/docs/intro.md")
+            == "https://example.com/docs"
+        )
+
+    def test_strips_php_extension(self):
+        assert (
+            make_url_prefix("https://example.com/blog/post.php")
+            == "https://example.com/blog"
+        )
+
+    def test_strips_any_extension(self):
+        assert (
+            make_url_prefix("https://example.com/docs/page.txt")
+            == "https://example.com/docs"
+        )
+
+    def test_dot_in_middle_segment_preserved(self):
+        assert (
+            make_url_prefix("https://example.com/docs/v2.0/guide")
+            == "https://example.com/docs/v2.0/guide"
+        )
+
+    def test_strips_query_and_fragment(self):
+        assert (
+            make_url_prefix("https://example.com/docs?lang=en#top")
+            == "https://example.com/docs"
+        )
+
+    def test_preserves_port(self):
+        assert (
+            make_url_prefix("http://localhost:8000/docs/en")
+            == "http://localhost:8000/docs/en"
+        )
+
+    def test_lowercases_scheme_and_host(self):
+        assert make_url_prefix("HTTPS://Example.COM/Docs") == "https://example.com/Docs"
+
+    def test_html_at_root(self):
+        assert (
+            make_url_prefix("https://example.com/index.html") == "https://example.com"
+        )
+
+
+class TestIsUrlWithinScope:
+    def test_exact_match(self):
+        assert (
+            is_url_within_scope(
+                "https://example.com/docs/en", "https://example.com/docs/en"
+            )
+            is True
+        )
+
+    def test_child_path(self):
+        assert (
+            is_url_within_scope(
+                "https://example.com/docs/en/intro", "https://example.com/docs/en"
+            )
+            is True
+        )
+
+    def test_deep_child(self):
+        assert (
+            is_url_within_scope(
+                "https://example.com/docs/en/api/v2", "https://example.com/docs/en"
+            )
+            is True
+        )
+
+    def test_sibling_rejected(self):
+        assert (
+            is_url_within_scope(
+                "https://example.com/docs/de/intro", "https://example.com/docs/en"
+            )
+            is False
+        )
+
+    def test_prefix_substring_rejected(self):
+        assert (
+            is_url_within_scope(
+                "https://example.com/docs/english", "https://example.com/docs/en"
+            )
+            is False
+        )
+
+    def test_parent_rejected(self):
+        assert (
+            is_url_within_scope(
+                "https://example.com/docs", "https://example.com/docs/en"
+            )
+            is False
+        )
+
+    def test_root_prefix_matches_all(self):
+        assert (
+            is_url_within_scope("https://example.com/anything", "https://example.com")
+            is True
+        )
+
+    def test_different_domain_rejected(self):
+        assert (
+            is_url_within_scope(
+                "https://other.com/docs/en", "https://example.com/docs/en"
+            )
+            is False
+        )
