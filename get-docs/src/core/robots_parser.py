@@ -3,7 +3,7 @@ import re
 import httpx
 
 from src.models.enums import ContentSignal
-from src.utils.url_utils import normalize_url
+from src.utils.url_utils import extract_origin
 
 
 @dataclass
@@ -216,7 +216,7 @@ class RobotsParser:
 async def fetch_robots_txt(
     base_url: str, client: httpx.AsyncClient, timeout: float = 10
 ) -> RobotsParser:
-    url = normalize_url(base_url).rstrip("/") + "/robots.txt"
+    url = extract_origin(base_url) + "/robots.txt"
     try:
         resp = await client.get(url, follow_redirects=True, timeout=timeout)
         if resp.status_code == 200:
