@@ -146,7 +146,25 @@ class TestFindDocFolder:
     def test_deeply_nested_docs_not_detected_as_top_level(self):
         paths = ["src/docs/index.md", "main.py"]
         result = _find_doc_folder(paths)
-        assert result is None
+        assert result == "src/docs"
+
+    def test_prefers_shallower_over_deeper_docs(self):
+        paths = [
+            "docs/index.md",
+            "docs/en/docs/intro.md",
+        ]
+        assert _find_doc_folder(paths) == "docs"
+
+    def test_prefers_content_over_nested_docs(self):
+        paths = [
+            "content/index.md",
+            "content/docs/intro.md",
+        ]
+        assert _find_doc_folder(paths) == "content"
+
+    def test_monorepo_docs_folder_detected(self):
+        paths = ["packages/docs/quickstart.mdx", "packages/app/main.ts"]
+        assert _find_doc_folder(paths) == "packages/docs"
 
 
 class TestNarrowToEnglish:

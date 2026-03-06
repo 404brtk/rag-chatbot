@@ -171,21 +171,34 @@ def parse_github_url(url: str) -> tuple[str, str] | None:
 
 
 def _find_doc_folder(tree_paths: list[str]) -> str | None:
-    """Find the primary documentation folder from the repo tree."""
-    top_level_dirs: set[str] = set()
+    """Find the primary documentation folder from the repo tree.
+    It searches at all depths, preferring shallower folders and
+    DOC_FOLDERS_PRIORITY order. This handles monorepo layouts like
+    packages/docs/ or apps/docs/.
+    """
+    doc_dirs: set[str] = set()
     for path in tree_paths:
         parts = path.split("/")
-        if len(parts) > 1:
-            top_level_dirs.add(parts[0])
+        for i, part in enumerate(parts[:-1]):
+            if part.lower() in DOC_FOLDERS:
+                doc_dirs.add("/".join(parts[: i + 1]))
 
-    for candidate in DOC_FOLDERS_PRIORITY:
-        if candidate in top_level_dirs:
-            return candidate
-        for d in top_level_dirs:
-            if d.lower() == candidate:
-                return d
+    if not doc_dirs:
+        return None
 
-    return None
+    def _sort_key(d: str) -> tuple[int, int, str]:
+        depth = d.count("/")
+        name = d.split("/")[-1].lower()
+        try:
+            priority = DOC_FOLDERS_PRIORITY.index(name)
+        except ValueError:
+            priority = len(DOC_FOLDERS_PRIORITY)
+        return (depth, priority, d.lower())
+
+    top_level = [d for d in doc_dirs if d.count("/") == 0]
+    candidates = top_level if top_level else list(doc_dirs)
+
+    return min(candidates, key=_sort_key)
 
 
 def _narrow_to_english(tree_paths: list[str], doc_folder: str | None) -> str | None:
