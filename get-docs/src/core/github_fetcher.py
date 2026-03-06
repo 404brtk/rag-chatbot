@@ -17,6 +17,11 @@ _GITHUB_REPO_PATTERN = re.compile(
     r"(?:https?://)?github\.com/(?P<owner>[^/\s]+)/(?P<repo>[^/\s?#]+)"
 )
 
+# /tree/<branch>/optional/path
+_GITHUB_TREE_PATTERN = re.compile(
+    r"(?:https?://)?github\.com/[^/\s]+/[^/\s?#]+/tree/(?P<branch>[^/\s?#]+)(?:/(?P<subpath>[^\s?#]+))?"
+)
+
 # file extensions we care about
 DOC_EXTENSIONS = frozenset({".md", ".mdx", ".rst"})
 
@@ -139,6 +144,17 @@ ALLOWED_LICENSES = frozenset(
 # English subfolder names to look for, in priority order
 _ENGLISH_FOLDERS = ("en", "en-us", "en-gb")
 
+# 2-letter language codes and locale variants like pt-br, zh-cn, etc.
+_LANG_CODE_RE = re.compile(r"^[a-z]{2}(-[a-z]{2,3})?$")
+
+
+@dataclass
+class ParsedGitHubURL:
+    owner: str
+    repo: str
+    branch: str | None = None
+    subpath: str | None = None
+
 
 @dataclass
 class GitHubFile:
@@ -155,8 +171,8 @@ class GitHubFetchResult:
     files: list[GitHubFile] = field(default_factory=list)
 
 
-def parse_github_url(url: str) -> tuple[str, str] | None:
-    """Extract (owner, repo) from a GitHub URL."""
+def parse_github_url(url: str) -> ParsedGitHubURL | None:
+    """Extract owner, repo, and optional branch/subpath from a GitHub URL."""
     match = _GITHUB_REPO_PATTERN.search(url)
     if not match:
         return None
@@ -167,15 +183,37 @@ def parse_github_url(url: str) -> tuple[str, str] | None:
     if owner.lower() in GITHUB_NON_REPO_PATHS:
         return None
 
-    return (owner, repo)
+    tree_match = _GITHUB_TREE_PATTERN.search(url)
+    branch = tree_match.group("branch") if tree_match else None
+    subpath = tree_match.group("subpath") if tree_match else None
+    if subpath:
+        subpath = subpath.rstrip("/")
+
+    return ParsedGitHubURL(owner=owner, repo=repo, branch=branch, subpath=subpath)
 
 
-def _find_doc_folder(tree_paths: list[str]) -> str | None:
+def _find_doc_folder(tree_paths: list[str], root_only: bool = False) -> str | None:
     """Find the primary documentation folder from the repo tree.
-    It searches at all depths, preferring shallower folders and
-    DOC_FOLDERS_PRIORITY order. This handles monorepo layouts like
-    packages/docs/ or apps/docs/.
+
+    When root_only is True only top-level directories are considered.
+    When False it searches at all depths, preferring
+    shallower folders and DOC_FOLDERS_PRIORITY
     """
+    if root_only:
+        top_level_dirs: set[str] = set()
+        for path in tree_paths:
+            parts = path.split("/")
+            if len(parts) > 1:
+                top_level_dirs.add(parts[0])
+
+        for candidate in DOC_FOLDERS_PRIORITY:
+            if candidate in top_level_dirs:
+                return candidate
+            for d in top_level_dirs:
+                if d.lower() == candidate:
+                    return d
+        return None
+
     doc_dirs: set[str] = set()
     for path in tree_paths:
         parts = path.split("/")
@@ -201,10 +239,12 @@ def _find_doc_folder(tree_paths: list[str]) -> str | None:
     return min(candidates, key=_sort_key)
 
 
-def _narrow_to_english(tree_paths: list[str], doc_folder: str | None) -> str | None:
-    """Narrow a doc folder to its English subfolder if one exists."""
+def _narrow_to_english(
+    tree_paths: list[str], doc_folder: str | None
+) -> tuple[str | None, set[str]]:
+    """Narrow a doc folder to its English content."""
     if doc_folder is None:
-        return None
+        return None, set()
 
     prefix = doc_folder.lower() + "/"
     child_dirs: set[str] = set()
@@ -219,9 +259,16 @@ def _narrow_to_english(tree_paths: list[str], doc_folder: str | None) -> str | N
 
     for lang in _ENGLISH_FOLDERS:
         if lang in child_dirs:
-            return f"{doc_folder}/{lang}"
+            return f"{doc_folder}/{lang}", set()
 
-    return doc_folder
+    # no english subfolder. if there are multiple language-code dirs,
+    # eng lives at the doc root - exclude the language subdirs.
+    lang_dirs = {d for d in child_dirs if _LANG_CODE_RE.match(d)}
+    if len(lang_dirs) >= 2:
+        exclude = {f"{doc_folder}/{d}" for d in lang_dirs}
+        return doc_folder, exclude
+
+    return doc_folder, set()
 
 
 def _is_doc_file(path: str, doc_folder: str | None) -> bool:
@@ -317,9 +364,10 @@ async def _fetch_raw_file(
 async def fetch_github_docs(
     repo_url: str,
     client: httpx.AsyncClient,
-    branch: str | None = None,
     timeout: float = 15,
     max_files: int = 300,
+    doc_folder_override: str | None = None,
+    root_only: bool = False,
 ) -> GitHubFetchResult | None:
     """Fetch documentation files from a GitHub repository.
 
@@ -332,7 +380,7 @@ async def fetch_github_docs(
     if not parsed:
         return None
 
-    owner, repo = parsed
+    owner, repo = parsed.owner, parsed.repo
 
     # check license before fetching any content
     meta = await _fetch_repo_meta(client, owner, repo, timeout)
@@ -346,7 +394,7 @@ async def fetch_github_docs(
         )
         return None
 
-    resolved_branch = branch or meta.default_branch
+    resolved_branch = parsed.branch or meta.default_branch
     if not resolved_branch:
         return None
 
@@ -360,10 +408,19 @@ async def fetch_github_docs(
 
     all_paths = [entry["path"] for entry in tree_entries if entry.get("type") == "blob"]
 
-    doc_folder = _find_doc_folder(all_paths)
-    doc_folder = _narrow_to_english(all_paths, doc_folder)
+    if doc_folder_override:
+        doc_folder = doc_folder_override
+    else:
+        doc_folder = _find_doc_folder(all_paths, root_only=root_only)
+    doc_folder, lang_excludes = _narrow_to_english(all_paths, doc_folder)
 
     doc_paths = [p for p in all_paths if _is_doc_file(p, doc_folder)]
+    if lang_excludes:
+        doc_paths = [
+            p
+            for p in doc_paths
+            if not any(p.lower().startswith(ex.lower() + "/") for ex in lang_excludes)
+        ]
 
     if not doc_paths:
         return GitHubFetchResult(

@@ -43,7 +43,7 @@ def discover_github_repo(html: str) -> str | None:
         if not parsed:
             continue
 
-        owner, repo = parsed
+        owner, repo = parsed.owner, parsed.repo
 
         # skip urls that go deeper into github (issues, pulls, blob, etc.)
         # unless it's /tree/ (branch link) which still identifies the repo

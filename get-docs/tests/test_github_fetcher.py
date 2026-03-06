@@ -5,6 +5,7 @@ from src.core.github_fetcher import (
     ALLOWED_LICENSES,
     GitHubFile,
     GitHubFetchResult,
+    ParsedGitHubURL,
     parse_github_url,
     fetch_github_docs,
     _fetch_repo_meta,
@@ -22,31 +23,43 @@ from tests.conftest import mock_response
 class TestParseGithubUrl:
     def test_standard_url(self):
         result = parse_github_url("https://github.com/fastapi/fastapi")
-        assert result == ("fastapi", "fastapi")
+        assert result == ParsedGitHubURL("fastapi", "fastapi")
 
     def test_url_with_trailing_slash(self):
         result = parse_github_url("https://github.com/pydantic/pydantic/")
-        assert result == ("pydantic", "pydantic")
+        assert result == ParsedGitHubURL("pydantic", "pydantic")
 
     def test_url_with_tree_path(self):
         result = parse_github_url("https://github.com/owner/repo/tree/main/docs")
-        assert result == ("owner", "repo")
+        assert result == ParsedGitHubURL("owner", "repo", branch="main", subpath="docs")
+
+    def test_url_with_deep_tree_path(self):
+        result = parse_github_url(
+            "https://github.com/owner/repo/tree/main/packages/docs"
+        )
+        assert result == ParsedGitHubURL(
+            "owner", "repo", branch="main", subpath="packages/docs"
+        )
+
+    def test_url_with_tree_branch_only(self):
+        result = parse_github_url("https://github.com/owner/repo/tree/develop")
+        assert result == ParsedGitHubURL("owner", "repo", branch="develop")
 
     def test_url_with_blob_path(self):
         result = parse_github_url("https://github.com/owner/repo/blob/main/README.md")
-        assert result == ("owner", "repo")
+        assert result == ParsedGitHubURL("owner", "repo")
 
     def test_url_without_scheme(self):
         result = parse_github_url("github.com/owner/repo")
-        assert result == ("owner", "repo")
+        assert result == ParsedGitHubURL("owner", "repo")
 
     def test_http_scheme(self):
         result = parse_github_url("http://github.com/owner/repo")
-        assert result == ("owner", "repo")
+        assert result == ParsedGitHubURL("owner", "repo")
 
     def test_dot_git_suffix_stripped(self):
         result = parse_github_url("https://github.com/owner/repo.git")
-        assert result == ("owner", "repo")
+        assert result == ParsedGitHubURL("owner", "repo")
 
     def test_rejects_non_github_url(self):
         result = parse_github_url("https://gitlab.com/owner/repo")
@@ -74,21 +87,21 @@ class TestParseGithubUrl:
 
     def test_preserves_case_of_owner_and_repo(self):
         result = parse_github_url("https://github.com/FastAPI/FastAPI")
-        assert result == ("FastAPI", "FastAPI")
+        assert result == ParsedGitHubURL("FastAPI", "FastAPI")
 
     def test_url_with_query_params(self):
         result = parse_github_url("https://github.com/owner/repo?tab=repositories")
-        assert result == ("owner", "repo")
+        assert result == ParsedGitHubURL("owner", "repo")
 
     def test_url_with_fragment(self):
         result = parse_github_url("https://github.com/owner/repo#readme")
-        assert result == ("owner", "repo")
+        assert result == ParsedGitHubURL("owner", "repo")
 
     def test_embedded_in_text(self):
         result = parse_github_url(
             "Check out https://github.com/owner/repo for more info"
         )
-        assert result == ("owner", "repo")
+        assert result == ParsedGitHubURL("owner", "repo")
 
     def test_only_owner_no_repo(self):
         result = parse_github_url("https://github.com/owner")
@@ -96,11 +109,15 @@ class TestParseGithubUrl:
 
     def test_owner_with_hyphens(self):
         result = parse_github_url("https://github.com/my-org/my-repo")
-        assert result == ("my-org", "my-repo")
+        assert result == ParsedGitHubURL("my-org", "my-repo")
 
     def test_owner_with_dots(self):
         result = parse_github_url("https://github.com/my.org/my.repo")
-        assert result == ("my.org", "my.repo")
+        assert result == ParsedGitHubURL("my.org", "my.repo")
+
+    def test_trailing_slash_in_subpath_stripped(self):
+        result = parse_github_url("https://github.com/owner/repo/tree/main/docs/")
+        assert result == ParsedGitHubURL("owner", "repo", branch="main", subpath="docs")
 
 
 class TestFindDocFolder:
@@ -166,6 +183,26 @@ class TestFindDocFolder:
         paths = ["packages/docs/quickstart.mdx", "packages/app/main.ts"]
         assert _find_doc_folder(paths) == "packages/docs"
 
+    def test_root_only_finds_top_level_docs(self):
+        paths = ["docs/index.md", "src/main.py"]
+        assert _find_doc_folder(paths, root_only=True) == "docs"
+
+    def test_root_only_ignores_nested_docs(self):
+        paths = ["packages/docs/quickstart.mdx", "packages/app/main.ts"]
+        assert _find_doc_folder(paths, root_only=True) is None
+
+    def test_root_only_prefers_docs_over_doc(self):
+        paths = ["docs/a.md", "doc/b.md", "src/main.py"]
+        assert _find_doc_folder(paths, root_only=True) == "docs"
+
+    def test_root_only_case_insensitive(self):
+        paths = ["Docs/index.md", "src/main.py"]
+        assert _find_doc_folder(paths, root_only=True) == "Docs"
+
+    def test_root_only_no_doc_folder(self):
+        paths = ["src/main.py", "README.md"]
+        assert _find_doc_folder(paths, root_only=True) is None
+
 
 class TestNarrowToEnglish:
     def test_picks_en_when_present(self):
@@ -174,33 +211,44 @@ class TestNarrowToEnglish:
             "docs/de/tutorial.md",
             "docs/fr/tutorial.md",
         ]
-        assert _narrow_to_english(paths, "docs") == "docs/en"
+        folder, excludes = _narrow_to_english(paths, "docs")
+        assert folder == "docs/en"
+        assert excludes == set()
 
-    def test_no_en_returns_doc_folder(self):
+    def test_no_en_with_lang_dirs_excludes_them(self):
         paths = [
+            "docs/index.md",
             "docs/de/tutorial.md",
             "docs/fr/tutorial.md",
             "docs/ja/tutorial.md",
         ]
-        assert _narrow_to_english(paths, "docs") == "docs"
+        folder, excludes = _narrow_to_english(paths, "docs")
+        assert folder == "docs"
+        assert excludes == {"docs/de", "docs/fr", "docs/ja"}
 
     def test_en_is_only_subfolder(self):
         paths = [
             "docs/en/tutorial.md",
             "docs/api/reference.md",
         ]
-        assert _narrow_to_english(paths, "docs") == "docs/en"
+        folder, excludes = _narrow_to_english(paths, "docs")
+        assert folder == "docs/en"
+        assert excludes == set()
 
     def test_no_en_subfolder_normal_folders(self):
         paths = [
             "docs/tutorial/intro.md",
             "docs/api/reference.md",
         ]
-        assert _narrow_to_english(paths, "docs") == "docs"
+        folder, excludes = _narrow_to_english(paths, "docs")
+        assert folder == "docs"
+        assert excludes == set()
 
     def test_none_doc_folder_returns_none(self):
         paths = ["README.md", "src/main.py"]
-        assert _narrow_to_english(paths, None) is None
+        folder, excludes = _narrow_to_english(paths, None)
+        assert folder is None
+        assert excludes == set()
 
     def test_prefers_en_over_en_us(self):
         paths = [
@@ -208,31 +256,41 @@ class TestNarrowToEnglish:
             "docs/en-us/tutorial.md",
             "docs/fr/tutorial.md",
         ]
-        assert _narrow_to_english(paths, "docs") == "docs/en"
+        folder, excludes = _narrow_to_english(paths, "docs")
+        assert folder == "docs/en"
+        assert excludes == set()
 
     def test_falls_back_to_en_us(self):
         paths = [
             "docs/en-us/tutorial.md",
             "docs/fr/tutorial.md",
         ]
-        assert _narrow_to_english(paths, "docs") == "docs/en-us"
+        folder, excludes = _narrow_to_english(paths, "docs")
+        assert folder == "docs/en-us"
+        assert excludes == set()
 
     def test_falls_back_to_en_gb(self):
         paths = [
             "docs/en-gb/tutorial.md",
             "docs/fr/tutorial.md",
         ]
-        assert _narrow_to_english(paths, "docs") == "docs/en-gb"
+        folder, excludes = _narrow_to_english(paths, "docs")
+        assert folder == "docs/en-gb"
+        assert excludes == set()
 
     def test_case_insensitive_path_matching(self):
         paths = [
             "Docs/en/tutorial.md",
             "Docs/de/tutorial.md",
         ]
-        assert _narrow_to_english(paths, "Docs") == "Docs/en"
+        folder, excludes = _narrow_to_english(paths, "Docs")
+        assert folder == "Docs/en"
+        assert excludes == set()
 
     def test_empty_paths(self):
-        assert _narrow_to_english([], "docs") == "docs"
+        folder, excludes = _narrow_to_english([], "docs")
+        assert folder == "docs"
+        assert excludes == set()
 
     def test_root_files_in_doc_folder_ignored(self):
         # root files directly under docs/ have no child dir — shouldn't crash
@@ -240,7 +298,9 @@ class TestNarrowToEnglish:
             "docs/index.md",
             "docs/en/tutorial.md",
         ]
-        assert _narrow_to_english(paths, "docs") == "docs/en"
+        folder, excludes = _narrow_to_english(paths, "docs")
+        assert folder == "docs/en"
+        assert excludes == set()
 
     def test_fastapi_style_deep_nesting(self):
         paths = [
@@ -249,7 +309,9 @@ class TestNarrowToEnglish:
             "docs/fr/docs/tutorial/first-steps.md",
             "docs/zh/docs/tutorial/first-steps.md",
         ]
-        assert _narrow_to_english(paths, "docs") == "docs/en"
+        folder, excludes = _narrow_to_english(paths, "docs")
+        assert folder == "docs/en"
+        assert excludes == set()
 
     def test_kubernetes_style(self):
         paths = [
@@ -257,7 +319,58 @@ class TestNarrowToEnglish:
             "content/zh-cn/docs/concepts/intro.md",
             "content/ko/docs/concepts/intro.md",
         ]
-        assert _narrow_to_english(paths, "content") == "content/en"
+        folder, excludes = _narrow_to_english(paths, "content")
+        assert folder == "content/en"
+        assert excludes == set()
+
+    def test_english_at_root_with_lang_subdirs(self):
+        paths = [
+            "docs/agents.mdx",
+            "docs/config.mdx",
+            "docs/ar/agents.mdx",
+            "docs/ar/config.mdx",
+            "docs/de/agents.mdx",
+            "docs/de/config.mdx",
+            "docs/fr/agents.mdx",
+            "docs/fr/config.mdx",
+        ]
+        folder, excludes = _narrow_to_english(paths, "docs")
+        assert folder == "docs"
+        assert excludes == {"docs/ar", "docs/de", "docs/fr"}
+
+    def test_single_lang_dir_not_excluded(self):
+        paths = [
+            "docs/index.md",
+            "docs/go/tutorial.md",
+        ]
+        folder, excludes = _narrow_to_english(paths, "docs")
+        assert folder == "docs"
+        assert excludes == set()
+
+    def test_deep_doc_folder_with_lang_subdirs(self):
+        paths = [
+            "packages/web/src/content/docs/agents.mdx",
+            "packages/web/src/content/docs/ar/agents.mdx",
+            "packages/web/src/content/docs/de/agents.mdx",
+            "packages/web/src/content/docs/fr/agents.mdx",
+        ]
+        folder, excludes = _narrow_to_english(paths, "packages/web/src/content/docs")
+        assert folder == "packages/web/src/content/docs"
+        assert excludes == {
+            "packages/web/src/content/docs/ar",
+            "packages/web/src/content/docs/de",
+            "packages/web/src/content/docs/fr",
+        }
+
+    def test_locale_codes_excluded(self):
+        paths = [
+            "docs/index.md",
+            "docs/pt-br/index.md",
+            "docs/zh-cn/index.md",
+        ]
+        folder, excludes = _narrow_to_english(paths, "docs")
+        assert folder == "docs"
+        assert excludes == {"docs/pt-br", "docs/zh-cn"}
 
 
 class TestIsDocFile:
