@@ -804,6 +804,48 @@ class TestGetDocs:
         assert result.ethics.crawl_delay_seconds == 5
 
     @pytest.mark.asyncio
+    async def test_falls_back_to_single_page_scrape(self, mocker):
+        mocker.patch(
+            "src.core.orchestrator.fetch_robots_txt",
+            return_value=RobotsParser(""),
+        )
+        mocker.patch(
+            "src.core.orchestrator.fetch_llms_txt",
+            return_value=None,
+        )
+        mocker.patch(
+            "src.core.orchestrator.crawl_sitemap",
+            return_value=CrawlResult(pages=[]),
+        )
+
+        call_count = 0
+
+        async def mock_get(url, **kwargs):
+            nonlocal call_count
+            call_count += 1
+            headers = kwargs.get("headers", {})
+            if headers.get("Accept") == "text/markdown":
+                return mock_response(status_code=404)
+            if url.endswith(".md"):
+                return mock_response(status_code=404)
+            if call_count == 1:
+                return mock_response(text="<html>no github</html>")
+            return mock_response(
+                text=html_page("Home", "Welcome to the docs"),
+                content_type="text/html; charset=utf-8",
+            )
+
+        client = mocker.AsyncMock(spec=httpx.AsyncClient)
+        client.get = mocker.AsyncMock(side_effect=mock_get)
+
+        result = await get_docs(_request(), client)
+
+        assert result.source_method == SourceMethod.SINGLE_PAGE
+        assert len(result.pages) == 1
+        assert result.pages[0].url == "https://docs.example.com/"
+        assert "Welcome to the docs" in result.pages[0].content
+
+    @pytest.mark.asyncio
     async def test_on_progress_callback(self, mocker):
         mocker.patch(
             "src.core.orchestrator.fetch_robots_txt",

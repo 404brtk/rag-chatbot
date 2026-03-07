@@ -377,4 +377,15 @@ async def get_docs(
         except Exception:
             logger.exception("Sitemap crawl failed")
 
+    # 4. single-page fallback
+    if not result.pages and base_url:
+        page = await _fetch_page_as_markdown(
+            base_url, client, options.timeout, SourceMethod.SINGLE_PAGE
+        )
+        if page:
+            result.pages.append(page)
+            result.source_method = SourceMethod.SINGLE_PAGE
+            if on_progress:
+                await on_progress(1, 1)
+
     return result

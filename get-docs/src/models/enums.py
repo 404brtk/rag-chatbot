@@ -12,6 +12,7 @@ class SourceMethod(StrEnum):
     LLMS_TXT = "llms_txt"
     GITHUB_RAW = "github_raw"
     SITEMAP_CRAWL = "sitemap_crawl"
+    SINGLE_PAGE = "single_page"
 
 
 class ContentSignal(StrEnum):
