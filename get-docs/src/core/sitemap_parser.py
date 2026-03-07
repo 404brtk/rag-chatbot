@@ -103,7 +103,10 @@ async def fetch_sitemap_urls(
     except (httpx.HTTPError, httpx.TimeoutException):
         return []
 
-    parser = SitemapParser(resp.text)
+    try:
+        parser = SitemapParser(resp.text)
+    except ET.ParseError:
+        return []
 
     if not parser.is_index():
         return [entry.loc for entry in parser.get_urls()]
