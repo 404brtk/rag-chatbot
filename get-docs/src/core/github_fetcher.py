@@ -168,6 +168,7 @@ class GitHubFetchResult:
     repo: str
     branch: str
     doc_folder: str | None
+    license_spdx_id: str | None = None
     files: list[GitHubFile] = field(default_factory=list)
 
 
@@ -433,6 +434,7 @@ async def fetch_github_docs(
             repo=repo,
             branch=resolved_branch,
             doc_folder=doc_folder,
+            license_spdx_id=meta.spdx_id,
         )
 
     doc_paths = doc_paths[:max_files]
@@ -442,6 +444,7 @@ async def fetch_github_docs(
         repo=repo,
         branch=resolved_branch,
         doc_folder=doc_folder,
+        license_spdx_id=meta.spdx_id,
     )
 
     # batch fetch to avoid overwhelming the server
