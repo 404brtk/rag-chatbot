@@ -1,6 +1,6 @@
 import asyncio
 import logging
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
 
 import httpx
 
@@ -23,7 +23,7 @@ from src.utils.url_utils import extract_path
 
 logger = logging.getLogger("get-docs")
 
-ProgressCallback = Callable[[int, int | None], None]
+ProgressCallback = Callable[[int, int | None], Awaitable[None]]
 
 
 def _html_to_doc_page(url: str, html: str, source_method: SourceMethod) -> DocPage:
@@ -166,7 +166,7 @@ async def _fetch_and_convert_urls(
             pages.append(outcome)
 
         if on_progress:
-            on_progress(len(pages), len(filtered))
+            await on_progress(len(pages), len(filtered))
 
         if effective_delay > 0 and i + options.max_concurrent < len(filtered):
             await asyncio.sleep(effective_delay)
@@ -214,7 +214,7 @@ async def _try_sitemap(
             pages.append(page)
 
     if on_progress:
-        on_progress(len(pages), len(pages))
+        await on_progress(len(pages), len(pages))
 
     errors = [f"{e.url}: {e.error}" for e in crawl_result.errors]
     return pages, errors
@@ -312,7 +312,7 @@ async def get_docs(
                     result.pages.append(_llms_full_to_doc_page(llms_result))
                     result.source_method = SourceMethod.LLMS_TXT
                     if on_progress:
-                        on_progress(1, 1)
+                        await on_progress(1, 1)
                     return result
 
                 urls = [link.url for link in llms_result.links if not link.optional]
@@ -361,7 +361,7 @@ async def get_docs(
                 result.source_method = SourceMethod.GITHUB_RAW
                 result.github_repo = repo_url
                 if on_progress:
-                    on_progress(len(github_pages), len(github_pages))
+                    await on_progress(len(github_pages), len(github_pages))
                 return result
         except Exception as exc:
             result.errors.append(f"GitHub fetch failed: {exc}")
