@@ -2,11 +2,12 @@ from pydantic_settings import BaseSettings
 
 
 class Settings(BaseSettings):
-    model_config = {"env_prefix": "CRAWLER_", "env_file": ".env"}
+    model_config = {"env_prefix": "GETDOCS_", "env_file": ".env"}
 
-    HOST = "127.0.0.1"
-    PORT = 8001
-    LOG_LEVEL = "INFO"
+    HOST: str = "127.0.0.1"
+    PORT: int = 8001
+    LOG_LEVEL: str = "INFO"
+    REDIS_URL: str = "redis://localhost:6379"
 
 
 settings = Settings()
