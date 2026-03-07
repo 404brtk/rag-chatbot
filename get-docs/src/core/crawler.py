@@ -57,22 +57,18 @@ async def crawl_sitemap(
         robots = await fetch_robots_txt(base_url, client, timeout)
 
     sitemap_sources = robots.get_sitemaps()
-    if not sitemap_sources:
+    all_page_urls: list[str] = []
+
+    if sitemap_sources:
+        for src in sitemap_sources:
+            all_page_urls.extend(await fetch_sitemap_urls(src, client, timeout))
+    else:
         for parent in url_path_parents(base_url):
             candidate = parent.rstrip("/") + "/sitemap.xml"
-            try:
-                resp = await client.get(
-                    candidate, follow_redirects=True, timeout=timeout
-                )
-                if resp.status_code == 200:
-                    sitemap_sources = [candidate]
-                    break
-            except (httpx.HTTPError, httpx.TimeoutException):
-                continue
-
-    all_page_urls: list[str] = []
-    for src in sitemap_sources:
-        all_page_urls.extend(await fetch_sitemap_urls(src, client, timeout))
+            urls = await fetch_sitemap_urls(candidate, client, timeout)
+            if urls:
+                all_page_urls.extend(urls)
+                break
 
     prefix = make_url_prefix(base_url)
 
