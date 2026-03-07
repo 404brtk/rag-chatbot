@@ -1,5 +1,4 @@
 import asyncio
-import logging
 from collections.abc import Awaitable, Callable
 
 import httpx
@@ -19,9 +18,8 @@ from src.models.responses import DocPage, EthicsContext, GetDocsResult
 from src.parsing.html_extractor import extract_content, extract_title
 from src.parsing.html_to_md import html_to_markdown
 from src.parsing.mdx_strip import strip_mdx
+from src.utils.logger import logger
 from src.utils.url_utils import extract_path
-
-logger = logging.getLogger("get-docs")
 
 ProgressCallback = Callable[[int, int | None], Awaitable[None]]
 
@@ -137,7 +135,7 @@ async def _fetch_and_convert_urls(
     source_method: SourceMethod,
     ethics: EthicsContext,
     on_progress: ProgressCallback | None = None,
-) -> tuple[list[DocPage], list[str]]:
+) -> list[DocPage]:
     filtered, robots_count, signal_count = _filter_urls_by_robots(urls, robots)
     ethics.pages_filtered_by_robots += robots_count
     ethics.pages_filtered_by_content_signal += signal_count
@@ -145,7 +143,6 @@ async def _fetch_and_convert_urls(
     filtered = filtered[: options.max_web_pages]
 
     pages: list[DocPage] = []
-    errors: list[str] = []
     effective_delay = max(options.delay_seconds, robots.get_crawl_delay() or 0)
 
     for i in range(0, len(filtered), options.max_concurrent):
@@ -158,10 +155,10 @@ async def _fetch_and_convert_urls(
 
         for url, outcome in zip(batch, outcomes):
             if isinstance(outcome, BaseException):
-                errors.append(f"{url}: {outcome}")
+                logger.warning(f"Failed to fetch {url}: {outcome}")
                 continue
             if outcome is None:
-                errors.append(f"{url}: failed to fetch or extract content")
+                logger.warning(f"Failed to fetch or extract content: {url}")
                 continue
             pages.append(outcome)
 
@@ -171,7 +168,7 @@ async def _fetch_and_convert_urls(
         if effective_delay > 0 and i + options.max_concurrent < len(filtered):
             await asyncio.sleep(effective_delay)
 
-    return pages, errors
+    return pages
 
 
 def _llms_full_to_doc_page(llms_result: LlmsTxtResult) -> DocPage:
@@ -189,7 +186,7 @@ async def _try_sitemap(
     robots: RobotsParser,
     options: GetDocsOptions,
     on_progress: ProgressCallback | None = None,
-) -> tuple[list[DocPage], list[str]]:
+) -> list[DocPage]:
     """Sitemap crawl fallback: fetch pages, convert to markdown.
 
     TODO: it's worth considering using _fetch_page_as_markdown instead of plain HTML fetch
@@ -216,8 +213,7 @@ async def _try_sitemap(
     if on_progress:
         await on_progress(len(pages), len(pages))
 
-    errors = [f"{e.url}: {e.error}" for e in crawl_result.errors]
-    return pages, errors
+    return pages
 
 
 async def _fetch_github(
@@ -316,7 +312,7 @@ async def get_docs(
                     return result
 
                 urls = [link.url for link in llms_result.links if not link.optional]
-                pages, errors = await _fetch_and_convert_urls(
+                pages = await _fetch_and_convert_urls(
                     urls,
                     client,
                     robots,
@@ -325,13 +321,12 @@ async def get_docs(
                     ethics,
                     on_progress,
                 )
-                result.errors.extend(errors)
                 if pages:
                     result.pages.extend(pages)
                     result.source_method = SourceMethod.LLMS_TXT
                     return result
-        except Exception as exc:
-            result.errors.append(f"llms.txt fetch failed: {exc}")
+        except Exception:
+            logger.exception("llms.txt fetch failed")
 
     # 2. GitHub docs
     repo_url = await _resolve_github_repo(request, client, timeout=options.timeout)
@@ -363,28 +358,23 @@ async def get_docs(
                 if on_progress:
                     await on_progress(len(github_pages), len(github_pages))
                 return result
-        except Exception as exc:
-            result.errors.append(f"GitHub fetch failed: {exc}")
+        except Exception:
+            logger.exception("GitHub fetch failed")
 
     # 3. Sitemap crawl
     if base_url and robots:
         try:
-            pages, errors = await _try_sitemap(
+            pages = await _try_sitemap(
                 base_url,
                 client,
                 robots,
                 options,
                 on_progress,
             )
-            result.errors.extend(errors)
             if pages:
                 result.pages.extend(pages)
                 result.source_method = SourceMethod.SITEMAP_CRAWL
-        except Exception as exc:
-            result.errors.append(f"Sitemap crawl failed: {exc}")
-
-    if result.errors:
-        for error in result.errors:
-            logger.warning(error)
+        except Exception:
+            logger.exception("Sitemap crawl failed")
 
     return result

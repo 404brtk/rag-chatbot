@@ -2,7 +2,6 @@ import httpx
 import pytest
 
 from src.core.crawler import (
-    CrawlError,
     CrawlPage,
     CrawlResult,
     crawl_sitemap,
@@ -87,7 +86,6 @@ class TestCrawlSitemap:
             "https://example.com", client, robots=robots, delay_seconds=0
         )
         assert len(result.pages) == 2
-        assert len(result.errors) == 0
 
     @pytest.mark.asyncio
     async def test_falls_back_to_default_sitemap_xml(self, mocker):
@@ -187,7 +185,7 @@ class TestCrawlSitemap:
         assert len(result.pages) == 1
 
     @pytest.mark.asyncio
-    async def test_records_fetch_errors(self, mocker):
+    async def test_skips_failed_fetches(self, mocker):
         robots = RobotsParser("")
 
         sitemap_xml = """<?xml version="1.0"?>
@@ -208,8 +206,7 @@ class TestCrawlSitemap:
             "https://example.com", client, robots=robots, delay_seconds=0
         )
         assert len(result.pages) == 1
-        assert len(result.errors) == 1
-        assert "500" in result.errors[0].error
+        assert result.pages[0].url == "https://example.com/ok"
 
     @pytest.mark.asyncio
     async def test_skips_ai_input_disallowed(self, mocker):
@@ -440,11 +437,6 @@ class TestDataclasses:
         p = CrawlPage(url="https://example.com", html="<html></html>")
         assert p.url == "https://example.com"
 
-    def test_crawl_error_fields(self):
-        e = CrawlError(url="https://example.com", error="timeout")
-        assert e.error == "timeout"
-
     def test_crawl_result_defaults(self):
         r = CrawlResult()
         assert r.pages == []
-        assert r.errors == []

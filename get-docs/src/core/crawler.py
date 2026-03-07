@@ -11,6 +11,7 @@ from src.utils.url_utils import (
     normalize_url,
     url_path_parents,
 )
+from src.utils.logger import logger
 
 
 @dataclass
@@ -20,15 +21,8 @@ class CrawlPage:
 
 
 @dataclass
-class CrawlError:
-    url: str
-    error: str
-
-
-@dataclass
 class CrawlResult:
     pages: list[CrawlPage] = field(default_factory=list)
-    errors: list[CrawlError] = field(default_factory=list)
 
 
 async def _fetch_page(
@@ -110,13 +104,13 @@ async def crawl_sitemap(
 
         for outcome in outcomes:
             if isinstance(outcome, BaseException):
-                result.errors.append(CrawlError(url="unknown", error=str(outcome)))
+                logger.warning(f"Crawl error: {outcome}")
                 continue
             url, html, error = outcome
             if error or html is None:
-                result.errors.append(CrawlError(url=url, error=error or "Unknown"))
-            else:
-                result.pages.append(CrawlPage(url=url, html=html))
+                logger.warning(f"Failed to fetch {url}: {error or 'Unknown'}")
+                continue
+            result.pages.append(CrawlPage(url=url, html=html))
 
         if effective_delay > 0 and i + max_concurrent < len(filtered):
             await asyncio.sleep(effective_delay)

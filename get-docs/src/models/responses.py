@@ -25,7 +25,6 @@ class EthicsContext:
 class GetDocsResult:
     url: str
     pages: list[DocPage] = field(default_factory=list)
-    errors: list[str] = field(default_factory=list)
     source_method: SourceMethod | None = None
     github_repo: str | None = None
     ethics: EthicsContext = field(default_factory=EthicsContext)
