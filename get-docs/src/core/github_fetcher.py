@@ -366,6 +366,7 @@ async def fetch_github_docs(
     client: httpx.AsyncClient,
     timeout: float = 15,
     max_files: int = 300,
+    delay_seconds: float = 1.5,
     doc_folder_override: str | None = None,
     root_only: bool = False,
 ) -> GitHubFetchResult | None:
@@ -450,11 +451,13 @@ async def fetch_github_docs(
             _fetch_raw_file(client, owner, repo, resolved_branch, path, timeout)
             for path in batch
         ]
-        # gather concurrently
         contents = await asyncio.gather(*tasks, return_exceptions=True)
 
         for path, content in zip(batch, contents):
             if isinstance(content, str):
                 result.files.append(GitHubFile(path=path, content=content))
+
+        if delay_seconds > 0 and i + _GITHUB_BATCH_SIZE < len(doc_paths):
+            await asyncio.sleep(delay_seconds)
 
     return result

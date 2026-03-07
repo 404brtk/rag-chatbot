@@ -101,6 +101,7 @@ async def crawl_sitemap(
     filtered = filtered[:max_pages]
 
     result = CrawlResult()
+    effective_delay = max(delay_seconds, robots.get_crawl_delay() or 0)
 
     for i in range(0, len(filtered), max_concurrent):
         batch = filtered[i : i + max_concurrent]
@@ -117,7 +118,7 @@ async def crawl_sitemap(
             else:
                 result.pages.append(CrawlPage(url=url, html=html))
 
-        if delay_seconds > 0 and i + max_concurrent < len(filtered):
-            await asyncio.sleep(delay_seconds)
+        if effective_delay > 0 and i + max_concurrent < len(filtered):
+            await asyncio.sleep(effective_delay)
 
     return result

@@ -1,3 +1,4 @@
+import asyncio
 import re
 from dataclasses import dataclass, field
 import httpx
@@ -117,10 +118,12 @@ async def fetch_llms_txt(
     client: httpx.AsyncClient,
     robots: RobotsParser | None = None,
     timeout: float = 10,
+    delay_seconds: float = 0.5,
 ) -> LlmsTxtResult | None:
     if robots is None:
         robots = await fetch_robots_txt(base_url, client, timeout)
 
+    request_count = 0
     for parent in url_path_parents(base_url):
         for filename, is_full in _LLMS_TXT_PATHS:
             url = parent.rstrip("/") + "/" + filename
@@ -131,7 +134,11 @@ async def fetch_llms_txt(
             if robots.is_ai_input_allowed(url_path) is False:
                 continue
 
+            if request_count > 0 and delay_seconds > 0:
+                await asyncio.sleep(delay_seconds)
+
             try:
+                request_count += 1
                 resp = await client.get(url, follow_redirects=True, timeout=timeout)
                 if resp.status_code != 200:
                     continue
