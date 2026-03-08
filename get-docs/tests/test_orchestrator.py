@@ -162,6 +162,31 @@ class TestFetchPageAsMarkdown:
         assert page is None
 
     @pytest.mark.asyncio
+    async def test_md_url_skips_content_negotiation(self, mocker):
+        urls_fetched: list[str] = []
+
+        async def mock_get(url, **kwargs):
+            urls_fetched.append(url)
+            return mock_response(
+                text="# Markdown Content\nHello",
+                content_type="text/plain",
+            )
+
+        client = mocker.AsyncMock(spec=httpx.AsyncClient)
+        client.get = mocker.AsyncMock(side_effect=mock_get)
+
+        page = await _fetch_page_as_markdown(
+            "https://docs.stripe.com/connect.md",
+            client,
+            10.0,
+            SourceMethod.LLMS_TXT,
+        )
+        assert page is not None
+        assert page.content == "# Markdown Content\nHello"
+        assert len(urls_fetched) == 1
+        assert urls_fetched[0] == "https://docs.stripe.com/connect.md"
+
+    @pytest.mark.asyncio
     async def test_md_probe_rejects_html_disguised_as_text(self, mocker):
         call_count = 0
 
