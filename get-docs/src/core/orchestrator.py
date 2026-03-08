@@ -60,8 +60,8 @@ async def _try_md_url(
     client: httpx.AsyncClient,
     timeout: float,
 ) -> str | None:
-    """try appending .md to the URL path."""
-    md_url = url.rstrip("/") + ".md"
+    """try fetching a .md variant of the URL."""
+    md_url = url if url.rstrip("/").endswith(".md") else url.rstrip("/") + ".md"
     try:
         resp = await client.get(md_url, follow_redirects=True, timeout=timeout)
         if resp.status_code != 200:
@@ -82,12 +82,17 @@ async def _fetch_page_as_markdown(
     timeout: float,
     source_method: SourceMethod,
 ) -> DocPage | None:
-    # 1. Content negotiation
-    md = await _try_content_negotiation(url, client, timeout)
-    if md:
-        return DocPage(url=url, title="", content=md, source_method=source_method)
+    # first check if the url already ends with .md
+    is_md_url = url.rstrip("/").endswith(".md")
 
-    # 2. .md URL
+    # 1. Content negotiation (skip for .md urls - it is meant for
+    # HTML pages that can serve markdown as an alternative format)
+    if not is_md_url:
+        md = await _try_content_negotiation(url, client, timeout)
+        if md:
+            return DocPage(url=url, title="", content=md, source_method=source_method)
+
+    # 2. .md URL (fetches as-is if url already ends in .md)
     md = await _try_md_url(url, client, timeout)
     if md:
         return DocPage(url=url, title="", content=md, source_method=source_method)
