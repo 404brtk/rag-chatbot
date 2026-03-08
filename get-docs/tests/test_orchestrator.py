@@ -826,7 +826,7 @@ class TestGetDocs:
 
         result = await get_docs(_request(), client)
 
-        assert result.ethics.crawl_delay_seconds == 5
+        assert result.ethics.robots_crawl_delay_seconds == 5
 
     @pytest.mark.asyncio
     async def test_falls_back_to_single_page_scrape(self, mocker):

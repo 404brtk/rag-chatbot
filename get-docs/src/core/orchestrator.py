@@ -298,7 +298,7 @@ async def get_docs(
     robots: RobotsParser | None = None
     if base_url:
         robots = await fetch_robots_txt(base_url, client)
-        ethics.crawl_delay_seconds = robots.get_crawl_delay()
+        ethics.robots_crawl_delay_seconds = robots.get_crawl_delay()
         ethics.content_signal_ai_input = robots.is_ai_input_allowed()
 
     # 1. llms-full.txt / llms.txt

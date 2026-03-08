@@ -13,7 +13,7 @@ class DocPage:
 
 @dataclass
 class EthicsContext:
-    crawl_delay_seconds: float | None = None
+    robots_crawl_delay_seconds: float | None = None
     content_signal_ai_input: bool | None = None
     license_spdx_id: str | None = None
     license_allowed: bool | None = None
