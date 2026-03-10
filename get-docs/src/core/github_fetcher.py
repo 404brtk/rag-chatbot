@@ -1,13 +1,12 @@
-import asyncio
-import logging
 import re
 from dataclasses import dataclass, field
 
 import httpx
 
+from src.utils.http_client import get_with_retry
+from src.utils.logger import logger
+from src.utils.rate_limiter import fetch_with_rate_limit
 from src.utils.url_utils import strip_git_suffix
-
-logger = logging.getLogger("get-docs")
 
 # GitHub repo URL patterns:
 #   https://github.com/owner/repo
@@ -311,8 +310,8 @@ async def _fetch_repo_meta(
     url = f"{_API_BASE}/repos/{owner}/{repo}"
     headers = {"Accept": "application/vnd.github+json"}
     try:
-        resp = await client.get(
-            url, headers=headers, follow_redirects=True, timeout=timeout
+        resp = await get_with_retry(
+            client, url, headers=headers, follow_redirects=True, timeout=timeout
         )
         if resp.status_code != 200:
             return _RepoMeta(spdx_id=None, default_branch=None)
@@ -321,7 +320,7 @@ async def _fetch_repo_meta(
         spdx_id = license_obj.get("spdx_id") if license_obj else None
         default_branch = data.get("default_branch")
         return _RepoMeta(spdx_id=spdx_id, default_branch=default_branch)
-    except (httpx.HTTPError, httpx.TimeoutException):
+    except httpx.HTTPError:
         return _RepoMeta(spdx_id=None, default_branch=None)
 
 
@@ -336,8 +335,8 @@ async def _fetch_tree(
     url = f"{_API_BASE}/repos/{owner}/{repo}/git/trees/{branch}?recursive=1"
     headers = {"Accept": "application/vnd.github+json"}
 
-    resp = await client.get(
-        url, headers=headers, follow_redirects=True, timeout=timeout
+    resp = await get_with_retry(
+        client, url, headers=headers, follow_redirects=True, timeout=timeout
     )
     if resp.status_code != 200:
         return None
@@ -356,7 +355,7 @@ async def _fetch_raw_file(
 ) -> str | None:
     """Fetch a single file's raw content from raw.githubusercontent.com."""
     url = f"{_RAW_BASE}/{owner}/{repo}/{branch}/{path}"
-    resp = await client.get(url, follow_redirects=True, timeout=timeout)
+    resp = await get_with_retry(client, url, follow_redirects=True, timeout=timeout)
     if resp.status_code != 200:
         return None
     return resp.text
@@ -402,7 +401,7 @@ async def fetch_github_docs(
 
     try:
         tree_entries = await _fetch_tree(client, owner, repo, resolved_branch, timeout)
-    except (httpx.HTTPError, httpx.TimeoutException):
+    except httpx.HTTPError:
         return None
 
     if tree_entries is None:
@@ -447,20 +446,17 @@ async def fetch_github_docs(
         license_spdx_id=meta.spdx_id,
     )
 
-    # batch fetch to avoid overwhelming the server
-    for i in range(0, len(doc_paths), _GITHUB_BATCH_SIZE):
-        batch = doc_paths[i : i + _GITHUB_BATCH_SIZE]
-        tasks = [
-            _fetch_raw_file(client, owner, repo, resolved_branch, path, timeout)
-            for path in batch
-        ]
-        contents = await asyncio.gather(*tasks, return_exceptions=True)
+    outcomes = await fetch_with_rate_limit(
+        doc_paths,
+        lambda path: _fetch_raw_file(
+            client, owner, repo, resolved_branch, path, timeout
+        ),
+        max_concurrent=_GITHUB_BATCH_SIZE,
+        delay_seconds=delay_seconds,
+    )
 
-        for path, content in zip(batch, contents):
-            if isinstance(content, str):
-                result.files.append(GitHubFile(path=path, content=content))
-
-        if delay_seconds > 0 and i + _GITHUB_BATCH_SIZE < len(doc_paths):
-            await asyncio.sleep(delay_seconds)
+    for path, content in outcomes:
+        if isinstance(content, str):
+            result.files.append(GitHubFile(path=path, content=content))
 
     return result

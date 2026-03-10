@@ -2,6 +2,8 @@ from dataclasses import dataclass
 import xml.etree.ElementTree as ET
 import httpx
 
+from src.utils.http_client import get_with_retry
+
 
 @dataclass
 class SitemapEntry:
@@ -97,10 +99,12 @@ async def fetch_sitemap_urls(
         return []
 
     try:
-        resp = await client.get(sitemap_url, follow_redirects=True, timeout=timeout)
+        resp = await get_with_retry(
+            client, sitemap_url, follow_redirects=True, timeout=timeout
+        )
         if resp.status_code != 200:
             return []
-    except (httpx.HTTPError, httpx.TimeoutException):
+    except httpx.HTTPError:
         return []
 
     try:

@@ -4,6 +4,7 @@ from dataclasses import dataclass, field
 import httpx
 
 from src.core.robots_parser import RobotsParser, fetch_robots_txt
+from src.utils.http_client import get_with_retry
 from src.utils.url_utils import (
     extract_path,
     is_absolute_url,
@@ -139,7 +140,9 @@ async def fetch_llms_txt(
 
             try:
                 request_count += 1
-                resp = await client.get(url, follow_redirects=True, timeout=timeout)
+                resp = await get_with_retry(
+                    client, url, follow_redirects=True, timeout=timeout
+                )
                 if resp.status_code != 200:
                     continue
 
@@ -154,7 +157,7 @@ async def fetch_llms_txt(
 
                 return parse_llms_txt(text, source_url=url, is_full=is_full)
 
-            except (httpx.HTTPError, httpx.TimeoutException):
+            except httpx.HTTPError:
                 continue
 
     return None

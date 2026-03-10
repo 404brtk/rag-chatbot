@@ -1,4 +1,3 @@
-import asyncio
 from collections.abc import Awaitable, Callable
 
 import httpx
@@ -18,7 +17,9 @@ from src.models.responses import DocPage, EthicsContext, GetDocsResult
 from src.parsing.html_extractor import extract_content, extract_title
 from src.parsing.html_to_md import html_to_markdown
 from src.parsing.mdx_strip import strip_mdx
+from src.utils.http_client import get_with_retry
 from src.utils.logger import logger
+from src.utils.rate_limiter import fetch_with_rate_limit
 from src.utils.url_utils import extract_path
 
 ProgressCallback = Callable[[int, int | None], Awaitable[None]]
@@ -38,7 +39,8 @@ async def _try_content_negotiation(
 ) -> str | None:
     """try fetching with Accept: text/markdown header."""
     try:
-        resp = await client.get(
+        resp = await get_with_retry(
+            client,
             url,
             headers={"Accept": "text/markdown"},
             follow_redirects=True,
@@ -50,7 +52,7 @@ async def _try_content_negotiation(
         if "text/markdown" in content_type:
             text = resp.text.strip()
             return text if text else None
-    except (httpx.HTTPError, httpx.TimeoutException):
+    except httpx.HTTPError:
         pass
     return None
 
@@ -63,7 +65,9 @@ async def _try_md_url(
     """try fetching a .md variant of the URL."""
     md_url = url if url.rstrip("/").endswith(".md") else url.rstrip("/") + ".md"
     try:
-        resp = await client.get(md_url, follow_redirects=True, timeout=timeout)
+        resp = await get_with_retry(
+            client, md_url, follow_redirects=True, timeout=timeout
+        )
         if resp.status_code != 200:
             return None
         content_type = resp.headers.get("content-type", "")
@@ -71,7 +75,7 @@ async def _try_md_url(
             text = resp.text.strip()
             if text and not text.lstrip().startswith("<!"):
                 return text
-    except (httpx.HTTPError, httpx.TimeoutException):
+    except httpx.HTTPError:
         pass
     return None
 
@@ -99,7 +103,7 @@ async def _fetch_page_as_markdown(
 
     # 3. HTML fallback
     try:
-        resp = await client.get(url, follow_redirects=True, timeout=timeout)
+        resp = await get_with_retry(client, url, follow_redirects=True, timeout=timeout)
         if resp.status_code != 200:
             return None
         content_type = resp.headers.get("content-type", "")
@@ -107,7 +111,7 @@ async def _fetch_page_as_markdown(
             return None
         page = _html_to_doc_page(url, resp.text, source_method)
         return page if page.content else None
-    except (httpx.HTTPError, httpx.TimeoutException):
+    except httpx.HTTPError:
         return None
 
 
@@ -150,28 +154,24 @@ async def _fetch_and_convert_urls(
     pages: list[DocPage] = []
     effective_delay = max(options.delay_seconds, robots.get_crawl_delay() or 0)
 
-    for i in range(0, len(filtered), options.max_concurrent):
-        batch = filtered[i : i + options.max_concurrent]
-        tasks = [
-            _fetch_page_as_markdown(url, client, options.timeout, source_method)
-            for url in batch
-        ]
-        outcomes = await asyncio.gather(*tasks, return_exceptions=True)
+    outcomes = await fetch_with_rate_limit(
+        filtered,
+        lambda url: _fetch_page_as_markdown(
+            url, client, options.timeout, source_method
+        ),
+        max_concurrent=options.max_concurrent,
+        delay_seconds=effective_delay,
+        on_progress=on_progress,
+    )
 
-        for url, outcome in zip(batch, outcomes):
-            if isinstance(outcome, BaseException):
-                logger.warning(f"Failed to fetch {url}: {outcome}")
-                continue
-            if outcome is None:
-                logger.warning(f"Failed to fetch or extract content: {url}")
-                continue
-            pages.append(outcome)
-
-        if on_progress:
-            await on_progress(len(pages), len(filtered))
-
-        if effective_delay > 0 and i + options.max_concurrent < len(filtered):
-            await asyncio.sleep(effective_delay)
+    for url, outcome in outcomes:
+        if isinstance(outcome, Exception):
+            logger.warning(f"Failed to fetch {url}: {outcome}")
+            continue
+        if outcome is None:
+            logger.warning(f"Failed to fetch or extract content: {url}")
+            continue
+        pages.append(outcome)
 
     return pages
 
@@ -268,14 +268,14 @@ async def _resolve_github_repo(
         return None
 
     try:
-        resp = await client.get(
-            str(request.url), follow_redirects=True, timeout=timeout
+        resp = await get_with_retry(
+            client, str(request.url), follow_redirects=True, timeout=timeout
         )
         if resp.status_code == 200 and "text/html" in resp.headers.get(
             "content-type", ""
         ):
             return discover_github_repo(resp.text)
-    except (httpx.HTTPError, httpx.TimeoutException):
+    except httpx.HTTPError:
         pass
     return None
 

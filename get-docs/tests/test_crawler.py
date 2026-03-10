@@ -50,7 +50,7 @@ class TestFetchPage:
 
         url, html, error = await _fetch_page("https://example.com", client, 10)
         assert html is None
-        assert error == "Timeout"
+        assert error is not None
 
     @pytest.mark.asyncio
     async def test_network_error_returns_error(self, mocker):

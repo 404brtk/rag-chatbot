@@ -1,9 +1,11 @@
-import asyncio
 from dataclasses import dataclass, field
 import httpx
 
 from src.core.robots_parser import RobotsParser, fetch_robots_txt
 from src.core.sitemap_parser import fetch_sitemap_urls
+from src.utils.http_client import get_with_retry
+from src.utils.logger import logger
+from src.utils.rate_limiter import fetch_with_rate_limit
 from src.utils.url_utils import (
     extract_path,
     is_url_within_scope,
@@ -11,7 +13,6 @@ from src.utils.url_utils import (
     normalize_url,
     url_path_parents,
 )
-from src.utils.logger import logger
 
 
 @dataclass
@@ -31,15 +32,13 @@ async def _fetch_page(
     timeout: float,
 ) -> tuple[str, str | None, str | None]:
     try:
-        resp = await client.get(url, follow_redirects=True, timeout=timeout)
+        resp = await get_with_retry(client, url, follow_redirects=True, timeout=timeout)
         if resp.status_code != 200:
             return (url, None, f"HTTP {resp.status_code}")
         content_type = resp.headers.get("content-type", "")
         if "text/html" not in content_type:
             return (url, None, f"Not HTML: {content_type}")
         return (url, resp.text, None)
-    except httpx.TimeoutException:
-        return (url, None, "Timeout")
     except httpx.HTTPError as exc:
         return (url, None, str(exc))
 
@@ -93,22 +92,21 @@ async def crawl_sitemap(
     result = CrawlResult()
     effective_delay = max(delay_seconds, robots.get_crawl_delay() or 0)
 
-    for i in range(0, len(filtered), max_concurrent):
-        batch = filtered[i : i + max_concurrent]
-        tasks = [_fetch_page(url, client, timeout) for url in batch]
-        outcomes = await asyncio.gather(*tasks, return_exceptions=True)
+    outcomes = await fetch_with_rate_limit(
+        filtered,
+        lambda url: _fetch_page(url, client, timeout),
+        max_concurrent=max_concurrent,
+        delay_seconds=effective_delay,
+    )
 
-        for outcome in outcomes:
-            if isinstance(outcome, BaseException):
-                logger.warning(f"Crawl error: {outcome}")
-                continue
-            url, html, error = outcome
-            if error or html is None:
-                logger.warning(f"Failed to fetch {url}: {error or 'Unknown'}")
-                continue
-            result.pages.append(CrawlPage(url=url, html=html))
-
-        if effective_delay > 0 and i + max_concurrent < len(filtered):
-            await asyncio.sleep(effective_delay)
+    for _url, outcome in outcomes:
+        if isinstance(outcome, Exception):
+            logger.warning(f"Crawl error: {outcome}")
+            continue
+        url, html, error = outcome
+        if error or html is None:
+            logger.warning(f"Failed to fetch {url}: {error or 'Unknown'}")
+            continue
+        result.pages.append(CrawlPage(url=url, html=html))
 
     return result
