@@ -8,6 +8,8 @@ class Settings(BaseSettings):
     PORT: int = 8001
     LOG_LEVEL: str = "INFO"
     REDIS_URL: str = "redis://localhost:6379"
+    BOT_NAME: str = "get-docs"
+    USER_AGENT: str = "get-docs/0.1.0"
 
 
 settings = Settings()
