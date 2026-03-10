@@ -1,5 +1,11 @@
 import json
 import httpx
+import pytest
+
+
+@pytest.fixture(autouse=True)
+def _no_retry_sleep(mocker):
+    mocker.patch("src.utils.http_client.asyncio.sleep", new_callable=mocker.AsyncMock)
 
 
 def mock_response(
