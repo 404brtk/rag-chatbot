@@ -149,6 +149,10 @@ def is_url_within_scope(url: str, prefix: str) -> bool:
     return url == prefix or url.startswith(prefix + "/")
 
 
+def has_md_extension(url: str) -> bool:
+    return url.rstrip("/").endswith(".md")
+
+
 def strip_git_suffix(name: str) -> str:
     if name.endswith(".git"):
         return name[:-4]

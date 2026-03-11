@@ -7,6 +7,7 @@ from src.utils.url_utils import (
     is_same_domain,
     is_asset_url,
     is_absolute_url,
+    has_md_extension,
     strip_git_suffix,
     url_path_parents,
     make_url_prefix,
@@ -152,6 +153,26 @@ class TestIsAbsoluteUrl:
 
     def test_empty(self):
         assert is_absolute_url("") is False
+
+
+class TestHasMdExtension:
+    def test_simple_md(self):
+        assert has_md_extension("https://example.com/docs/intro.md") is True
+
+    def test_trailing_slash(self):
+        assert has_md_extension("https://example.com/docs/intro.md/") is True
+
+    def test_no_extension(self):
+        assert has_md_extension("https://example.com/docs/intro") is False
+
+    def test_html_extension(self):
+        assert has_md_extension("https://example.com/docs/intro.html") is False
+
+    def test_md_in_path_segment(self):
+        assert has_md_extension("https://example.com/docs.md/intro") is False
+
+    def test_mdx_extension(self):
+        assert has_md_extension("https://example.com/docs/intro.mdx") is False
 
 
 class TestStripGitSuffix:
