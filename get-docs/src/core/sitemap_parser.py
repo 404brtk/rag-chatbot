@@ -4,7 +4,8 @@ import httpx
 
 from src.core.robots_parser import RobotsParser, fetch_robots_txt
 from src.utils.http_client import get_with_retry
-from src.utils.url_utils import url_path_parents
+from src.utils.lang_utils import ENGLISH_FOLDERS, is_lang_code
+from src.utils.url_utils import extract_path, url_path_parents
 
 
 @dataclass
@@ -123,6 +124,43 @@ async def fetch_sitemap_urls(
     return urls
 
 
+def _relative_parts(url: str, base_path: str) -> list[str]:
+    path = extract_path(url)
+    if path.startswith(base_path):
+        path = path[len(base_path) :]
+    return [p for p in path.strip("/").split("/") if p]
+
+
+def _has_lang_segment(parts: list[str]) -> str | None:
+    for p in parts:
+        if is_lang_code(p):
+            return p
+    return None
+
+
+def _filter_language_urls(urls: list[str], base_url: str) -> list[str]:
+    if not urls:
+        return urls
+
+    base_path = extract_path(base_url).rstrip("/") + "/"
+
+    all_lang_codes: set[str] = set()
+    for url in urls:
+        parts = _relative_parts(url, base_path)
+        lang = _has_lang_segment(parts)
+        if lang:
+            all_lang_codes.add(lang)
+
+    if len(all_lang_codes) < 2:
+        return urls
+
+    for enf in ENGLISH_FOLDERS:
+        if enf in all_lang_codes:
+            return [u for u in urls if enf in _relative_parts(u, base_path)]
+
+    return [u for u in urls if _has_lang_segment(_relative_parts(u, base_path)) is None]
+
+
 async def collect_sitemap_urls(
     base_url: str,
     client: httpx.AsyncClient,
@@ -149,4 +187,4 @@ async def collect_sitemap_urls(
                 all_page_urls.extend(urls)
                 break
 
-    return all_page_urls
+    return _filter_language_urls(all_page_urls, base_url)

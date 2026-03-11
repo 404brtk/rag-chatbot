@@ -4,6 +4,7 @@ from dataclasses import dataclass, field
 import httpx
 
 from src.utils.http_client import get_with_retry
+from src.utils.lang_utils import ENGLISH_FOLDERS, is_lang_code
 from src.utils.logger import logger
 from src.utils.rate_limiter import fetch_with_rate_limit
 from src.utils.url_utils import strip_git_suffix
@@ -140,12 +141,6 @@ ALLOWED_LICENSES = frozenset(
     }
 )
 
-# English subfolder names to look for, in priority order
-_ENGLISH_FOLDERS = ("en", "en-us", "en-gb")
-
-# 2-letter language codes and locale variants like pt-br, zh-cn, etc.
-_LANG_CODE_RE = re.compile(r"^[a-z]{2}(-[a-z]{2,3})?$")
-
 
 @dataclass
 class ParsedGitHubURL:
@@ -257,13 +252,13 @@ def _narrow_to_english(
         if slash_idx > 0:
             child_dirs.add(remainder[:slash_idx])
 
-    for lang in _ENGLISH_FOLDERS:
+    for lang in ENGLISH_FOLDERS:
         if lang in child_dirs:
             return f"{doc_folder}/{lang}", set()
 
     # no english subfolder. if there are multiple language-code dirs,
     # eng lives at the doc root - exclude the language subdirs.
-    lang_dirs = {d for d in child_dirs if _LANG_CODE_RE.match(d)}
+    lang_dirs = {d for d in child_dirs if is_lang_code(d)}
     if len(lang_dirs) >= 2:
         exclude = {f"{doc_folder}/{d}" for d in lang_dirs}
         return doc_folder, exclude
