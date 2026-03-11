@@ -45,6 +45,8 @@ async def _try_sitemap(
         robots=robots,
         timeout=options.timeout,
         max_depth=options.max_depth,
+        max_concurrent=options.max_concurrent,
+        delay_seconds=options.delay_seconds,
     )
     if not urls:
         return []

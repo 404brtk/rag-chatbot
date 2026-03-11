@@ -5,7 +5,13 @@ import httpx
 from src.core.robots_parser import RobotsParser, fetch_robots_txt
 from src.utils.http_client import get_with_retry
 from src.utils.lang_utils import ENGLISH_FOLDERS, is_lang_code
-from src.utils.url_utils import extract_path, url_path_parents
+from src.utils.rate_limiter import fetch_with_rate_limit
+from src.utils.url_utils import (
+    extract_path,
+    is_url_within_scope,
+    make_url_prefix,
+    url_path_parents,
+)
 
 
 @dataclass
@@ -22,7 +28,6 @@ def _strip_ns(tag: str) -> str:
 
 
 def _parse_entry(elem: ET.Element) -> SitemapEntry | None:
-    """Extract loc and lastmod from a <url> or <sitemap> element."""
     loc = None
     lastmod = None
     for child in elem:
@@ -80,16 +85,20 @@ class SitemapParser:
                         self._sub_sitemaps.append(entry)
 
     def get_urls(self) -> list[SitemapEntry]:
-        """URLs from a <urlset> sitemap."""
         return list(self._urls)
 
     def get_sub_sitemaps(self) -> list[SitemapEntry]:
-        """Sub-sitemap URLs from a <sitemapindex>."""
         return list(self._sub_sitemaps)
 
     def is_index(self) -> bool:
-        """True if this was a sitemap index (contains sub-sitemaps, not pages)."""
         return len(self._sub_sitemaps) > 0
+
+
+def _filter_by_scope(urls: list[str], base_url: str | None) -> list[str]:
+    if not base_url:
+        return urls
+    prefix = make_url_prefix(base_url)
+    return [u for u in urls if is_url_within_scope(u, prefix)]
 
 
 async def fetch_sitemap_urls(
@@ -97,6 +106,9 @@ async def fetch_sitemap_urls(
     client: httpx.AsyncClient,
     timeout: float = 10,
     max_depth: int = 3,
+    base_url: str | None = None,
+    max_concurrent: int = 5,
+    delay_seconds: float = 1.5,
 ) -> list[str]:
     if max_depth <= 0:
         return []
@@ -116,11 +128,39 @@ async def fetch_sitemap_urls(
         return []
 
     if not parser.is_index():
-        return [entry.loc for entry in parser.get_urls()]
+        return _filter_by_scope([entry.loc for entry in parser.get_urls()], base_url)
+
+    subs = parser.get_sub_sitemaps()
+    if base_url:
+        prefix = make_url_prefix(base_url)
+        subs = [s for s in subs if is_url_within_scope(s.loc, prefix)]
+
+    if not subs:
+        return []
+
+    async def _fetch_sub(sub: SitemapEntry) -> list[str]:
+        return await fetch_sitemap_urls(
+            sub.loc,
+            client,
+            timeout,
+            max_depth - 1,
+            base_url=base_url,
+            max_concurrent=max_concurrent,
+            delay_seconds=delay_seconds,
+        )
+
+    outcomes = await fetch_with_rate_limit(
+        subs,
+        _fetch_sub,
+        max_concurrent=max_concurrent,
+        delay_seconds=delay_seconds,
+    )
 
     urls: list[str] = []
-    for sub in parser.get_sub_sitemaps():
-        urls.extend(await fetch_sitemap_urls(sub.loc, client, timeout, max_depth - 1))
+    for _sub, result in outcomes:
+        if isinstance(result, Exception):
+            continue
+        urls.extend(result)
     return urls
 
 
@@ -167,6 +207,8 @@ async def collect_sitemap_urls(
     robots: RobotsParser | None = None,
     timeout: float = 15,
     max_depth: int = 3,
+    max_concurrent: int = 5,
+    delay_seconds: float = 1.5,
 ) -> list[str]:
     if robots is None:
         robots = await fetch_robots_txt(base_url, client, timeout)
@@ -177,12 +219,29 @@ async def collect_sitemap_urls(
     if sitemap_sources:
         for src in sitemap_sources:
             all_page_urls.extend(
-                await fetch_sitemap_urls(src, client, timeout, max_depth)
+                await fetch_sitemap_urls(
+                    src,
+                    client,
+                    timeout,
+                    max_depth,
+                    base_url=base_url,
+                    max_concurrent=max_concurrent,
+                    delay_seconds=delay_seconds,
+                )
             )
-    else:
+
+    if not all_page_urls:
         for parent in url_path_parents(base_url):
             candidate = parent.rstrip("/") + "/sitemap.xml"
-            urls = await fetch_sitemap_urls(candidate, client, timeout, max_depth)
+            urls = await fetch_sitemap_urls(
+                candidate,
+                client,
+                timeout,
+                max_depth,
+                base_url=base_url,
+                max_concurrent=max_concurrent,
+                delay_seconds=delay_seconds,
+            )
             if urls:
                 all_page_urls.extend(urls)
                 break

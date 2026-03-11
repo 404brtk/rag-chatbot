@@ -332,6 +332,11 @@ def _mock_response(
     )
 
 
+@pytest.fixture(autouse=True)
+def _no_rate_limit_sleep(mocker):
+    mocker.patch("src.utils.rate_limiter.asyncio.sleep", new_callable=mocker.AsyncMock)
+
+
 class TestFetchSitemapUrls:
     @pytest.mark.asyncio
     async def test_simple_urlset(self, mocker):
@@ -393,6 +398,132 @@ class TestFetchSitemapUrls:
             "https://example.com/sitemap.xml", client, max_depth=1
         )
         assert urls == []
+
+    @pytest.mark.asyncio
+    async def test_filters_sub_sitemaps_by_base_url(self, mocker):
+        index_xml = _index_xml(
+            "https://example.com/docs/sitemap-1.xml",
+            "https://example.com/blog/sitemap-1.xml",
+            "https://example.com/docs/sitemap-2.xml",
+            "https://learn.example.com/sitemap.xml",
+        )
+        docs_xml_1 = _urlset_xml("https://example.com/docs/intro")
+        docs_xml_2 = _urlset_xml("https://example.com/docs/guide")
+
+        def side_effect(url, **kw):
+            responses = {
+                "https://example.com/sitemap.xml": _mock_response(text=index_xml),
+                "https://example.com/docs/sitemap-1.xml": _mock_response(
+                    text=docs_xml_1
+                ),
+                "https://example.com/docs/sitemap-2.xml": _mock_response(
+                    text=docs_xml_2
+                ),
+            }
+            return responses.get(url, _mock_response(status_code=404))
+
+        client = mocker.AsyncMock(spec=httpx.AsyncClient)
+        client.get = mocker.AsyncMock(side_effect=side_effect)
+
+        urls = await fetch_sitemap_urls(
+            "https://example.com/sitemap.xml",
+            client,
+            base_url="https://example.com/docs/",
+        )
+        assert sorted(urls) == [
+            "https://example.com/docs/guide",
+            "https://example.com/docs/intro",
+        ]
+        called_urls = [call.args[0] for call in client.get.call_args_list]
+        assert "https://example.com/blog/sitemap-1.xml" not in called_urls
+        assert "https://learn.example.com/sitemap.xml" not in called_urls
+
+    @pytest.mark.asyncio
+    async def test_filters_final_urls_by_scope(self, mocker):
+        xml = _urlset_xml(
+            "https://example.com/docs/intro",
+            "https://example.com/blog/post",
+            "https://example.com/docs/guide",
+        )
+        client = mocker.AsyncMock(spec=httpx.AsyncClient)
+        client.get = mocker.AsyncMock(return_value=_mock_response(text=xml))
+
+        urls = await fetch_sitemap_urls(
+            "https://example.com/docs/sitemap.xml",
+            client,
+            base_url="https://example.com/docs/",
+        )
+        assert urls == [
+            "https://example.com/docs/intro",
+            "https://example.com/docs/guide",
+        ]
+
+    @pytest.mark.asyncio
+    async def test_multi_level_filtering(self, mocker):
+        root_index = _index_xml(
+            "https://example.com/docs/sitemap-index.xml",
+            "https://example.com/blog/sitemap.xml",
+        )
+        docs_index = _index_xml(
+            "https://example.com/docs/manual/sitemap.xml",
+            "https://example.com/community/sitemap.xml",
+        )
+        manual_xml = _urlset_xml("https://example.com/docs/manual/page1")
+
+        def side_effect(url, **kw):
+            responses = {
+                "https://example.com/sitemap.xml": _mock_response(text=root_index),
+                "https://example.com/docs/sitemap-index.xml": _mock_response(
+                    text=docs_index
+                ),
+                "https://example.com/docs/manual/sitemap.xml": _mock_response(
+                    text=manual_xml
+                ),
+            }
+            return responses.get(url, _mock_response(status_code=404))
+
+        client = mocker.AsyncMock(spec=httpx.AsyncClient)
+        client.get = mocker.AsyncMock(side_effect=side_effect)
+
+        urls = await fetch_sitemap_urls(
+            "https://example.com/sitemap.xml",
+            client,
+            base_url="https://example.com/docs/",
+        )
+        assert urls == ["https://example.com/docs/manual/page1"]
+        called_urls = [call.args[0] for call in client.get.call_args_list]
+        assert "https://example.com/blog/sitemap.xml" not in called_urls
+        assert "https://example.com/community/sitemap.xml" not in called_urls
+
+    @pytest.mark.asyncio
+    async def test_no_base_url_fetches_all(self, mocker):
+        index_xml = _index_xml(
+            "https://example.com/docs/sitemap.xml",
+            "https://example.com/blog/sitemap.xml",
+        )
+        docs_xml = _urlset_xml("https://example.com/docs/page")
+        blog_xml = _urlset_xml("https://example.com/blog/post")
+
+        def side_effect(url, **kw):
+            responses = {
+                "https://example.com/sitemap.xml": _mock_response(text=index_xml),
+                "https://example.com/docs/sitemap.xml": _mock_response(text=docs_xml),
+                "https://example.com/blog/sitemap.xml": _mock_response(text=blog_xml),
+            }
+            return responses.get(url, _mock_response(status_code=404))
+
+        client = mocker.AsyncMock(spec=httpx.AsyncClient)
+        client.get = mocker.AsyncMock(side_effect=side_effect)
+
+        urls = await fetch_sitemap_urls(
+            "https://example.com/sitemap.xml",
+            client,
+            base_url=None,
+        )
+        assert sorted(urls) == [
+            "https://example.com/blog/post",
+            "https://example.com/docs/page",
+        ]
 
 
 class TestCollectSitemapUrls:
@@ -467,21 +598,31 @@ class TestCollectSitemapUrls:
         assert "https://example.com/private/secret" in urls
 
     @pytest.mark.asyncio
-    async def test_passes_max_depth_to_sitemap_parser(self, mocker):
-        robots = RobotsParser("")
+    async def test_fallback_when_sitemapindex_has_zero_scope_matches(self, mocker):
+        robots = RobotsParser("Sitemap: https://example.com/sitemap.xml")
 
-        mock_fetch = mocker.patch(
-            "src.core.sitemap_parser.fetch_sitemap_urls",
-            return_value=["https://example.com/page"],
+        root_index = _index_xml(
+            "https://example.com/blog/sitemap.xml",
+            "https://example.com/community/sitemap.xml",
         )
+        fallback_xml = _urlset_xml("https://example.com/docs/intro")
+
+        def side_effect(url, **kw):
+            if url == "https://example.com/sitemap.xml":
+                return mock_response(text=root_index)
+            if url == "https://example.com/docs/sitemap.xml":
+                return mock_response(text=fallback_xml)
+            return mock_response(status_code=404)
 
         client = mocker.AsyncMock(spec=httpx.AsyncClient)
+        client.get = mocker.AsyncMock(side_effect=side_effect)
 
-        await collect_sitemap_urls(
-            "https://example.com", client, robots=robots, max_depth=5
+        urls = await collect_sitemap_urls(
+            "https://example.com/docs/",
+            client,
+            robots=robots,
         )
-
-        assert mock_fetch.call_args[0][3] == 5
+        assert urls == ["https://example.com/docs/intro"]
 
 
 class TestSitemapFallbackPathWalking:
@@ -535,7 +676,8 @@ class TestSitemapFallbackPathWalking:
 
         sitemap_xml = """<?xml version="1.0"?>
         <urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
-            <url><loc>https://example.com/docs/page1</loc></url>
+            <url><loc>https://example.com/docs/sub/page1</loc></url>
+            <url><loc>https://example.com/docs/other</loc></url>
         </urlset>"""
 
         def side_effect(url, **kw):
@@ -549,7 +691,7 @@ class TestSitemapFallbackPathWalking:
         urls = await collect_sitemap_urls(
             "https://example.com/docs/sub", client, robots=robots
         )
-        assert urls == ["https://example.com/docs/page1"]
+        assert urls == ["https://example.com/docs/sub/page1"]
         called_urls = [call.args[0] for call in client.get.call_args_list]
         assert "https://example.com/sitemap.xml" not in called_urls
 
