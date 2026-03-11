@@ -1,7 +1,6 @@
 import re
 from collections import Counter
 from src.core.github_fetcher import parse_github_url
-from src.utils.url_utils import extract_path
 
 from bs4 import BeautifulSoup
 
@@ -44,16 +43,6 @@ def discover_github_repo(html: str) -> str | None:
             continue
 
         owner, repo = parsed.owner, parsed.repo
-
-        # skip urls that go deeper into github (issues, pulls, blob, etc.)
-        # unless it's /tree/ (branch link) which still identifies the repo
-        parsed_path = extract_path(href).strip("/").split("/")
-        if len(parsed_path) > 2:
-            sub = parsed_path[2]
-            if sub not in ("tree", ""):
-                # links to issues, pulls, blob, etc. are still valid repo indicators
-                # but we deprioritize them vs direct repo links
-                pass
 
         link_text = link.get_text(strip=True).lower()
         aria_label = str(link.get("aria-label") or "").lower()
