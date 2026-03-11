@@ -1,8 +1,10 @@
-from collections.abc import Awaitable, Callable
-
 import httpx
 
-from src.core.crawler import crawl_sitemap
+from src.core.crawler import (
+    ProgressCallback,
+    fetch_and_convert_urls,
+    fetch_page_as_markdown,
+)
 from src.core.github_discovery import discover_github_repo
 from src.core.github_fetcher import (
     GitHubFetchResult,
@@ -11,226 +13,13 @@ from src.core.github_fetcher import (
 )
 from src.core.llms_txt_fetcher import LlmsTxtResult, fetch_llms_txt
 from src.core.robots_parser import RobotsParser, fetch_robots_txt
-from src.models.enums import FetchMethod, SourceMethod
+from src.core.sitemap_parser import collect_sitemap_urls
+from src.models.enums import SourceMethod
 from src.models.requests import GetDocsOptions, GetDocsRequest
 from src.models.responses import DocPage, EthicsContext, GetDocsResult
-from src.parsing.html_extractor import extract_content, extract_title
-from src.parsing.html_to_md import html_to_markdown
 from src.parsing.mdx_strip import strip_mdx
 from src.utils.http_client import get_with_retry
 from src.utils.logger import logger
-from src.utils.rate_limiter import fetch_with_rate_limit
-from src.utils.url_utils import extract_path, has_md_extension
-
-ProgressCallback = Callable[[int, int | None], Awaitable[None]]
-
-
-def _html_to_doc_page(url: str, html: str, source_method: SourceMethod) -> DocPage:
-    title = extract_title(html)
-    element = extract_content(html)
-    markdown = html_to_markdown(element) if element else ""
-    return DocPage(url=url, title=title, content=markdown, source_method=source_method)
-
-
-async def _try_content_negotiation(
-    url: str,
-    client: httpx.AsyncClient,
-    timeout: float,
-) -> str | None:
-    """try fetching with Accept: text/markdown header."""
-    try:
-        resp = await get_with_retry(
-            client,
-            url,
-            headers={"Accept": "text/markdown"},
-            follow_redirects=True,
-            timeout=timeout,
-        )
-        if resp.status_code != 200:
-            return None
-        content_type = resp.headers.get("content-type", "")
-        if "text/markdown" in content_type:
-            text = resp.text.strip()
-            return text if text else None
-    except httpx.HTTPError:
-        pass
-    return None
-
-
-async def _try_md_url(
-    url: str,
-    client: httpx.AsyncClient,
-    timeout: float,
-) -> str | None:
-    """try fetching a .md variant of the URL."""
-    md_url = url if has_md_extension(url) else url.rstrip("/") + ".md"
-    try:
-        resp = await get_with_retry(
-            client, md_url, follow_redirects=True, timeout=timeout
-        )
-        if resp.status_code != 200:
-            return None
-        content_type = resp.headers.get("content-type", "")
-        if "text/markdown" in content_type or "text/plain" in content_type:
-            text = resp.text.strip()
-            if text and not text.lstrip().startswith("<!"):
-                return text
-    except httpx.HTTPError:
-        pass
-    return None
-
-
-async def _fetch_html(
-    url: str,
-    client: httpx.AsyncClient,
-    timeout: float,
-    source_method: SourceMethod,
-) -> DocPage | None:
-    try:
-        resp = await get_with_retry(client, url, follow_redirects=True, timeout=timeout)
-        if resp.status_code != 200:
-            return None
-        content_type = resp.headers.get("content-type", "")
-        if "text/html" not in content_type:
-            return None
-        page = _html_to_doc_page(url, resp.text, source_method)
-        return page if page.content else None
-    except httpx.HTTPError:
-        return None
-
-
-async def _probe_and_fetch(
-    url: str,
-    client: httpx.AsyncClient,
-    timeout: float,
-    source_method: SourceMethod,
-) -> tuple[DocPage | None, FetchMethod]:
-    if not has_md_extension(url):
-        md = await _try_content_negotiation(url, client, timeout)
-        if md:
-            return DocPage(
-                url=url, title="", content=md, source_method=source_method
-            ), FetchMethod.CONTENT_NEGOTIATION
-
-    md = await _try_md_url(url, client, timeout)
-    if md:
-        return DocPage(
-            url=url, title="", content=md, source_method=source_method
-        ), FetchMethod.MD_URL
-
-    return await _fetch_html(url, client, timeout, source_method), FetchMethod.HTML
-
-
-async def _fetch_page_as_markdown(
-    url: str,
-    client: httpx.AsyncClient,
-    timeout: float,
-    source_method: SourceMethod,
-    preferred_method: FetchMethod | None = None,
-) -> DocPage | None:
-    if preferred_method is None:
-        page, _ = await _probe_and_fetch(url, client, timeout, source_method)
-        return page
-
-    if has_md_extension(url):
-        md = await _try_md_url(url, client, timeout)
-        if md:
-            return DocPage(url=url, title="", content=md, source_method=source_method)
-        return await _fetch_html(url, client, timeout, source_method)
-
-    if preferred_method == FetchMethod.CONTENT_NEGOTIATION:
-        md = await _try_content_negotiation(url, client, timeout)
-        if md:
-            return DocPage(url=url, title="", content=md, source_method=source_method)
-
-    elif preferred_method == FetchMethod.MD_URL:
-        md = await _try_md_url(url, client, timeout)
-        if md:
-            return DocPage(url=url, title="", content=md, source_method=source_method)
-
-    elif preferred_method == FetchMethod.HTML:
-        return await _fetch_html(url, client, timeout, source_method)
-
-    return await _fetch_html(url, client, timeout, source_method)
-
-
-def _filter_urls_by_robots(
-    urls: list[str],
-    robots: RobotsParser,
-) -> tuple[list[str], int, int]:
-    allowed: list[str] = []
-    robots_filtered = 0
-    content_signal_filtered = 0
-
-    for url in urls:
-        path = extract_path(url)
-        if not robots.is_allowed(path):
-            robots_filtered += 1
-            continue
-        if robots.is_ai_input_allowed(path) is False:
-            content_signal_filtered += 1
-            continue
-        allowed.append(url)
-
-    return allowed, robots_filtered, content_signal_filtered
-
-
-async def _fetch_and_convert_urls(
-    urls: list[str],
-    client: httpx.AsyncClient,
-    robots: RobotsParser,
-    options: GetDocsOptions,
-    source_method: SourceMethod,
-    ethics: EthicsContext,
-    on_progress: ProgressCallback | None = None,
-) -> list[DocPage]:
-    filtered, robots_count, signal_count = _filter_urls_by_robots(urls, robots)
-    ethics.pages_filtered_by_robots += robots_count
-    ethics.pages_filtered_by_content_signal += signal_count
-
-    filtered = filtered[: options.max_web_pages]
-
-    if not filtered:
-        return []
-
-    pages: list[DocPage] = []
-    effective_delay = max(options.delay_seconds, robots.get_crawl_delay() or 0)
-
-    first_page, method = await _probe_and_fetch(
-        filtered[0], client, options.timeout, source_method
-    )
-    if first_page:
-        pages.append(first_page)
-
-    if on_progress:
-        await on_progress(len(pages), len(filtered))
-
-    remaining = filtered[1:]
-    if remaining:
-        outcomes = await fetch_with_rate_limit(
-            remaining,
-            lambda url: _fetch_page_as_markdown(
-                url,
-                client,
-                options.timeout,
-                source_method,
-                preferred_method=method,
-            ),
-            max_concurrent=options.max_concurrent,
-            delay_seconds=effective_delay,
-            on_progress=on_progress,
-        )
-
-        for url, outcome in outcomes:
-            if isinstance(outcome, Exception):
-                logger.warning(f"Failed to fetch {url}: {outcome}")
-                continue
-            if outcome is None:
-                logger.warning(f"Failed to fetch or extract content: {url}")
-                continue
-            pages.append(outcome)
-
-    return pages
 
 
 def _llms_full_to_doc_page(llms_result: LlmsTxtResult) -> DocPage:
@@ -247,35 +36,28 @@ async def _try_sitemap(
     client: httpx.AsyncClient,
     robots: RobotsParser,
     options: GetDocsOptions,
+    ethics: EthicsContext,
     on_progress: ProgressCallback | None = None,
 ) -> list[DocPage]:
-    """Sitemap crawl fallback: fetch pages, convert to markdown.
-
-    TODO: it's worth considering using _fetch_page_as_markdown instead of plain HTML fetch
-    to benefit from content negotiation and .md URL probing.
-    This would however triple the requests
-    unlike llms.txt, it's not so certain that it will actually work
-    thus, it's better not to put additional strain on the servers
-    """
-    crawl_result = await crawl_sitemap(
+    urls = await collect_sitemap_urls(
         base_url,
         client,
         robots=robots,
-        max_pages=options.max_web_pages,
-        max_concurrent=options.max_concurrent,
-        delay_seconds=options.delay_seconds,
+        timeout=options.timeout,
+        max_depth=options.max_depth,
     )
-
-    pages: list[DocPage] = []
-    for cp in crawl_result.pages:
-        page = _html_to_doc_page(cp.url, cp.html, SourceMethod.SITEMAP_CRAWL)
-        if page.content:
-            pages.append(page)
-
-    if on_progress:
-        await on_progress(len(pages), len(pages))
-
-    return pages
+    if not urls:
+        return []
+    return await fetch_and_convert_urls(
+        urls,
+        client,
+        robots,
+        options,
+        SourceMethod.SITEMAP_CRAWL,
+        ethics,
+        base_url=base_url,
+        on_progress=on_progress,
+    )
 
 
 async def _fetch_github(
@@ -374,14 +156,14 @@ async def get_docs(
                     return result
 
                 urls = [link.url for link in llms_result.links if not link.optional]
-                pages = await _fetch_and_convert_urls(
+                pages = await fetch_and_convert_urls(
                     urls,
                     client,
                     robots,
                     options,
                     SourceMethod.LLMS_TXT,
                     ethics,
-                    on_progress,
+                    on_progress=on_progress,
                 )
                 if pages:
                     result.pages.extend(pages)
@@ -431,6 +213,7 @@ async def get_docs(
                 client,
                 robots,
                 options,
+                ethics,
                 on_progress,
             )
             if pages:
@@ -441,7 +224,7 @@ async def get_docs(
 
     # 4. single-page fallback
     if not result.pages and base_url:
-        page = await _fetch_page_as_markdown(
+        page = await fetch_page_as_markdown(
             base_url, client, options.timeout, SourceMethod.SINGLE_PAGE
         )
         if page:

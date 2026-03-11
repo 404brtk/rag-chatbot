@@ -2,7 +2,9 @@ from dataclasses import dataclass
 import xml.etree.ElementTree as ET
 import httpx
 
+from src.core.robots_parser import RobotsParser, fetch_robots_txt
 from src.utils.http_client import get_with_retry
+from src.utils.url_utils import url_path_parents
 
 
 @dataclass
@@ -119,3 +121,32 @@ async def fetch_sitemap_urls(
     for sub in parser.get_sub_sitemaps():
         urls.extend(await fetch_sitemap_urls(sub.loc, client, timeout, max_depth - 1))
     return urls
+
+
+async def collect_sitemap_urls(
+    base_url: str,
+    client: httpx.AsyncClient,
+    robots: RobotsParser | None = None,
+    timeout: float = 15,
+    max_depth: int = 3,
+) -> list[str]:
+    if robots is None:
+        robots = await fetch_robots_txt(base_url, client, timeout)
+
+    sitemap_sources = robots.get_sitemaps()
+    all_page_urls: list[str] = []
+
+    if sitemap_sources:
+        for src in sitemap_sources:
+            all_page_urls.extend(
+                await fetch_sitemap_urls(src, client, timeout, max_depth)
+            )
+    else:
+        for parent in url_path_parents(base_url):
+            candidate = parent.rstrip("/") + "/sitemap.xml"
+            urls = await fetch_sitemap_urls(candidate, client, timeout, max_depth)
+            if urls:
+                all_page_urls.extend(urls)
+                break
+
+    return all_page_urls
