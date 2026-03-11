@@ -11,7 +11,7 @@ from src.core.github_fetcher import (
 )
 from src.core.llms_txt_fetcher import LlmsTxtResult, fetch_llms_txt
 from src.core.robots_parser import RobotsParser, fetch_robots_txt
-from src.models.enums import SourceMethod
+from src.models.enums import FetchMethod, SourceMethod
 from src.models.requests import GetDocsOptions, GetDocsRequest
 from src.models.responses import DocPage, EthicsContext, GetDocsResult
 from src.parsing.html_extractor import extract_content, extract_title
@@ -20,7 +20,7 @@ from src.parsing.mdx_strip import strip_mdx
 from src.utils.http_client import get_with_retry
 from src.utils.logger import logger
 from src.utils.rate_limiter import fetch_with_rate_limit
-from src.utils.url_utils import extract_path
+from src.utils.url_utils import extract_path, has_md_extension
 
 ProgressCallback = Callable[[int, int | None], Awaitable[None]]
 
@@ -63,7 +63,7 @@ async def _try_md_url(
     timeout: float,
 ) -> str | None:
     """try fetching a .md variant of the URL."""
-    md_url = url if url.rstrip("/").endswith(".md") else url.rstrip("/") + ".md"
+    md_url = url if has_md_extension(url) else url.rstrip("/") + ".md"
     try:
         resp = await get_with_retry(
             client, md_url, follow_redirects=True, timeout=timeout
@@ -80,28 +80,12 @@ async def _try_md_url(
     return None
 
 
-async def _fetch_page_as_markdown(
+async def _fetch_html(
     url: str,
     client: httpx.AsyncClient,
     timeout: float,
     source_method: SourceMethod,
 ) -> DocPage | None:
-    # first check if the url already ends with .md
-    is_md_url = url.rstrip("/").endswith(".md")
-
-    # 1. Content negotiation (skip for .md urls - it is meant for
-    # HTML pages that can serve markdown as an alternative format)
-    if not is_md_url:
-        md = await _try_content_negotiation(url, client, timeout)
-        if md:
-            return DocPage(url=url, title="", content=md, source_method=source_method)
-
-    # 2. .md URL (fetches as-is if url already ends in .md)
-    md = await _try_md_url(url, client, timeout)
-    if md:
-        return DocPage(url=url, title="", content=md, source_method=source_method)
-
-    # 3. HTML fallback
     try:
         resp = await get_with_retry(client, url, follow_redirects=True, timeout=timeout)
         if resp.status_code != 200:
@@ -113,6 +97,61 @@ async def _fetch_page_as_markdown(
         return page if page.content else None
     except httpx.HTTPError:
         return None
+
+
+async def _probe_and_fetch(
+    url: str,
+    client: httpx.AsyncClient,
+    timeout: float,
+    source_method: SourceMethod,
+) -> tuple[DocPage | None, FetchMethod]:
+    if not has_md_extension(url):
+        md = await _try_content_negotiation(url, client, timeout)
+        if md:
+            return DocPage(
+                url=url, title="", content=md, source_method=source_method
+            ), FetchMethod.CONTENT_NEGOTIATION
+
+    md = await _try_md_url(url, client, timeout)
+    if md:
+        return DocPage(
+            url=url, title="", content=md, source_method=source_method
+        ), FetchMethod.MD_URL
+
+    return await _fetch_html(url, client, timeout, source_method), FetchMethod.HTML
+
+
+async def _fetch_page_as_markdown(
+    url: str,
+    client: httpx.AsyncClient,
+    timeout: float,
+    source_method: SourceMethod,
+    preferred_method: FetchMethod | None = None,
+) -> DocPage | None:
+    if preferred_method is None:
+        page, _ = await _probe_and_fetch(url, client, timeout, source_method)
+        return page
+
+    if has_md_extension(url):
+        md = await _try_md_url(url, client, timeout)
+        if md:
+            return DocPage(url=url, title="", content=md, source_method=source_method)
+        return await _fetch_html(url, client, timeout, source_method)
+
+    if preferred_method == FetchMethod.CONTENT_NEGOTIATION:
+        md = await _try_content_negotiation(url, client, timeout)
+        if md:
+            return DocPage(url=url, title="", content=md, source_method=source_method)
+
+    elif preferred_method == FetchMethod.MD_URL:
+        md = await _try_md_url(url, client, timeout)
+        if md:
+            return DocPage(url=url, title="", content=md, source_method=source_method)
+
+    elif preferred_method == FetchMethod.HTML:
+        return await _fetch_html(url, client, timeout, source_method)
+
+    return await _fetch_html(url, client, timeout, source_method)
 
 
 def _filter_urls_by_robots(
@@ -151,27 +190,45 @@ async def _fetch_and_convert_urls(
 
     filtered = filtered[: options.max_web_pages]
 
+    if not filtered:
+        return []
+
     pages: list[DocPage] = []
     effective_delay = max(options.delay_seconds, robots.get_crawl_delay() or 0)
 
-    outcomes = await fetch_with_rate_limit(
-        filtered,
-        lambda url: _fetch_page_as_markdown(
-            url, client, options.timeout, source_method
-        ),
-        max_concurrent=options.max_concurrent,
-        delay_seconds=effective_delay,
-        on_progress=on_progress,
+    first_page, method = await _probe_and_fetch(
+        filtered[0], client, options.timeout, source_method
     )
+    if first_page:
+        pages.append(first_page)
 
-    for url, outcome in outcomes:
-        if isinstance(outcome, Exception):
-            logger.warning(f"Failed to fetch {url}: {outcome}")
-            continue
-        if outcome is None:
-            logger.warning(f"Failed to fetch or extract content: {url}")
-            continue
-        pages.append(outcome)
+    if on_progress:
+        await on_progress(len(pages), len(filtered))
+
+    remaining = filtered[1:]
+    if remaining:
+        outcomes = await fetch_with_rate_limit(
+            remaining,
+            lambda url: _fetch_page_as_markdown(
+                url,
+                client,
+                options.timeout,
+                source_method,
+                preferred_method=method,
+            ),
+            max_concurrent=options.max_concurrent,
+            delay_seconds=effective_delay,
+            on_progress=on_progress,
+        )
+
+        for url, outcome in outcomes:
+            if isinstance(outcome, Exception):
+                logger.warning(f"Failed to fetch {url}: {outcome}")
+                continue
+            if outcome is None:
+                logger.warning(f"Failed to fetch or extract content: {url}")
+                continue
+            pages.append(outcome)
 
     return pages
 

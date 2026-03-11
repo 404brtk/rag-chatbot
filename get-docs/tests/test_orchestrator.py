@@ -7,10 +7,11 @@ from src.core.llms_txt_fetcher import LlmsTxtLink, LlmsTxtResult
 from src.core.orchestrator import (
     _fetch_page_as_markdown,
     _html_to_doc_page,
+    _probe_and_fetch,
     get_docs,
 )
 from src.core.robots_parser import RobotsParser
-from src.models.enums import SourceMethod
+from src.models.enums import FetchMethod, SourceMethod
 from src.models.requests import GetDocsOptions, GetDocsRequest
 from tests.conftest import html_page, mock_response
 
@@ -216,6 +217,201 @@ class TestFetchPageAsMarkdown:
         )
         assert page is not None
         assert call_count == 3
+
+
+class TestProbeAndFetch:
+    @pytest.mark.asyncio
+    async def test_returns_content_negotiation_when_markdown_header(self, mocker):
+        client = mocker.AsyncMock(spec=httpx.AsyncClient)
+        client.get = mocker.AsyncMock(
+            return_value=mock_response(
+                text="# Hello",
+                content_type="text/markdown; charset=utf-8",
+            )
+        )
+
+        page, method = await _probe_and_fetch(
+            "https://example.com/docs/intro", client, 10.0, SourceMethod.LLMS_TXT
+        )
+        assert page is not None
+        assert page.content == "# Hello"
+        assert method == FetchMethod.CONTENT_NEGOTIATION
+
+    @pytest.mark.asyncio
+    async def test_returns_md_url_when_negotiation_fails(self, mocker):
+        call_count = 0
+
+        async def mock_get(url, **kwargs):
+            nonlocal call_count
+            call_count += 1
+            if call_count == 1:
+                return mock_response(status_code=404)
+            return mock_response(text="# MD Content", content_type="text/plain")
+
+        client = mocker.AsyncMock(spec=httpx.AsyncClient)
+        client.get = mocker.AsyncMock(side_effect=mock_get)
+
+        page, method = await _probe_and_fetch(
+            "https://example.com/docs/intro", client, 10.0, SourceMethod.LLMS_TXT
+        )
+        assert page is not None
+        assert page.content == "# MD Content"
+        assert method == FetchMethod.MD_URL
+        assert call_count == 2
+
+    @pytest.mark.asyncio
+    async def test_returns_html_when_all_md_methods_fail(self, mocker):
+        call_count = 0
+
+        async def mock_get(url, **kwargs):
+            nonlocal call_count
+            call_count += 1
+            if call_count <= 2:
+                return mock_response(status_code=404)
+            return mock_response(
+                text=html_page("Fallback", "HTML content"),
+                content_type="text/html; charset=utf-8",
+            )
+
+        client = mocker.AsyncMock(spec=httpx.AsyncClient)
+        client.get = mocker.AsyncMock(side_effect=mock_get)
+
+        page, method = await _probe_and_fetch(
+            "https://example.com/docs/intro", client, 10.0, SourceMethod.LLMS_TXT
+        )
+        assert page is not None
+        assert "HTML content" in page.content
+        assert method == FetchMethod.HTML
+        assert call_count == 3
+
+    @pytest.mark.asyncio
+    async def test_skips_negotiation_for_md_urls(self, mocker):
+        client = mocker.AsyncMock(spec=httpx.AsyncClient)
+        client.get = mocker.AsyncMock(
+            return_value=mock_response(text="# Direct MD", content_type="text/plain")
+        )
+
+        page, method = await _probe_and_fetch(
+            "https://example.com/docs/intro.md", client, 10.0, SourceMethod.LLMS_TXT
+        )
+        assert page is not None
+        assert method == FetchMethod.MD_URL
+        assert client.get.call_count == 1
+
+
+class TestFetchPagePreferredMethod:
+    @pytest.mark.asyncio
+    async def test_preferred_html_makes_single_request(self, mocker):
+        client = mocker.AsyncMock(spec=httpx.AsyncClient)
+        client.get = mocker.AsyncMock(
+            return_value=mock_response(
+                text=html_page("Page", "Content"),
+                content_type="text/html; charset=utf-8",
+            )
+        )
+
+        page = await _fetch_page_as_markdown(
+            "https://example.com/docs/intro",
+            client,
+            10.0,
+            SourceMethod.LLMS_TXT,
+            preferred_method=FetchMethod.HTML,
+        )
+        assert page is not None
+        assert "Content" in page.content
+        assert client.get.call_count == 1
+
+    @pytest.mark.asyncio
+    async def test_preferred_md_url_tries_md_then_html_fallback(self, mocker):
+        call_count = 0
+
+        async def mock_get(url, **kwargs):
+            nonlocal call_count
+            call_count += 1
+            if url.endswith(".md"):
+                return mock_response(status_code=404)
+            return mock_response(
+                text=html_page("Page", "Fallback"),
+                content_type="text/html; charset=utf-8",
+            )
+
+        client = mocker.AsyncMock(spec=httpx.AsyncClient)
+        client.get = mocker.AsyncMock(side_effect=mock_get)
+
+        page = await _fetch_page_as_markdown(
+            "https://example.com/docs/intro",
+            client,
+            10.0,
+            SourceMethod.LLMS_TXT,
+            preferred_method=FetchMethod.MD_URL,
+        )
+        assert page is not None
+        assert "Fallback" in page.content
+        assert call_count == 2
+
+    @pytest.mark.asyncio
+    async def test_preferred_md_url_succeeds(self, mocker):
+        client = mocker.AsyncMock(spec=httpx.AsyncClient)
+        client.get = mocker.AsyncMock(
+            return_value=mock_response(text="# MD Content", content_type="text/plain")
+        )
+
+        page = await _fetch_page_as_markdown(
+            "https://example.com/docs/intro",
+            client,
+            10.0,
+            SourceMethod.LLMS_TXT,
+            preferred_method=FetchMethod.MD_URL,
+        )
+        assert page is not None
+        assert page.content == "# MD Content"
+        assert client.get.call_count == 1
+
+    @pytest.mark.asyncio
+    async def test_preferred_content_negotiation_falls_back_to_html(self, mocker):
+        call_count = 0
+
+        async def mock_get(url, **kwargs):
+            nonlocal call_count
+            call_count += 1
+            if call_count == 1:
+                return mock_response(status_code=404)
+            return mock_response(
+                text=html_page("Page", "HTML fallback"),
+                content_type="text/html; charset=utf-8",
+            )
+
+        client = mocker.AsyncMock(spec=httpx.AsyncClient)
+        client.get = mocker.AsyncMock(side_effect=mock_get)
+
+        page = await _fetch_page_as_markdown(
+            "https://example.com/docs/intro",
+            client,
+            10.0,
+            SourceMethod.LLMS_TXT,
+            preferred_method=FetchMethod.CONTENT_NEGOTIATION,
+        )
+        assert page is not None
+        assert "HTML fallback" in page.content
+        assert call_count == 2
+
+    @pytest.mark.asyncio
+    async def test_md_url_fetched_directly_regardless_of_preferred(self, mocker):
+        client = mocker.AsyncMock(spec=httpx.AsyncClient)
+        client.get = mocker.AsyncMock(
+            return_value=mock_response(text="# Direct MD", content_type="text/plain")
+        )
+
+        page = await _fetch_page_as_markdown(
+            "https://example.com/docs/intro.md",
+            client,
+            10.0,
+            SourceMethod.LLMS_TXT,
+            preferred_method=FetchMethod.CONTENT_NEGOTIATION,
+        )
+        assert page is not None
+        assert page.content == "# Direct MD"
+        assert client.get.call_count == 1
 
 
 class TestGetDocs:
