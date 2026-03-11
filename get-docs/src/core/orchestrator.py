@@ -194,7 +194,6 @@ async def get_docs(
             )
             if gh_result:
                 ethics.license_spdx_id = gh_result.license_spdx_id
-                ethics.license_allowed = gh_result.license_spdx_id is not None
             if github_pages:
                 result.pages.extend(github_pages)
                 result.source_method = SourceMethod.GITHUB_RAW

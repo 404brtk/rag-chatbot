@@ -200,7 +200,6 @@ class TestGetDocs:
         assert len(result.pages) == 1
         assert result.pages[0].content == "# GH Docs"
         assert result.ethics.license_spdx_id == "MIT"
-        assert result.ethics.license_allowed is True
         mock_sitemap.assert_not_called()
 
     @pytest.mark.asyncio
@@ -317,7 +316,6 @@ class TestGetDocs:
         assert len(result.pages) == 1
         assert result.pages[0].content == "# GH Only"
         assert result.ethics.license_spdx_id == "MIT"
-        assert result.ethics.license_allowed is True
 
     @pytest.mark.asyncio
     async def test_github_auto_discovery(self, mocker):
