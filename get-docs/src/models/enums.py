@@ -15,6 +15,12 @@ class SourceMethod(StrEnum):
     SINGLE_PAGE = "single_page"
 
 
+class FetchMethod(StrEnum):
+    CONTENT_NEGOTIATION = "content_negotiation"
+    MD_URL = "md_url"
+    HTML = "html"
+
+
 class ContentSignal(StrEnum):
     """Check https://contentsignals.org/"""
 
