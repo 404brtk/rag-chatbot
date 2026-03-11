@@ -1,4 +1,5 @@
 from dataclasses import dataclass
+import re
 import xml.etree.ElementTree as ET
 import httpx
 
@@ -101,6 +102,65 @@ def _filter_by_scope(urls: list[str], base_url: str | None) -> list[str]:
     return [u for u in urls if is_url_within_scope(u, prefix)]
 
 
+_VERSION_RE = re.compile(r"^v?\d+(?:\.\d+)*(?:\.x)?$")
+_LATEST_KEYWORDS = frozenset({"current", "latest", "next", "stable", "main"})
+
+
+def _parse_version(segment: str) -> tuple[int, ...] | None:
+    if segment in _LATEST_KEYWORDS:
+        return (9999,)
+    if segment.startswith("version-"):
+        segment = segment[8:]
+    m = re.match(r"^v?(\d+(?:\.\d+)*)(?:\.x)?$", segment)
+    if not m:
+        return None
+    return tuple(int(p) for p in m.group(1).split("."))
+
+
+def _dedupe_versioned_sitemaps(subs: list[SitemapEntry]) -> list[SitemapEntry]:
+    groups: dict[str, list[SitemapEntry]] = {}
+    ungrouped: list[SitemapEntry] = []
+
+    for entry in subs:
+        path = extract_path(entry.loc)
+        parts = [p for p in path.strip("/").split("/") if p]
+
+        version_idx = None
+        for i, part in enumerate(parts):
+            if part in _LATEST_KEYWORDS or _VERSION_RE.match(part):
+                version_idx = i
+                break
+
+        if version_idx is None:
+            ungrouped.append(entry)
+            continue
+
+        product_key = "/".join(parts[:version_idx])
+        groups.setdefault(product_key, []).append(entry)
+
+    result = list(ungrouped)
+    for entries in groups.values():
+        latest = [
+            e for e in entries if any(f"/{kw}/" in e.loc for kw in _LATEST_KEYWORDS)
+        ]
+        if latest:
+            result.append(latest[0])
+            continue
+
+        best = entries[0]
+        best_ver = (0,)
+        for e in entries:
+            parts = extract_path(e.loc).strip("/").split("/")
+            for p in parts:
+                ver = _parse_version(p)
+                if ver and ver > best_ver:
+                    best_ver = ver
+                    best = e
+        result.append(best)
+
+    return result
+
+
 async def fetch_sitemap_urls(
     sitemap_url: str,
     client: httpx.AsyncClient,
@@ -134,6 +194,8 @@ async def fetch_sitemap_urls(
     if base_url:
         prefix = make_url_prefix(base_url)
         subs = [s for s in subs if is_url_within_scope(s.loc, prefix)]
+
+    subs = _dedupe_versioned_sitemaps(subs)
 
     if not subs:
         return []

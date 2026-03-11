@@ -3,10 +3,12 @@ import pytest
 
 from src.core.robots_parser import RobotsParser
 from src.core.sitemap_parser import (
+    SitemapEntry,
     SitemapParser,
     collect_sitemap_urls,
     fetch_sitemap_urls,
 )
+from src.core.sitemap_parser import _dedupe_versioned_sitemaps
 from tests.conftest import mock_response
 
 
@@ -524,6 +526,87 @@ class TestFetchSitemapUrls:
             "https://example.com/blog/post",
             "https://example.com/docs/page",
         ]
+
+
+class TestDedupeVersionedSitemaps:
+    def test_prefers_current_over_versions(self):
+        subs = [
+            SitemapEntry(loc="https://example.com/docs/kubernetes/current/sitemap.xml"),
+            SitemapEntry(loc="https://example.com/docs/kubernetes/v1.6/sitemap.xml"),
+            SitemapEntry(loc="https://example.com/docs/kubernetes/v1.5/sitemap.xml"),
+            SitemapEntry(loc="https://example.com/docs/kubernetes/v1.4/sitemap.xml"),
+        ]
+        result = _dedupe_versioned_sitemaps(subs)
+        assert len(result) == 1
+        assert (
+            result[0].loc == "https://example.com/docs/kubernetes/current/sitemap.xml"
+        )
+
+    def test_picks_highest_version_when_no_current(self):
+        subs = [
+            SitemapEntry(loc="https://example.com/docs/ef/v8.1/sitemap.xml"),
+            SitemapEntry(loc="https://example.com/docs/ef/v9.0/sitemap.xml"),
+            SitemapEntry(loc="https://example.com/docs/ef/v8.4/sitemap.xml"),
+        ]
+        result = _dedupe_versioned_sitemaps(subs)
+        assert len(result) == 1
+        assert result[0].loc == "https://example.com/docs/ef/v9.0/sitemap.xml"
+
+    def test_keeps_unversioned_sitemaps(self):
+        subs = [
+            SitemapEntry(loc="https://example.com/docs/compass/sitemap.xml"),
+            SitemapEntry(loc="https://example.com/docs/shell/sitemap.xml"),
+        ]
+        result = _dedupe_versioned_sitemaps(subs)
+        assert len(result) == 2
+
+    def test_mixed_versioned_and_unversioned(self):
+        subs = [
+            SitemapEntry(loc="https://example.com/docs/kubernetes/current/sitemap.xml"),
+            SitemapEntry(loc="https://example.com/docs/kubernetes/v1.6/sitemap.xml"),
+            SitemapEntry(loc="https://example.com/docs/compass/sitemap.xml"),
+            SitemapEntry(loc="https://example.com/docs/ef/v9.0/sitemap.xml"),
+            SitemapEntry(loc="https://example.com/docs/ef/v8.4/sitemap.xml"),
+        ]
+        result = _dedupe_versioned_sitemaps(subs)
+        locs = {e.loc for e in result}
+        assert len(result) == 3
+        assert "https://example.com/docs/kubernetes/current/sitemap.xml" in locs
+        assert "https://example.com/docs/compass/sitemap.xml" in locs
+        assert "https://example.com/docs/ef/v9.0/sitemap.xml" in locs
+
+    def test_handles_vx_suffix(self):
+        subs = [
+            SitemapEntry(loc="https://example.com/docs/driver/current/sitemap.xml"),
+            SitemapEntry(loc="https://example.com/docs/driver/v6.x/sitemap.xml"),
+        ]
+        result = _dedupe_versioned_sitemaps(subs)
+        assert len(result) == 1
+        assert result[0].loc == "https://example.com/docs/driver/current/sitemap.xml"
+
+    def test_multiple_products_each_deduped(self):
+        subs = [
+            SitemapEntry(loc="https://example.com/docs/a/current/sitemap.xml"),
+            SitemapEntry(loc="https://example.com/docs/a/v1.0/sitemap.xml"),
+            SitemapEntry(loc="https://example.com/docs/b/v3.0/sitemap.xml"),
+            SitemapEntry(loc="https://example.com/docs/b/v2.0/sitemap.xml"),
+        ]
+        result = _dedupe_versioned_sitemaps(subs)
+        locs = {e.loc for e in result}
+        assert len(result) == 2
+        assert "https://example.com/docs/a/current/sitemap.xml" in locs
+        assert "https://example.com/docs/b/v3.0/sitemap.xml" in locs
+
+    def test_keyword_substring_not_false_positive(self):
+        subs = [
+            SitemapEntry(loc="https://example.com/docs/main-concepts/v2.0/sitemap.xml"),
+            SitemapEntry(loc="https://example.com/docs/main-concepts/v1.0/sitemap.xml"),
+        ]
+        result = _dedupe_versioned_sitemaps(subs)
+        assert len(result) == 1
+        assert (
+            result[0].loc == "https://example.com/docs/main-concepts/v2.0/sitemap.xml"
+        )
 
 
 class TestCollectSitemapUrls:
