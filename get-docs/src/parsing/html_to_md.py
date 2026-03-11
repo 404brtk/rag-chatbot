@@ -1,54 +1,48 @@
-import io
 import re
 
 from bs4 import Tag
-from markitdown import MarkItDown, StreamInfo
+from markdownify import MarkdownConverter
 
-_markitdown = MarkItDown()
-_STREAM_INFO = StreamInfo(mimetype="text/html", extension=".html", charset="utf-8")
+from src.parsing.mdx_strip import strip_mdx
 
-_LANG_MARKER = "__CODE_LANG:"
 _LANG_PREFIXES = ("language-", "lang-", "highlight-")
 
 
-def _detect_code_language(code_tag: Tag) -> str:
-    for source in (code_tag, code_tag.parent):
-        if not source or not isinstance(source, Tag):
-            continue
-        classes = source.get("class", [])
+def _detect_code_language(el: Tag) -> str | None:
+    sources = [el]
+    if el.name == "pre":
+        code = el.find("code")
+        if code and isinstance(code, Tag):
+            sources.insert(0, code)
+    elif el.name == "code" and el.parent and isinstance(el.parent, Tag):
+        sources.append(el.parent)
+
+    for source in sources:
+        classes = source.get("class") or []
         for cls in classes:
             cls_lower = cls.lower()
             for prefix in _LANG_PREFIXES:
                 if cls_lower.startswith(prefix):
                     return cls_lower[len(prefix) :]
-    return ""
+    return None
 
 
-def _inject_language_markers(element: Tag) -> None:
-    for pre in element.find_all("pre"):
-        code = pre.find("code")
-        if not code:
-            continue
-        lang = _detect_code_language(code)
-        if lang:
-            existing = code.string or ""
-            code.string = f"{_LANG_MARKER}{lang}__\n{existing}"
+class _DocsMarkdownConverter(MarkdownConverter):
+    def convert_pre(self, el: Tag, text: str, parent_tags: set) -> str:
+        result = super().convert_pre(el, text, parent_tags)
+        result = re.sub(r"```(\w*)\n\n", r"```\1\n", result)
+        result = re.sub(r"\n\n```", "\n```", result)
+        return result
 
 
-def _resolve_language_markers(md: str) -> str:
-    return re.sub(
-        rf"```\n{re.escape(_LANG_MARKER)}(\w+)__\n",
-        r"```\1\n",
-        md,
-    )
+_converter = _DocsMarkdownConverter(
+    heading_style="ATX",
+    code_language_callback=_detect_code_language,
+)
 
 
 def html_to_markdown(element: Tag) -> str:
-    _inject_language_markers(element)
-    html_bytes = str(element).encode("utf-8")
-    stream = io.BytesIO(html_bytes)
-    result = _markitdown.convert_stream(stream, stream_info=_STREAM_INFO)
-    md = result.markdown or ""
-    md = _resolve_language_markers(md)
+    md = _converter.convert_soup(element)
+    md = strip_mdx(md)
     md = re.sub(r"\n{3,}", "\n\n", md)
     return md.strip()

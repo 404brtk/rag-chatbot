@@ -1,6 +1,7 @@
 from bs4 import BeautifulSoup
 
 from src.parsing.html_to_md import html_to_markdown
+from src.parsing.mdx_strip import strip_mdx
 
 
 def parse(html: str):
@@ -296,3 +297,86 @@ class TestComplexDocument:
         assert "> " in result
         assert "| Method | Path |" in result
         assert "| GET | /items |" in result
+
+
+class TestStripLeakedImports:
+    def test_strips_import_lines(self):
+        md = (
+            'import { Tabs } from "@astrojs/starlight/components"\n\n# Title\n\nContent'
+        )
+        result = strip_mdx(md)
+        assert "import" not in result
+        assert "# Title" in result
+        assert "Content" in result
+
+    def test_strips_export_lines(self):
+        md = "export const foo = 42\n\n# Title"
+        result = strip_mdx(md)
+        assert "export" not in result
+        assert "# Title" in result
+
+    def test_preserves_import_inside_code_block(self):
+        md = "```python\nimport os\nimport sys\n```\n\nSome text"
+        result = strip_mdx(md)
+        assert "import os" in result
+        assert "import sys" in result
+        assert "Some text" in result
+
+    def test_preserves_import_inside_fenced_block_with_lang(self):
+        md = "```javascript\nimport React from 'react'\nexport default App\n```"
+        result = strip_mdx(md)
+        assert "import React from 'react'" in result
+        assert "export default App" in result
+
+    def test_strips_multiple_imports(self):
+        md = (
+            'import { Tabs, TabItem } from "@astrojs/starlight/components"\n'
+            'import config from "../../../../config.mjs"\n'
+            "\n"
+            "# Documentation\n"
+            "\n"
+            "Real content here."
+        )
+        result = strip_mdx(md)
+        assert "import" not in result
+        assert "# Documentation" in result
+        assert "Real content here." in result
+
+    def test_no_imports_unchanged(self):
+        md = "# Title\n\nJust regular content.\n\nMore text."
+        result = strip_mdx(md)
+        assert result == md
+
+    def test_mixed_code_block_and_bare_import(self):
+        md = (
+            'import { Tabs } from "astro"\n'
+            "\n"
+            "# Title\n"
+            "\n"
+            "```python\n"
+            "import os\n"
+            "```\n"
+            "\n"
+            "More text."
+        )
+        result = strip_mdx(md)
+        assert "import { Tabs }" not in result
+        assert "import os" in result
+        assert "# Title" in result
+        assert "More text." in result
+
+    def test_html_with_astro_imports(self):
+        html = (
+            "<body>"
+            "<article>"
+            '<p>import { Tabs, TabItem } from "@astrojs/starlight/components"</p>'
+            '<p>import config from "../../../../config.mjs"</p>'
+            "<h1>Documentation</h1>"
+            "<p>Real content here.</p>"
+            "</article>"
+            "</body>"
+        )
+        result = html_to_markdown(parse(html))
+        assert "import" not in result
+        assert "Documentation" in result
+        assert "Real content here." in result

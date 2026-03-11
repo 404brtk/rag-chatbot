@@ -3,13 +3,6 @@ import re
 
 from bs4 import BeautifulSoup, NavigableString, Tag
 
-from src.utils.url_utils import (
-    is_absolute_url,
-    is_asset_url,
-    is_same_domain,
-    normalize_url,
-    resolve_relative,
-)
 
 # tags that are unlikely to contain documentation content
 NOISE_TAGS = frozenset(
@@ -194,7 +187,7 @@ def _flatten_tabbed_content(container: Tag) -> None:
 def _flatten_definition_lists(container: Tag) -> None:
     """Flatten <dl> tags into regular paragraph and block siblings.
 
-    This prevents Markitdown from misinterpreting nested code blocks.
+    This prevents markdownify from misinterpreting nested code blocks.
     """
     for dl in container.find_all("dl"):
         for child in list(dl.children):
@@ -258,73 +251,24 @@ def _clean_code_blocks(container: Tag) -> None:
     """extract clean, plain-text code from <pre> blocks."""
     for pre in container.find_all("pre"):
         code = pre.find("code")
+        target = code if code else pre
         code_classes = code.get("class", []) if code else []
 
-        raw = pre.decode_contents()
-        # strip styling/highlighting tags and <code> wrappers, keep text
-        cleaned = _STYLING_TAG_RE.sub("", raw)
-        cleaned = re.sub(r"</?code[^>]*>", "", cleaned, flags=re.IGNORECASE)
-        # unescape twice because sometimes the text is double-wrapped in html codes
+        for br in target.find_all("br"):
+            br.replace_with("\n")
+        cleaned = target.get_text()
         cleaned = html.unescape(cleaned)
         cleaned = _STYLING_TAG_RE.sub("", cleaned)
         cleaned = html.unescape(cleaned)
+        cleaned = _STYLING_TAG_RE.sub("", cleaned)
+        cleaned = re.sub(r"\n{2,}", "\n", cleaned).strip("\n")
 
-        # rebuild the block but keep the language class
         pre.clear()
         new_code = Tag(name="code")
         if code_classes:
             new_code["class"] = code_classes
         new_code.append(NavigableString(cleaned))
         pre.append(new_code)
-
-
-def extract_hreflang_urls(html: str, base_url: str) -> set[str]:
-    """Extract alternate-language URLs declared via ``<link rel="alternate" hreflang="...">`` tags"""
-    soup = BeautifulSoup(html, "html.parser")
-    base_normalized = normalize_url(base_url)
-    urls: set[str] = set()
-
-    for link in soup.find_all("link", attrs={"rel": "alternate", "hreflang": True}):
-        href = link.get("href", "").strip()
-        if not href:
-            continue
-
-        resolved = resolve_relative(base_url, href)
-        if not is_absolute_url(resolved):
-            continue
-
-        normalized = normalize_url(resolved)
-        if normalized != base_normalized:
-            urls.add(normalized)
-
-    return urls
-
-
-def extract_links(html: str, base_url: str) -> list[str]:
-    soup = BeautifulSoup(html, "html.parser")
-    seen: set[str] = set()
-    result: list[str] = []
-
-    for a in soup.find_all("a", href=True):
-        href = a["href"].strip()
-        if not href or href.startswith("#"):
-            continue
-
-        url = resolve_relative(base_url, href)
-
-        if not is_absolute_url(url):
-            continue
-        if is_asset_url(url):
-            continue
-        if not is_same_domain(url, base_url):
-            continue
-
-        normalized = normalize_url(url)
-        if normalized not in seen:
-            seen.add(normalized)
-            result.append(normalized)
-
-    return result
 
 
 def extract_title(html: str) -> str:
