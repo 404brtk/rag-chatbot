@@ -155,8 +155,8 @@ class ParsedGitHubURL:
 class GitHubFetchResult:
     owner: str
     repo: str
-    branch: str
-    doc_folder: str | None
+    branch: str | None = None
+    doc_folder: str | None = None
     license_spdx_id: str | None = None
     pages: list[DocPage] = field(default_factory=list)
     rate_limited: bool = False
@@ -434,8 +434,6 @@ async def fetch_github_docs(
         return GitHubFetchResult(
             owner=owner,
             repo=repo,
-            branch=parsed.branch or meta.default_branch or "",
-            doc_folder=None,
             license_spdx_id=meta.spdx_id,
         )
 
