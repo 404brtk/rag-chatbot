@@ -3,7 +3,10 @@ import pytest
 
 from src.core.github_fetcher import (
     ALLOWED_LICENSES,
-    GitHubFile,
+    DOC_EXTENSIONS,
+    DOC_FOLDERS,
+    SKIP_FILES,
+    SKIP_DIRS,
     GitHubFetchResult,
     ParsedGitHubURL,
     parse_github_url,
@@ -12,11 +15,8 @@ from src.core.github_fetcher import (
     _is_doc_file,
     _find_doc_folder,
     _narrow_to_english,
-    DOC_EXTENSIONS,
-    DOC_FOLDERS,
-    SKIP_FILES,
-    SKIP_DIRS,
 )
+from src.models.enums import SourceMethod
 from tests.conftest import mock_response
 
 
@@ -293,7 +293,6 @@ class TestNarrowToEnglish:
         assert excludes == set()
 
     def test_root_files_in_doc_folder_ignored(self):
-        # root files directly under docs/ have no child dir — shouldn't crash
         paths = [
             "docs/index.md",
             "docs/en/tutorial.md",
@@ -374,8 +373,6 @@ class TestNarrowToEnglish:
 
 
 class TestIsDocFile:
-    # --- with doc folder ---
-
     def test_md_in_doc_folder(self):
         assert _is_doc_file("docs/guide.md", "docs") is True
 
@@ -399,8 +396,6 @@ class TestIsDocFile:
 
     def test_doc_folder_case_insensitive(self):
         assert _is_doc_file("Docs/guide.md", "Docs") is True
-
-    # --- without doc folder ---
 
     def test_root_md_accepted(self):
         assert _is_doc_file("README.md", None) is True
@@ -469,28 +464,16 @@ class TestIsDocFile:
         assert _is_doc_file("docs/index.md", "docs/en") is False
 
     def test_file_in_unknown_subdir_without_doc_folder(self):
-        # no doc folder, file in a non-recognized subdir
         assert _is_doc_file("src/notes.md", None) is False
 
 
 class TestGitHubFetchResult:
-    def test_default_empty_files(self):
+    def test_default_empty_pages(self):
         result = GitHubFetchResult(
             owner="owner", repo="repo", branch="main", doc_folder="docs"
         )
-        assert result.files == []
-
-    def test_files_stored(self):
-        result = GitHubFetchResult(
-            owner="owner",
-            repo="repo",
-            branch="main",
-            doc_folder="docs",
-            files=[GitHubFile(path="docs/intro.md", content="# Intro")],
-        )
-        assert len(result.files) == 1
-        assert result.files[0].path == "docs/intro.md"
-        assert result.files[0].content == "# Intro"
+        assert result.pages == []
+        assert result.rate_limited is False
 
     def test_doc_folder_can_be_none(self):
         result = GitHubFetchResult(
@@ -590,13 +573,58 @@ class TestFetchRepoMeta:
         meta = await _fetch_repo_meta(client, "owner", "repo", 10)
         assert meta.default_branch == "dev"
 
+    @pytest.mark.asyncio
+    async def test_token_passed_in_headers(self, mocker):
+        client = mocker.AsyncMock(spec=httpx.AsyncClient)
+        client.get = mocker.AsyncMock(
+            return_value=mock_response(
+                json_data={
+                    "license": {"spdx_id": "MIT"},
+                    "default_branch": "main",
+                }
+            )
+        )
+        await _fetch_repo_meta(client, "owner", "repo", 10, token="ghp_test123")
+        call_kwargs = client.get.call_args[1]
+        assert call_kwargs["headers"]["Authorization"] == "Bearer ghp_test123"
+
+
+def _make_github_client(mocker, tree_paths, file_contents=None):
+    client = mocker.AsyncMock(spec=httpx.AsyncClient)
+
+    async def mock_get(url, **kwargs):
+        if "/repos/" in url and "/git/trees/" not in url and "/contents/" not in url:
+            return mock_response(
+                json_data={
+                    "license": {"spdx_id": "MIT"},
+                    "default_branch": "main",
+                }
+            )
+        if "/git/trees/" in url:
+            return mock_response(
+                json_data={"tree": [{"path": p, "type": "blob"} for p in tree_paths]}
+            )
+        if "/contents/" in url:
+            path_part = url.split("/contents/")[1].split("?")[0]
+            if file_contents and path_part in file_contents:
+                return mock_response(text=file_contents[path_part])
+            return mock_response(text="# Content")
+        return mock_response(status_code=404)
+
+    client.get = mocker.AsyncMock(side_effect=mock_get)
+    return client
+
 
 class TestFetchGithubDocsLicenseGate:
     def _make_client(self, mocker, license_spdx_id):
         client = mocker.AsyncMock(spec=httpx.AsyncClient)
 
         async def mock_get(url, **kwargs):
-            if "/repos/" in url and "/git/trees/" not in url:
+            if (
+                "/repos/" in url
+                and "/git/trees/" not in url
+                and "/contents/" not in url
+            ):
                 license_obj = {"spdx_id": license_spdx_id} if license_spdx_id else None
                 return mock_response(
                     json_data={"license": license_obj, "default_branch": "main"}
@@ -609,7 +637,7 @@ class TestFetchGithubDocsLicenseGate:
                         ]
                     }
                 )
-            if "raw.githubusercontent.com" in url:
+            if "/contents/" in url:
                 return mock_response(text="# Intro\nHello")
             return mock_response(status_code=404)
 
@@ -633,7 +661,7 @@ class TestFetchGithubDocsLicenseGate:
         client = self._make_client(mocker, "MIT")
         result = await fetch_github_docs("https://github.com/owner/repo", client)
         assert result is not None
-        assert len(result.files) == 1
+        assert len(result.pages) == 1
 
     @pytest.mark.asyncio
     async def test_copyleft_license_allows_fetch(self, mocker):
@@ -649,34 +677,10 @@ class TestFetchGithubDocsLicenseGate:
 
 
 class TestFetchGithubDocsRootOnly:
-    def _make_client(self, mocker, tree_paths):
-        client = mocker.AsyncMock(spec=httpx.AsyncClient)
-
-        async def mock_get(url, **kwargs):
-            if "/repos/" in url and "/git/trees/" not in url:
-                return mock_response(
-                    json_data={
-                        "license": {"spdx_id": "MIT"},
-                        "default_branch": "main",
-                    }
-                )
-            if "/git/trees/" in url:
-                return mock_response(
-                    json_data={
-                        "tree": [{"path": p, "type": "blob"} for p in tree_paths]
-                    }
-                )
-            if "raw.githubusercontent.com" in url:
-                return mock_response(text="# Content")
-            return mock_response(status_code=404)
-
-        client.get = mocker.AsyncMock(side_effect=mock_get)
-        return client
-
     @pytest.mark.asyncio
     async def test_root_only_returns_none_when_no_doc_folder(self, mocker):
         tree = ["README.md", "AGENTS.md", "src/main.py"]
-        client = self._make_client(mocker, tree)
+        client = _make_github_client(mocker, tree)
         result = await fetch_github_docs(
             "https://github.com/owner/repo", client, root_only=True
         )
@@ -685,12 +689,12 @@ class TestFetchGithubDocsRootOnly:
     @pytest.mark.asyncio
     async def test_root_only_returns_docs_when_doc_folder_exists(self, mocker):
         tree = ["docs/intro.md", "docs/guide.md", "README.md", "src/main.py"]
-        client = self._make_client(mocker, tree)
+        client = _make_github_client(mocker, tree)
         result = await fetch_github_docs(
             "https://github.com/owner/repo", client, root_only=True
         )
         assert result is not None
-        assert len(result.files) == 2
+        assert len(result.pages) == 2
 
     @pytest.mark.asyncio
     async def test_root_only_skips_nested_doc_folder(self, mocker):
@@ -699,11 +703,161 @@ class TestFetchGithubDocsRootOnly:
             "README.md",
             "src/main.py",
         ]
-        client = self._make_client(mocker, tree)
+        client = _make_github_client(mocker, tree)
         result = await fetch_github_docs(
             "https://github.com/owner/repo", client, root_only=True
         )
         assert result is None
+
+
+class TestFetchGithubDocsPages:
+    @pytest.mark.asyncio
+    async def test_pages_have_correct_url_and_source_method(self, mocker):
+        tree = ["docs/intro.md"]
+        client = _make_github_client(mocker, tree, {"docs/intro.md": "# Intro"})
+        result = await fetch_github_docs("https://github.com/owner/repo", client)
+        assert result is not None
+        assert len(result.pages) == 1
+        page = result.pages[0]
+        assert page.url == "https://github.com/owner/repo/blob/main/docs/intro.md"
+        assert page.title == "docs/intro.md"
+        assert page.content == "# Intro"
+        assert page.source_method == SourceMethod.GITHUB
+
+    @pytest.mark.asyncio
+    async def test_mdx_files_are_stripped(self, mocker):
+        mdx_content = "import Foo from './foo'\n\n# Hello\n\n<Foo />\n\nWorld"
+        tree = ["docs/guide.mdx"]
+        client = _make_github_client(mocker, tree, {"docs/guide.mdx": mdx_content})
+        result = await fetch_github_docs("https://github.com/owner/repo", client)
+        assert result is not None
+        page = result.pages[0]
+        assert "import Foo" not in page.content
+        assert "# Hello" in page.content
+
+    @pytest.mark.asyncio
+    async def test_token_passed_to_all_api_calls(self, mocker):
+        tree = ["docs/intro.md"]
+        client = _make_github_client(mocker, tree)
+        await fetch_github_docs(
+            "https://github.com/owner/repo",
+            client,
+            github_token="ghp_test_token",
+        )
+        for call in client.get.call_args_list:
+            headers = call[1].get("headers", {})
+            assert headers.get("Authorization") == "Bearer ghp_test_token"
+
+
+class TestFetchGithubDocsRateLimitHandling:
+    @pytest.mark.asyncio
+    async def test_429_aborts_batch_with_partial_results(self, mocker):
+        tree = ["docs/a.md", "docs/b.md", "docs/c.md"]
+        client = mocker.AsyncMock(spec=httpx.AsyncClient)
+        call_count = 0
+
+        async def mock_get(url, **kwargs):
+            nonlocal call_count
+            if (
+                "/repos/" in url
+                and "/git/trees/" not in url
+                and "/contents/" not in url
+            ):
+                return mock_response(
+                    json_data={
+                        "license": {"spdx_id": "MIT"},
+                        "default_branch": "main",
+                    }
+                )
+            if "/git/trees/" in url:
+                return mock_response(
+                    json_data={"tree": [{"path": p, "type": "blob"} for p in tree]}
+                )
+            if "/contents/" in url:
+                call_count += 1
+                if call_count == 1:
+                    return mock_response(text="# First file")
+                return mock_response(status_code=429)
+            return mock_response(status_code=404)
+
+        client.get = mocker.AsyncMock(side_effect=mock_get)
+        result = await fetch_github_docs("https://github.com/owner/repo", client)
+        assert result is not None
+        assert result.rate_limited is True
+        assert len(result.pages) >= 1
+
+    @pytest.mark.asyncio
+    async def test_403_with_ratelimit_header_triggers_abort(self, mocker):
+        tree = ["docs/a.md", "docs/b.md"]
+        client = mocker.AsyncMock(spec=httpx.AsyncClient)
+
+        async def mock_get(url, **kwargs):
+            if (
+                "/repos/" in url
+                and "/git/trees/" not in url
+                and "/contents/" not in url
+            ):
+                return mock_response(
+                    json_data={
+                        "license": {"spdx_id": "MIT"},
+                        "default_branch": "main",
+                    }
+                )
+            if "/git/trees/" in url:
+                return mock_response(
+                    json_data={"tree": [{"path": p, "type": "blob"} for p in tree]}
+                )
+            if "/contents/" in url:
+                return httpx.Response(
+                    status_code=403,
+                    text="rate limit exceeded",
+                    headers={
+                        "content-type": "application/json",
+                        "x-ratelimit-remaining": "0",
+                    },
+                    request=httpx.Request("GET", url),
+                )
+            return mock_response(status_code=404)
+
+        client.get = mocker.AsyncMock(side_effect=mock_get)
+        result = await fetch_github_docs("https://github.com/owner/repo", client)
+        assert result is not None
+        assert result.rate_limited is True
+        assert len(result.pages) == 0
+
+    @pytest.mark.asyncio
+    async def test_generic_403_does_not_trigger_abort(self, mocker):
+        tree = ["docs/a.md", "docs/b.md"]
+        client = mocker.AsyncMock(spec=httpx.AsyncClient)
+
+        async def mock_get(url, **kwargs):
+            if (
+                "/repos/" in url
+                and "/git/trees/" not in url
+                and "/contents/" not in url
+            ):
+                return mock_response(
+                    json_data={
+                        "license": {"spdx_id": "MIT"},
+                        "default_branch": "main",
+                    }
+                )
+            if "/git/trees/" in url:
+                return mock_response(
+                    json_data={"tree": [{"path": p, "type": "blob"} for p in tree]}
+                )
+            if "/contents/" in url:
+                if "a.md" in url:
+                    return mock_response(status_code=403)
+                return mock_response(text="# B file")
+            return mock_response(status_code=404)
+
+        client.get = mocker.AsyncMock(side_effect=mock_get)
+        result = await fetch_github_docs("https://github.com/owner/repo", client)
+        assert result is not None
+        assert result.rate_limited is False
+        assert len(result.pages) == 1
+        assert result.pages[0].content == "# B file"
 
 
 class TestAllowedLicenses:

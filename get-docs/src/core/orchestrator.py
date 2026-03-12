@@ -1,5 +1,6 @@
 import httpx
 
+from src.config import settings
 from src.core.crawler import (
     ProgressCallback,
     fetch_and_convert_urls,
@@ -17,7 +18,6 @@ from src.core.sitemap_parser import collect_sitemap_urls
 from src.models.enums import SourceMethod
 from src.models.requests import GetDocsOptions, GetDocsRequest
 from src.models.responses import DocPage, EthicsContext, GetDocsResult
-from src.parsing.mdx_strip import strip_mdx
 from src.utils.http_client import get_with_retry
 from src.utils.logger import logger
 
@@ -60,41 +60,6 @@ async def _try_sitemap(
         base_url=base_url,
         on_progress=on_progress,
     )
-
-
-async def _fetch_github(
-    repo_url: str,
-    client: httpx.AsyncClient,
-    max_files: int = 300,
-    delay_seconds: float = 1.5,
-    doc_folder_override: str | None = None,
-    root_only: bool = False,
-) -> tuple[list[DocPage], str, GitHubFetchResult | None]:
-    gh_result = await fetch_github_docs(
-        repo_url,
-        client,
-        max_files=max_files,
-        delay_seconds=delay_seconds,
-        doc_folder_override=doc_folder_override,
-        root_only=root_only,
-    )
-    if gh_result is None or not gh_result.files:
-        return [], repo_url, gh_result
-
-    pages = [
-        DocPage(
-            url=(
-                f"https://github.com/{gh_result.owner}/{gh_result.repo}"
-                f"/blob/{gh_result.branch}/{f.path}"
-            ),
-            title=f.path,
-            # TODO: add rst-to-markdown conversion for .rst files
-            content=strip_mdx(f.content) if f.path.endswith(".mdx") else f.content,
-            source_method=SourceMethod.GITHUB_RAW,
-        )
-        for f in gh_result.files
-    ]
-    return pages, repo_url, gh_result
 
 
 async def _resolve_github_repo(
@@ -186,22 +151,24 @@ async def get_docs(
         root_only = has_url and doc_folder_override is None
 
         try:
-            github_pages, repo_url, gh_result = await _fetch_github(
+            gh_result: GitHubFetchResult | None = await fetch_github_docs(
                 repo_url,
                 client,
                 max_files=options.max_github_files,
+                max_concurrent=options.max_concurrent,
                 delay_seconds=options.delay_seconds,
                 doc_folder_override=doc_folder_override,
                 root_only=root_only,
+                github_token=settings.GITHUB_TOKEN,
             )
             if gh_result:
                 ethics.license_spdx_id = gh_result.license_spdx_id
-            if github_pages:
-                result.pages.extend(github_pages)
-                result.source_method = SourceMethod.GITHUB_RAW
+            if gh_result and gh_result.pages:
+                result.pages.extend(gh_result.pages)
+                result.source_method = SourceMethod.GITHUB
                 result.github_repo = repo_url
                 if on_progress:
-                    await on_progress(len(github_pages), len(github_pages))
+                    await on_progress(len(gh_result.pages), len(gh_result.pages))
                 return result
         except Exception:
             logger.exception("GitHub fetch failed")

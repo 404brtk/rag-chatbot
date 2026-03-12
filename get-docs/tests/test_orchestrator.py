@@ -1,12 +1,13 @@
 import httpx
 import pytest
 
-from src.core.github_fetcher import GitHubFetchResult, GitHubFile
+from src.core.github_fetcher import GitHubFetchResult
 from src.core.llms_txt_fetcher import LlmsTxtLink, LlmsTxtResult
 from src.core.orchestrator import get_docs
 from src.core.robots_parser import RobotsParser
 from src.models.enums import SourceMethod
 from src.models.requests import GetDocsOptions, GetDocsRequest
+from src.models.responses import DocPage
 from tests.conftest import html_page, mock_response
 
 
@@ -19,6 +20,15 @@ def _request(url="https://docs.example.com", github_repo=None):
             max_concurrent=5,
             delay_seconds=0,
         ),
+    )
+
+
+def _gh_page(owner, repo, branch, path, content):
+    return DocPage(
+        url=f"https://github.com/{owner}/{repo}/blob/{branch}/{path}",
+        title=path,
+        content=content,
+        source_method=SourceMethod.GITHUB,
     )
 
 
@@ -143,7 +153,9 @@ class TestGetDocs:
                 repo="repo",
                 branch="main",
                 doc_folder="docs",
-                files=[GitHubFile(path="docs/intro.md", content="# Fallback")],
+                pages=[
+                    _gh_page("owner", "repo", "main", "docs/intro.md", "# Fallback")
+                ],
             ),
         )
 
@@ -156,7 +168,7 @@ class TestGetDocs:
 
         result = await get_docs(_request(), client)
 
-        assert result.source_method == SourceMethod.GITHUB_RAW
+        assert result.source_method == SourceMethod.GITHUB
         assert len(result.pages) == 1
 
     @pytest.mark.asyncio
@@ -180,7 +192,7 @@ class TestGetDocs:
                 repo="repo",
                 branch="main",
                 doc_folder="docs",
-                files=[GitHubFile(path="docs/intro.md", content="# GH Docs")],
+                pages=[_gh_page("owner", "repo", "main", "docs/intro.md", "# GH Docs")],
                 license_spdx_id="MIT",
             ),
         )
@@ -195,7 +207,7 @@ class TestGetDocs:
 
         result = await get_docs(_request(), client)
 
-        assert result.source_method == SourceMethod.GITHUB_RAW
+        assert result.source_method == SourceMethod.GITHUB
         assert result.github_repo == "https://github.com/owner/repo"
         assert len(result.pages) == 1
         assert result.pages[0].content == "# GH Docs"
@@ -223,7 +235,7 @@ class TestGetDocs:
                 repo="repo",
                 branch="main",
                 doc_folder="docs",
-                files=[],
+                pages=[],
             ),
         )
         mocker.patch(
@@ -300,7 +312,7 @@ class TestGetDocs:
                 repo="repo",
                 branch="main",
                 doc_folder="docs",
-                files=[GitHubFile(path="docs/intro.md", content="# GH Only")],
+                pages=[_gh_page("owner", "repo", "main", "docs/intro.md", "# GH Only")],
                 license_spdx_id="MIT",
             ),
         )
@@ -312,7 +324,7 @@ class TestGetDocs:
             client,
         )
 
-        assert result.source_method == SourceMethod.GITHUB_RAW
+        assert result.source_method == SourceMethod.GITHUB
         assert len(result.pages) == 1
         assert result.pages[0].content == "# GH Only"
         assert result.ethics.license_spdx_id == "MIT"
@@ -338,7 +350,11 @@ class TestGetDocs:
                 repo="repo",
                 branch="main",
                 doc_folder="docs",
-                files=[GitHubFile(path="docs/readme.md", content="# Discovered")],
+                pages=[
+                    _gh_page(
+                        "discovered", "repo", "main", "docs/readme.md", "# Discovered"
+                    )
+                ],
             ),
         )
 
@@ -351,7 +367,7 @@ class TestGetDocs:
 
         result = await get_docs(_request(), client)
 
-        assert result.source_method == SourceMethod.GITHUB_RAW
+        assert result.source_method == SourceMethod.GITHUB
         assert result.github_repo == "https://github.com/discovered/repo"
         assert len(result.pages) == 1
 
@@ -466,7 +482,7 @@ class TestGetDocs:
                 repo="repo",
                 branch="main",
                 doc_folder="docs",
-                files=[GitHubFile(path="docs/intro.md", content="# Intro")],
+                pages=[_gh_page("owner", "repo", "main", "docs/intro.md", "# Intro")],
             ),
         )
 
@@ -476,7 +492,7 @@ class TestGetDocs:
             _request(github_repo="https://github.com/owner/repo"), client
         )
 
-        assert result.source_method == SourceMethod.GITHUB_RAW
+        assert result.source_method == SourceMethod.GITHUB
         mock_discover.assert_not_called()
 
     @pytest.mark.asyncio
@@ -496,7 +512,7 @@ class TestGetDocs:
                 repo="repo",
                 branch="main",
                 doc_folder="docs",
-                files=[GitHubFile(path="docs/intro.md", content="# Docs")],
+                pages=[_gh_page("owner", "repo", "main", "docs/intro.md", "# Docs")],
             ),
         )
 
@@ -524,7 +540,11 @@ class TestGetDocs:
                 repo="repo",
                 branch="main",
                 doc_folder="packages/docs",
-                files=[GitHubFile(path="packages/docs/intro.md", content="# Docs")],
+                pages=[
+                    _gh_page(
+                        "owner", "repo", "main", "packages/docs/intro.md", "# Docs"
+                    )
+                ],
             ),
         )
 
@@ -557,7 +577,11 @@ class TestGetDocs:
                 repo="repo",
                 branch="main",
                 doc_folder="packages/docs",
-                files=[GitHubFile(path="packages/docs/intro.md", content="# Docs")],
+                pages=[
+                    _gh_page(
+                        "owner", "repo", "main", "packages/docs/intro.md", "# Docs"
+                    )
+                ],
             ),
         )
 

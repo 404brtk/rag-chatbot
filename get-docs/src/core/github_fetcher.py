@@ -3,6 +3,9 @@ from dataclasses import dataclass, field
 
 import httpx
 
+from src.models.enums import SourceMethod
+from src.models.responses import DocPage
+from src.parsing.mdx_strip import strip_mdx
 from src.utils.http_client import get_with_retry
 from src.utils.lang_utils import ENGLISH_FOLDERS, is_lang_code
 from src.utils.logger import logger
@@ -97,8 +100,6 @@ SKIP_DIRS = frozenset(
 )
 
 _API_BASE = "https://api.github.com"
-_RAW_BASE = "https://raw.githubusercontent.com"
-_GITHUB_BATCH_SIZE = 20
 
 
 # SPDX license ids we consider safe to fetch docs from
@@ -151,19 +152,14 @@ class ParsedGitHubURL:
 
 
 @dataclass
-class GitHubFile:
-    path: str
-    content: str
-
-
-@dataclass
 class GitHubFetchResult:
     owner: str
     repo: str
     branch: str
     doc_folder: str | None
     license_spdx_id: str | None = None
-    files: list[GitHubFile] = field(default_factory=list)
+    pages: list[DocPage] = field(default_factory=list)
+    rate_limited: bool = False
 
 
 def parse_github_url(url: str) -> ParsedGitHubURL | None:
@@ -290,6 +286,17 @@ def _is_doc_file(path: str, doc_folder: str | None) -> bool:
     return False
 
 
+def _github_headers(token: str | None) -> dict[str, str]:
+    headers = {"Accept": "application/vnd.github+json"}
+    if token:
+        headers["Authorization"] = f"Bearer {token}"
+    return headers
+
+
+class _RateLimitExhausted(Exception):
+    """Raised when GitHub API rate limit is hit"""
+
+
 @dataclass
 class _RepoMeta:
     spdx_id: str | None
@@ -301,12 +308,16 @@ async def _fetch_repo_meta(
     owner: str,
     repo: str,
     timeout: float,
+    token: str | None = None,
 ) -> _RepoMeta:
     url = f"{_API_BASE}/repos/{owner}/{repo}"
-    headers = {"Accept": "application/vnd.github+json"}
     try:
         resp = await get_with_retry(
-            client, url, headers=headers, follow_redirects=True, timeout=timeout
+            client,
+            url,
+            headers=_github_headers(token),
+            follow_redirects=True,
+            timeout=timeout,
         )
         if resp.status_code != 200:
             return _RepoMeta(spdx_id=None, default_branch=None)
@@ -325,13 +336,17 @@ async def _fetch_tree(
     repo: str,
     branch: str,
     timeout: float,
+    token: str | None = None,
 ) -> list[dict] | None:
     """Fetch the recursive tree for a given branch."""
     url = f"{_API_BASE}/repos/{owner}/{repo}/git/trees/{branch}?recursive=1"
-    headers = {"Accept": "application/vnd.github+json"}
 
     resp = await get_with_retry(
-        client, url, headers=headers, follow_redirects=True, timeout=timeout
+        client,
+        url,
+        headers=_github_headers(token),
+        follow_redirects=True,
+        timeout=timeout,
     )
     if resp.status_code != 200:
         return None
@@ -340,17 +355,34 @@ async def _fetch_tree(
     return data.get("tree", [])
 
 
-async def _fetch_raw_file(
+async def _fetch_file_content(
     client: httpx.AsyncClient,
     owner: str,
     repo: str,
     branch: str,
     path: str,
     timeout: float,
+    token: str | None = None,
 ) -> str | None:
-    """Fetch a single file's raw content from raw.githubusercontent.com."""
-    url = f"{_RAW_BASE}/{owner}/{repo}/{branch}/{path}"
-    resp = await get_with_retry(client, url, follow_redirects=True, timeout=timeout)
+    url = f"{_API_BASE}/repos/{owner}/{repo}/contents/{path}?ref={branch}"
+    headers = _github_headers(token)
+    headers["Accept"] = "application/vnd.github.raw+json"
+
+    resp = await get_with_retry(
+        client,
+        url,
+        headers=headers,
+        follow_redirects=True,
+        timeout=timeout,
+        max_retries=0,
+    )
+
+    if resp.status_code == 429:
+        raise _RateLimitExhausted()
+
+    if resp.status_code == 403 and resp.headers.get("x-ratelimit-remaining") == "0":
+        raise _RateLimitExhausted()
+
     if resp.status_code != 200:
         return None
     return resp.text
@@ -361,16 +393,18 @@ async def fetch_github_docs(
     client: httpx.AsyncClient,
     timeout: float = 15,
     max_files: int = 300,
+    max_concurrent: int = 5,
     delay_seconds: float = 1.5,
     doc_folder_override: str | None = None,
     root_only: bool = False,
+    github_token: str | None = None,
 ) -> GitHubFetchResult | None:
     """Fetch documentation files from a GitHub repository.
 
     1. Parses owner/repo from the URL.
     2. Fetches the full file tree via GitHub API.
     3. Identifies the docs folder and filters for doc files.
-    4. Fetches each doc file from raw.githubusercontent.com.
+    4. Fetches each doc file via the GitHub API.
     """
     parsed = parse_github_url(repo_url)
     if not parsed:
@@ -378,8 +412,16 @@ async def fetch_github_docs(
 
     owner, repo = parsed.owner, parsed.repo
 
+    if not github_token and max_files > 50:
+        logger.warning(
+            "Fetching up to %d GitHub files without a token. "
+            "Unauthenticated rate limit is 60 requests/hour. "
+            "Set the GETDOCS_GITHUB_TOKEN environment variable to increase this limit.",
+            max_files,
+        )
+
     # check license before fetching any content
-    meta = await _fetch_repo_meta(client, owner, repo, timeout)
+    meta = await _fetch_repo_meta(client, owner, repo, timeout, token=github_token)
     if (
         not meta.spdx_id
         or meta.spdx_id == "NOASSERTION"
@@ -395,7 +437,9 @@ async def fetch_github_docs(
         return None
 
     try:
-        tree_entries = await _fetch_tree(client, owner, repo, resolved_branch, timeout)
+        tree_entries = await _fetch_tree(
+            client, owner, repo, resolved_branch, timeout, token=github_token
+        )
     except httpx.HTTPError:
         return None
 
@@ -441,17 +485,46 @@ async def fetch_github_docs(
         license_spdx_id=meta.spdx_id,
     )
 
+    # abort remaining fetches early when the rate limit is hit.
+    # the flag is shared across all concurrent tasks via the closure.
+    rate_limit_hit = False
+
+    async def _fetch_one(path: str) -> str | None:
+        nonlocal rate_limit_hit
+        if rate_limit_hit:
+            return None
+        try:
+            return await _fetch_file_content(
+                client, owner, repo, resolved_branch, path, timeout, token=github_token
+            )
+        except _RateLimitExhausted:
+            rate_limit_hit = True
+            return None
+
     outcomes = await fetch_with_rate_limit(
         doc_paths,
-        lambda path: _fetch_raw_file(
-            client, owner, repo, resolved_branch, path, timeout
-        ),
-        max_concurrent=_GITHUB_BATCH_SIZE,
+        _fetch_one,
+        max_concurrent=max_concurrent,
         delay_seconds=delay_seconds,
     )
 
+    if rate_limit_hit:
+        result.rate_limited = True
+        logger.warning("GitHub rate limit hit - returning partial results")
+
     for path, content in outcomes:
-        if isinstance(content, str):
-            result.files.append(GitHubFile(path=path, content=content))
+        if not isinstance(content, str):
+            continue
+        page_url = f"https://github.com/{owner}/{repo}/blob/{resolved_branch}/{path}"
+        # TODO: add rst-to-markdown conversion for .rst files
+        page_content = strip_mdx(content) if path.endswith(".mdx") else content
+        result.pages.append(
+            DocPage(
+                url=page_url,
+                title=path,
+                content=page_content,
+                source_method=SourceMethod.GITHUB,
+            )
+        )
 
     return result
