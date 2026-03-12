@@ -648,13 +648,17 @@ class TestFetchGithubDocsLicenseGate:
     async def test_no_license_blocks_fetch(self, mocker):
         client = self._make_client(mocker, None)
         result = await fetch_github_docs("https://github.com/owner/repo", client)
-        assert result is None
+        assert result is not None
+        assert result.pages == []
+        assert result.license_spdx_id is None
 
     @pytest.mark.asyncio
     async def test_noassertion_blocks_fetch(self, mocker):
         client = self._make_client(mocker, "NOASSERTION")
         result = await fetch_github_docs("https://github.com/owner/repo", client)
-        assert result is None
+        assert result is not None
+        assert result.pages == []
+        assert result.license_spdx_id == "NOASSERTION"
 
     @pytest.mark.asyncio
     async def test_permissive_license_allows_fetch(self, mocker):
@@ -673,7 +677,9 @@ class TestFetchGithubDocsLicenseGate:
     async def test_unknown_license_blocks_fetch(self, mocker):
         client = self._make_client(mocker, "WTFPL")
         result = await fetch_github_docs("https://github.com/owner/repo", client)
-        assert result is None
+        assert result is not None
+        assert result.pages == []
+        assert result.license_spdx_id == "WTFPL"
 
 
 class TestFetchGithubDocsRootOnly:

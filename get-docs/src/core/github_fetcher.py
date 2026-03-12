@@ -431,7 +431,13 @@ async def fetch_github_docs(
         logger.info(
             f"Skipping {owner}/{repo}: license {meta.spdx_id!r} not in allowed set"
         )
-        return None
+        return GitHubFetchResult(
+            owner=owner,
+            repo=repo,
+            branch=parsed.branch or meta.default_branch or "",
+            doc_folder=None,
+            license_spdx_id=meta.spdx_id,
+        )
 
     resolved_branch = parsed.branch or meta.default_branch
     if not resolved_branch:
