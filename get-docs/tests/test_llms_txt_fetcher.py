@@ -3,6 +3,7 @@ import pytest
 
 from src.core.llms_txt_fetcher import fetch_llms_txt, parse_llms_txt
 from src.core.robots_parser import RobotsParser
+from src.models.responses import EthicsContext
 from tests.conftest import mock_response
 
 
@@ -453,3 +454,87 @@ class TestFetchLlmsTxtRobotsCheck:
         assert result.title == "Fallback"
         assert result.is_full is False
         assert result.source_url == "https://example.com/llms.txt"
+
+
+class TestFetchLlmsTxtEthicsTracking:
+    @pytest.mark.asyncio
+    async def test_increments_ethics_when_robots_disallows(self, mocker):
+        robots = RobotsParser(
+            "User-agent: *\nDisallow: /llms-full.txt\nDisallow: /llms.txt"
+        )
+        client = mocker.AsyncMock(spec=httpx.AsyncClient)
+        ethics = EthicsContext()
+
+        result = await fetch_llms_txt(
+            "https://example.com", client, robots=robots, ethics=ethics
+        )
+
+        assert result is None
+        assert ethics.pages_filtered_by_robots == 2
+
+    @pytest.mark.asyncio
+    async def test_increments_ethics_when_ai_input_disallowed(self, mocker):
+        robots = RobotsParser("User-agent: *\nAllow: /\nContent-Signal: ai-input=no")
+        client = mocker.AsyncMock(spec=httpx.AsyncClient)
+        ethics = EthicsContext()
+
+        result = await fetch_llms_txt(
+            "https://example.com", client, robots=robots, ethics=ethics
+        )
+
+        assert result is None
+        assert ethics.pages_filtered_by_robots == 2
+
+    @pytest.mark.asyncio
+    async def test_partial_disallow_increments_ethics_for_blocked_only(self, mocker):
+        robots = RobotsParser("User-agent: *\nDisallow: /llms-full.txt")
+        content = "# Fallback\n"
+
+        def side_effect(url, **kw):
+            if url == "https://example.com/llms.txt":
+                return mock_response(text=content, content_type="text/plain")
+            return mock_response(status_code=404)
+
+        client = mocker.AsyncMock(spec=httpx.AsyncClient)
+        client.get = mocker.AsyncMock(side_effect=side_effect)
+        ethics = EthicsContext()
+
+        result = await fetch_llms_txt(
+            "https://example.com", client, robots=robots, ethics=ethics
+        )
+
+        assert result is not None
+        assert ethics.pages_filtered_by_robots == 1
+
+    @pytest.mark.asyncio
+    async def test_no_ethics_still_works(self, mocker):
+        robots = RobotsParser(
+            "User-agent: *\nDisallow: /llms-full.txt\nDisallow: /llms.txt"
+        )
+        client = mocker.AsyncMock(spec=httpx.AsyncClient)
+
+        result = await fetch_llms_txt("https://example.com", client, robots=robots)
+
+        assert result is None
+        client.get.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_ethics_not_incremented_when_allowed(self, mocker):
+        robots = RobotsParser("User-agent: *\nAllow: /")
+        content = "# Docs\n> Summary\n"
+
+        def side_effect(url, **kw):
+            if url == "https://example.com/llms-full.txt":
+                return mock_response(text=content, content_type="text/plain")
+            return mock_response(status_code=404)
+
+        client = mocker.AsyncMock(spec=httpx.AsyncClient)
+        client.get = mocker.AsyncMock(side_effect=side_effect)
+        ethics = EthicsContext()
+
+        result = await fetch_llms_txt(
+            "https://example.com", client, robots=robots, ethics=ethics
+        )
+
+        assert result is not None
+        assert ethics.pages_filtered_by_robots == 0

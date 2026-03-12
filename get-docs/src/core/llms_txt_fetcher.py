@@ -4,7 +4,9 @@ from dataclasses import dataclass, field
 import httpx
 
 from src.core.robots_parser import RobotsParser, fetch_robots_txt
+from src.models.responses import EthicsContext
 from src.utils.http_client import get_with_retry
+from src.utils.logger import logger
 from src.utils.url_utils import (
     extract_path,
     is_absolute_url,
@@ -120,6 +122,7 @@ async def fetch_llms_txt(
     robots: RobotsParser | None = None,
     timeout: float = 10,
     delay_seconds: float = 0.5,
+    ethics: EthicsContext | None = None,
 ) -> LlmsTxtResult | None:
     if robots is None:
         robots = await fetch_robots_txt(base_url, client, timeout)
@@ -131,8 +134,14 @@ async def fetch_llms_txt(
 
             url_path = extract_path(url)
             if not robots.is_allowed(url_path):
+                logger.debug(f"robots.txt blocks {url}")
+                if ethics is not None:
+                    ethics.pages_filtered_by_robots += 1
                 continue
             if robots.is_ai_input_allowed(url_path) is False:
+                logger.debug(f"AI-input signal blocks {url}")
+                if ethics is not None:
+                    ethics.pages_filtered_by_robots += 1
                 continue
 
             if request_count > 0 and delay_seconds > 0:

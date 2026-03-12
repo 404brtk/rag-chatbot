@@ -111,7 +111,11 @@ async def get_docs(
     if base_url and robots:
         try:
             llms_result = await fetch_llms_txt(
-                base_url, client, robots=robots, delay_seconds=options.delay_seconds
+                base_url,
+                client,
+                robots=robots,
+                delay_seconds=options.delay_seconds,
+                ethics=ethics,
             )
 
             if llms_result is not None:
