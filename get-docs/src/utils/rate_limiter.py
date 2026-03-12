@@ -9,6 +9,8 @@ async def fetch_with_rate_limit[T, R](
     max_concurrent: int = 5,
     delay_seconds: float = 1.5,
     on_progress: Callable[[int, int], Awaitable[None]] | None = None,
+    progress_offset: int = 0,
+    progress_total: int | None = None,
 ) -> list[tuple[T, R | Exception]]:
     if not items:
         return []
@@ -17,7 +19,7 @@ async def fetch_with_rate_limit[T, R](
     lock = asyncio.Lock()
     last_start = 0.0
     completed = 0
-    total = len(items)
+    total = progress_total if progress_total is not None else len(items)
 
     async def _run(idx: int, item: T) -> tuple[int, T, R | Exception]:
         nonlocal last_start, completed
@@ -37,7 +39,7 @@ async def fetch_with_rate_limit[T, R](
 
             completed += 1
             if on_progress:
-                await on_progress(completed, total)
+                await on_progress(progress_offset + completed, total)
 
             return idx, item, result
 
@@ -48,4 +50,4 @@ async def fetch_with_rate_limit[T, R](
         idx, item, result = await task
         ordered[idx] = (item, result)
 
-    return [ordered[i] for i in range(total)]
+    return [ordered[i] for i in range(len(items))]
