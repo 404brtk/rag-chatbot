@@ -16,7 +16,7 @@ def _request(url="https://docs.example.com", github_repo=None):
         url=url,
         github_repo=github_repo,
         options=GetDocsOptions(
-            max_web_pages=10,
+            max_pages=10,
             max_concurrent=5,
             delay_seconds=0,
         ),

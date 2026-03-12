@@ -412,13 +412,14 @@ async def fetch_github_docs(
 
     owner, repo = parsed.owner, parsed.repo
 
-    if not github_token and max_files > 50:
-        logger.warning(
-            "Fetching up to %d GitHub files without a token. "
-            "Unauthenticated rate limit is 60 requests/hour. "
-            "Set the GETDOCS_GITHUB_TOKEN environment variable to increase this limit.",
-            max_files,
-        )
+    if not github_token:
+        capped = min(max_files, 50)
+        if max_files > 50:
+            logger.warning(
+                f"No GitHub token - capping file fetch to {capped} (from {max_files}). "
+                "Set GETDOCS_GITHUB_TOKEN to increase this limit."
+            )
+        max_files = capped
 
     # check license before fetching any content
     meta = await _fetch_repo_meta(client, owner, repo, timeout, token=github_token)

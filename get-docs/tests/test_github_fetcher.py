@@ -748,6 +748,31 @@ class TestFetchGithubDocsPages:
             headers = call[1].get("headers", {})
             assert headers.get("Authorization") == "Bearer ghp_test_token"
 
+    @pytest.mark.asyncio
+    async def test_no_token_caps_max_files_to_50(self, mocker):
+        tree = [f"docs/page{i}.md" for i in range(80)]
+        client = _make_github_client(mocker, tree)
+        result = await fetch_github_docs(
+            "https://github.com/owner/repo",
+            client,
+            max_files=300,
+        )
+        assert result is not None
+        assert len(result.pages) <= 50
+
+    @pytest.mark.asyncio
+    async def test_token_does_not_cap_max_files(self, mocker):
+        tree = [f"docs/page{i}.md" for i in range(80)]
+        client = _make_github_client(mocker, tree)
+        result = await fetch_github_docs(
+            "https://github.com/owner/repo",
+            client,
+            max_files=300,
+            github_token="ghp_test_token",
+        )
+        assert result is not None
+        assert len(result.pages) == 80
+
 
 class TestFetchGithubDocsRateLimitHandling:
     @pytest.mark.asyncio

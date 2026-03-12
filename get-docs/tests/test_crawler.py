@@ -414,7 +414,7 @@ class TestFetchAndConvertUrls:
             urls,
             client,
             RobotsParser(""),
-            GetDocsOptions(max_web_pages=10, delay_seconds=0),
+            GetDocsOptions(max_pages=10, delay_seconds=0),
             SourceMethod.SITEMAP_CRAWL,
             EthicsContext(),
             base_url="https://example.com/docs/en",
@@ -440,7 +440,7 @@ class TestFetchAndConvertUrls:
             urls,
             client,
             RobotsParser(""),
-            GetDocsOptions(max_web_pages=10, delay_seconds=0),
+            GetDocsOptions(max_pages=10, delay_seconds=0),
             SourceMethod.SITEMAP_CRAWL,
             EthicsContext(),
         )
@@ -461,7 +461,7 @@ class TestFetchAndConvertUrls:
             urls,
             client,
             RobotsParser(""),
-            GetDocsOptions(max_web_pages=10, delay_seconds=0),
+            GetDocsOptions(max_pages=10, delay_seconds=0),
             SourceMethod.LLMS_TXT,
             EthicsContext(),
         )
@@ -482,7 +482,7 @@ class TestFetchAndConvertUrls:
             urls,
             client,
             RobotsParser(""),
-            GetDocsOptions(max_web_pages=10, delay_seconds=0),
+            GetDocsOptions(max_pages=10, delay_seconds=0),
             SourceMethod.SITEMAP_CRAWL,
             EthicsContext(),
             base_url="https://example.com/docs/en",
@@ -506,7 +506,7 @@ class TestFetchAndConvertUrls:
             urls,
             client,
             RobotsParser(""),
-            GetDocsOptions(max_web_pages=10, delay_seconds=0),
+            GetDocsOptions(max_pages=10, delay_seconds=0),
             SourceMethod.SITEMAP_CRAWL,
             EthicsContext(),
             base_url="https://example.com/docs/en",
@@ -536,7 +536,7 @@ class TestFetchAndConvertUrls:
             urls,
             client,
             robots,
-            GetDocsOptions(max_web_pages=10, delay_seconds=0),
+            GetDocsOptions(max_pages=10, delay_seconds=0),
             SourceMethod.SITEMAP_CRAWL,
             ethics,
             base_url="https://example.com",
@@ -548,7 +548,7 @@ class TestFetchAndConvertUrls:
         assert ethics.pages_filtered_by_content_signal == 1
 
     @pytest.mark.asyncio
-    async def test_max_web_pages_truncates(self, mocker):
+    async def test_max_pages_truncates(self, mocker):
         urls = [f"https://example.com/page{i}" for i in range(10)]
 
         client = mocker.AsyncMock(spec=httpx.AsyncClient)
@@ -558,7 +558,7 @@ class TestFetchAndConvertUrls:
             urls,
             client,
             RobotsParser(""),
-            GetDocsOptions(max_web_pages=3, delay_seconds=0),
+            GetDocsOptions(max_pages=3, delay_seconds=0),
             SourceMethod.SITEMAP_CRAWL,
             EthicsContext(),
         )
@@ -587,7 +587,7 @@ class TestFetchAndConvertUrls:
             urls,
             client,
             RobotsParser(""),
-            GetDocsOptions(max_web_pages=10, delay_seconds=0),
+            GetDocsOptions(max_pages=10, delay_seconds=0),
             SourceMethod.SITEMAP_CRAWL,
             EthicsContext(),
             on_progress=progress,

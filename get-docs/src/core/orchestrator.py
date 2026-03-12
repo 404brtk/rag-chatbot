@@ -154,7 +154,7 @@ async def get_docs(
             gh_result: GitHubFetchResult | None = await fetch_github_docs(
                 repo_url,
                 client,
-                max_files=options.max_github_files,
+                max_files=options.max_pages,
                 max_concurrent=options.max_concurrent,
                 delay_seconds=options.delay_seconds,
                 doc_folder_override=doc_folder_override,

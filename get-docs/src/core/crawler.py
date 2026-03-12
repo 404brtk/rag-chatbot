@@ -196,7 +196,7 @@ async def fetch_and_convert_urls(
     ethics.pages_filtered_by_robots += robots_count
     ethics.pages_filtered_by_content_signal += signal_count
 
-    filtered = filtered[: options.max_web_pages]
+    filtered = filtered[: options.max_pages]
 
     if not filtered:
         return []
