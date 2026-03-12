@@ -2,6 +2,8 @@ import asyncio
 import random
 import httpx
 
+from src.utils.logger import logger
+
 _RETRYABLE_STATUS_CODES = frozenset({429, 500, 502, 503, 504})
 
 
@@ -38,18 +40,31 @@ async def get_with_retry(
     for attempt in range(1 + max_retries):
         try:
             resp = await client.get(url, **kwargs)
+            logger.debug(f"GET {url} -> {resp.status_code}")
 
             if resp.status_code not in _RETRYABLE_STATUS_CODES:
                 return resp
 
             if attempt == max_retries:
+                logger.warning(
+                    f"GET {url} -> {resp.status_code} (gave up after {max_retries} retries)"
+                )
                 return resp
 
             delay = _get_delay(resp, attempt, base_delay, max_delay)
+            logger.debug(
+                f"GET {url} -> {resp.status_code} (retry {attempt + 1}/{max_retries} in {delay:.1f}s)"
+            )
             await asyncio.sleep(delay)
 
-        except (httpx.TimeoutException, httpx.ConnectError):
+        except (httpx.TimeoutException, httpx.ConnectError) as e:
             if attempt == max_retries:
+                logger.warning(
+                    f"GET {url} -> {type(e).__name__} (gave up after {max_retries} retries)"
+                )
                 raise
             delay = _randomized_backoff(attempt, base_delay, max_delay)
+            logger.debug(
+                f"GET {url} -> {type(e).__name__} (retry {attempt + 1}/{max_retries} in {delay:.1f}s)"
+            )
             await asyncio.sleep(delay)

@@ -63,6 +63,8 @@ async def _run_job(
     redis: aioredis.Redis,
     http_client: httpx.AsyncClient,
 ) -> None:
+    target = str(request.url or request.github_repo)
+    logger.info(f"[job:{job_id}] Starting job for {target}")
     try:
         job = await get_job(redis, job_id)
         if job is None:
@@ -72,6 +74,9 @@ async def _run_job(
         await update_job(redis, job)
 
         async def on_progress(fetched: int, total: int | None) -> None:
+            logger.info(
+                f"[job:{job_id}] Progress: {fetched}/{total if total is not None else '?'} pages fetched"
+            )
             j = await get_job(redis, job_id)
             if j is None:
                 return
@@ -93,8 +98,12 @@ async def _run_job(
         job.progress = None
         await update_job(redis, job)
 
+        logger.info(
+            f"[job:{job_id}] Completed via {result.source_method} - {len(result.pages)} pages"
+        )
+
     except Exception:
-        logger.exception(f"Job {job_id} failed")
+        logger.exception(f"[job:{job_id}] Failed")
         job = await get_job(redis, job_id)
         if job is None:
             return
@@ -113,6 +122,10 @@ async def create_crawl_job(
 ) -> CrawlCreateResponse:
     job_id = str(uuid.uuid4())
     now = datetime.now(timezone.utc)
+
+    target = str(request.url or request.github_repo)
+    logger.info(f"POST /crawl - target={target}, job_id={job_id}")
+
     job = CrawlResponse(
         job_id=job_id,
         status=TaskState.PENDING,
@@ -130,9 +143,11 @@ async def create_crawl_job(
 async def get_crawl_job(
     job_id: str, redis: RedisDep, verbose: bool = False
 ) -> JSONResponse:
+    logger.info(f"GET /crawl/{job_id}")
     job = await get_job(redis, job_id)
     if job is None:
         raise HTTPException(status_code=404, detail="Job not found or expired")
+    logger.info(f"GET /crawl/{job_id} - status={job.status}")
     if verbose:
         data = job.model_dump(mode="json")
     else:

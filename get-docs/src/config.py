@@ -6,7 +6,7 @@ class Settings(BaseSettings):
 
     HOST: str = "127.0.0.1"
     PORT: int = 8001
-    LOG_LEVEL: str = "INFO"
+    LOG_LEVEL: str = "DEBUG"
     REDIS_URL: str = "redis://localhost:6379"
     BOT_NAME: str = "get-docs"
     USER_AGENT: str = "get-docs/0.1.0"

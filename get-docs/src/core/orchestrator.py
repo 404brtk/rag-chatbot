@@ -103,12 +103,17 @@ async def get_docs(
 
     robots: RobotsParser | None = None
     if base_url:
+        logger.info(f"Fetching robots.txt for {base_url}")
         robots = await fetch_robots_txt(base_url, client)
         ethics.robots_crawl_delay_seconds = robots.get_crawl_delay()
         ethics.content_signal_ai_input = robots.is_ai_input_allowed()
+        logger.info(
+            f"robots.txt: crawl_delay={ethics.robots_crawl_delay_seconds}, ai_input={ethics.content_signal_ai_input}"
+        )
 
     # 1. llms-full.txt / llms.txt
     if base_url and robots:
+        logger.info("Step 1: Trying llms.txt / llms-full.txt")
         try:
             llms_result = await fetch_llms_txt(
                 base_url,
@@ -120,6 +125,7 @@ async def get_docs(
 
             if llms_result is not None:
                 if llms_result.is_full:
+                    logger.info("Found llms-full.txt - using as single doc page")
                     result.pages.append(_llms_full_to_doc_page(llms_result))
                     result.source_method = SourceMethod.LLMS_TXT
                     if on_progress:
@@ -127,6 +133,7 @@ async def get_docs(
                     return result
 
                 urls = [link.url for link in llms_result.links if not link.optional]
+                logger.info(f"Found llms.txt with {len(urls)} links - fetching pages")
                 pages = await fetch_and_convert_urls(
                     urls,
                     client,
@@ -137,15 +144,22 @@ async def get_docs(
                     on_progress=on_progress,
                 )
                 if pages:
+                    logger.info(f"llms.txt crawl returned {len(pages)} pages")
                     result.pages.extend(pages)
                     result.source_method = SourceMethod.LLMS_TXT
                     return result
+                else:
+                    logger.info("llms.txt links yielded no pages, falling through")
+            else:
+                logger.info("No llms.txt found, falling through")
         except Exception:
             logger.exception("llms.txt fetch failed")
 
     # 2. GitHub docs
+    logger.info("Step 2: Trying GitHub docs")
     repo_url = await _resolve_github_repo(request, client, timeout=options.timeout)
     if repo_url:
+        logger.info(f"Resolved GitHub repo: {repo_url}")
         doc_folder_override: str | None = None
         parsed_gh = parse_github_url(repo_url)
         if parsed_gh and parsed_gh.subpath:
@@ -168,17 +182,23 @@ async def get_docs(
             if gh_result:
                 ethics.license_spdx_id = gh_result.license_spdx_id
             if gh_result and gh_result.pages:
+                logger.info(f"GitHub fetch returned {len(gh_result.pages)} pages")
                 result.pages.extend(gh_result.pages)
                 result.source_method = SourceMethod.GITHUB
                 result.github_repo = repo_url
                 if on_progress:
                     await on_progress(len(gh_result.pages), len(gh_result.pages))
                 return result
+            else:
+                logger.info("GitHub fetch returned no pages, falling through")
         except Exception:
             logger.exception("GitHub fetch failed")
+    else:
+        logger.info("No GitHub repo found, falling through")
 
     # 3. Sitemap crawl
     if base_url and robots:
+        logger.info(f"Step 3: Trying sitemap crawl for {base_url}")
         try:
             pages = await _try_sitemap(
                 base_url,
@@ -189,13 +209,17 @@ async def get_docs(
                 on_progress,
             )
             if pages:
+                logger.info(f"Sitemap crawl returned {len(pages)} pages")
                 result.pages.extend(pages)
                 result.source_method = SourceMethod.SITEMAP_CRAWL
+            else:
+                logger.info("Sitemap crawl returned no pages, falling through")
         except Exception:
             logger.exception("Sitemap crawl failed")
 
     # 4. single-page fallback
     if not result.pages and base_url:
+        logger.info(f"Step 4: Falling back to single-page fetch for {base_url}")
         page = await fetch_page_as_markdown(
             base_url, client, options.timeout, SourceMethod.SINGLE_PAGE
         )

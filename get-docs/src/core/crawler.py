@@ -42,9 +42,9 @@ async def _try_content_negotiation(
             follow_redirects=True,
             timeout=timeout,
         )
+        content_type = resp.headers.get("content-type", "")
         if resp.status_code != 200:
             return None
-        content_type = resp.headers.get("content-type", "")
         if "text/markdown" in content_type:
             text = resp.text.strip()
             return text if text else None
@@ -63,9 +63,9 @@ async def _try_md_url(
         resp = await get_with_retry(
             client, md_url, follow_redirects=True, timeout=timeout
         )
+        content_type = resp.headers.get("content-type", "")
         if resp.status_code != 200:
             return None
-        content_type = resp.headers.get("content-type", "")
         if "text/markdown" in content_type or "text/plain" in content_type:
             text = resp.text.strip()
             if text and not text.lstrip().startswith("<!"):
@@ -83,9 +83,9 @@ async def _fetch_html(
 ) -> DocPage | None:
     try:
         resp = await get_with_retry(client, url, follow_redirects=True, timeout=timeout)
+        content_type = resp.headers.get("content-type", "")
         if resp.status_code != 200:
             return None
-        content_type = resp.headers.get("content-type", "")
         if "text/html" not in content_type:
             return None
         page = html_to_doc_page(url, resp.text, source_method)
@@ -103,16 +103,19 @@ async def probe_and_fetch(
     if not has_md_extension(url):
         md = await _try_content_negotiation(url, client, timeout)
         if md:
+            logger.info(f"Probed {url} -> content_negotiation (markdown)")
             return DocPage(
                 url=url, title="", content=md, source_method=source_method
             ), FetchMethod.CONTENT_NEGOTIATION
 
     md = await _try_md_url(url, client, timeout)
     if md:
+        logger.info(f"Probed {url} -> md_url")
         return DocPage(
             url=url, title="", content=md, source_method=source_method
         ), FetchMethod.MD_URL
 
+    logger.info(f"Probed {url} -> html")
     return await _fetch_html(url, client, timeout, source_method), FetchMethod.HTML
 
 
@@ -201,6 +204,8 @@ async def fetch_and_convert_urls(
     if not filtered:
         return []
 
+    logger.info(f"Fetching {len(filtered)} URLs (method probe on first URL)")
+
     pages: list[DocPage] = []
     effective_delay = max(options.delay_seconds, robots.get_crawl_delay() or 0)
 
@@ -209,6 +214,8 @@ async def fetch_and_convert_urls(
     )
     if first_page:
         pages.append(first_page)
+
+    logger.info(f"Preferred fetch method: {method.value}")
 
     if on_progress:
         await on_progress(len(pages), len(filtered))
@@ -227,6 +234,8 @@ async def fetch_and_convert_urls(
             max_concurrent=options.max_concurrent,
             delay_seconds=effective_delay,
             on_progress=on_progress,
+            progress_offset=len(pages),
+            progress_total=len(filtered),
         )
 
         for url, outcome in outcomes:
