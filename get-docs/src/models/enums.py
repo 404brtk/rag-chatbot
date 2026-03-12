@@ -10,7 +10,7 @@ class TaskState(StrEnum):
 
 class SourceMethod(StrEnum):
     LLMS_TXT = "llms_txt"
-    GITHUB_RAW = "github_raw"
+    GITHUB = "github"
     SITEMAP_CRAWL = "sitemap_crawl"
     SINGLE_PAGE = "single_page"
 
