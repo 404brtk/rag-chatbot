@@ -32,49 +32,23 @@ DOC_EXTENSIONS = frozenset({".md", ".mdx", ".rst"})
 DOC_FOLDERS_PRIORITY = ("docs", "doc", "documentation", "guide", "guides", "content")
 DOC_FOLDERS = frozenset(DOC_FOLDERS_PRIORITY)
 
-# github paths that are NOT repos (e.g. github.com/features, github.com/pricing)
-GITHUB_NON_REPO_PATHS = frozenset(
+# files to always skip (matched without extension, lowercase comparison)
+SKIP_FILES = frozenset(
     {
-        "features",
+        "changelog",
+        "changes",
+        "contributing",
+        "contributors",
+        "code_of_conduct",
+        "license",
+        "licence",
         "security",
-        "pricing",
-        "enterprise",
-        "team",
-        "customer-stories",
-        "readme",
-        "explore",
-        "topics",
-        "trending",
-        "collections",
-        "events",
-        "sponsors",
-        "settings",
-        "login",
-        "join",
-        "about",
-        "contact",
-        "site",
-        "orgs",
+        "pull_request_template",
+        "issue_template",
     }
 )
 
-# root-level files to always skip (lowercase comparison)
-SKIP_FILES = frozenset(
-    {
-        "changelog.md",
-        "changes.md",
-        "contributing.md",
-        "contributors.md",
-        "code_of_conduct.md",
-        "license.md",
-        "licence.md",
-        "license.rst",
-        "licence.rst",
-        "security.md",
-        "pull_request_template.md",
-        "issue_template.md",
-    }
-)
+LICENSE_STEMS = frozenset({"license", "licence"})
 
 # directories to always skip
 SKIP_DIRS = frozenset(
@@ -171,9 +145,6 @@ def parse_github_url(url: str) -> ParsedGitHubURL | None:
     owner = match.group("owner")
     repo = strip_git_suffix(match.group("repo"))
 
-    if owner.lower() in GITHUB_NON_REPO_PATHS:
-        return None
-
     tree_match = _GITHUB_TREE_PATTERN.search(url)
     branch = tree_match.group("branch") if tree_match else None
     subpath = tree_match.group("subpath") if tree_match else None
@@ -183,51 +154,20 @@ def parse_github_url(url: str) -> ParsedGitHubURL | None:
     return ParsedGitHubURL(owner=owner, repo=repo, branch=branch, subpath=subpath)
 
 
-def _find_doc_folder(tree_paths: list[str], root_only: bool = False) -> str | None:
-    """Find the primary documentation folder from the repo tree.
-
-    When root_only is True only top-level directories are considered.
-    When False it searches at all depths, preferring
-    shallower folders and DOC_FOLDERS_PRIORITY
-    """
-    if root_only:
-        top_level_dirs: set[str] = set()
-        for path in tree_paths:
-            parts = path.split("/")
-            if len(parts) > 1:
-                top_level_dirs.add(parts[0])
-
-        for candidate in DOC_FOLDERS_PRIORITY:
-            if candidate in top_level_dirs:
-                return candidate
-            for d in top_level_dirs:
-                if d.lower() == candidate:
-                    return d
-        return None
-
-    doc_dirs: set[str] = set()
+def _find_doc_folder(tree_paths: list[str]) -> str | None:
+    top_level_dirs: set[str] = set()
     for path in tree_paths:
         parts = path.split("/")
-        for i, part in enumerate(parts[:-1]):
-            if part.lower() in DOC_FOLDERS:
-                doc_dirs.add("/".join(parts[: i + 1]))
+        if len(parts) > 1:
+            top_level_dirs.add(parts[0])
 
-    if not doc_dirs:
-        return None
-
-    def _sort_key(d: str) -> tuple[int, int, str]:
-        depth = d.count("/")
-        name = d.split("/")[-1].lower()
-        try:
-            priority = DOC_FOLDERS_PRIORITY.index(name)
-        except ValueError:
-            priority = len(DOC_FOLDERS_PRIORITY)
-        return (depth, priority, d.lower())
-
-    top_level = [d for d in doc_dirs if d.count("/") == 0]
-    candidates = top_level if top_level else list(doc_dirs)
-
-    return min(candidates, key=_sort_key)
+    for candidate in DOC_FOLDERS_PRIORITY:
+        if candidate in top_level_dirs:
+            return candidate
+        for d in top_level_dirs:
+            if d.lower() == candidate:
+                return d
+    return None
 
 
 def _narrow_to_english(
@@ -274,13 +214,18 @@ def _is_doc_file(path: str, doc_folder: str | None) -> bool:
         if part in SKIP_DIRS:
             return False
 
+    stem = filename.rsplit(".", 1)[0]
+
     if doc_folder:
-        return path.lower().startswith(doc_folder.lower() + "/")
+        if not path.lower().startswith(doc_folder.lower() + "/"):
+            return False
+        if stem in SKIP_FILES:
+            return False
+        return True
 
     if len(parts) == 1:
-        return filename not in SKIP_FILES
-
-    if parts[0] in DOC_FOLDERS:
+        if stem in SKIP_FILES:
+            return False
         return True
 
     return False
@@ -391,7 +336,6 @@ async def fetch_github_docs(
     timeout: float = 15,
     max_files: int = 300,
     doc_folder_override: str | None = None,
-    root_only: bool = False,
     github_token: str | None = None,
     on_progress: Callable[[int, int | None], Awaitable[None]] | None = None,
 ) -> GitHubFetchResult | None:
@@ -452,12 +396,31 @@ async def fetch_github_docs(
     if doc_folder_override:
         doc_folder = doc_folder_override
     else:
-        doc_folder = _find_doc_folder(all_paths, root_only=root_only)
-
-    if doc_folder is None and root_only:
-        return None
+        doc_folder = _find_doc_folder(all_paths)
 
     doc_folder, lang_excludes = _narrow_to_english(all_paths, doc_folder)
+
+    if doc_folder:
+        check_dirs: set[str] = {""}  # root
+        parts = doc_folder.lower().split("/")
+        for i in range(1, len(parts) + 1):
+            check_dirs.add("/".join(parts[:i]))
+
+        license_files = []
+        for p in all_paths:
+            low = p.lower()
+            filename = low.rsplit("/", 1)[-1]
+            parent = low.rsplit("/", 1)[0] if "/" in low else ""
+            stem = filename.rsplit(".", 1)[0]
+            if stem in LICENSE_STEMS and parent in check_dirs:
+                license_files.append(p)
+
+        if license_files:
+            logger.warning(
+                f"License file(s) found in doc folder path: {', '.join(license_files)}. "
+                f"The repo license is '{meta.spdx_id}' but docs may have different terms. "
+                "Please verify manually that the docs license permits this use."
+            )
 
     doc_paths = [p for p in all_paths if _is_doc_file(p, doc_folder)]
     if lang_excludes:
