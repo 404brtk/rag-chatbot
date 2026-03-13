@@ -1,10 +1,9 @@
-import httpx
 import pytest
 
 from src.core.llms_txt_fetcher import fetch_llms_txt, parse_llms_txt
 from src.core.robots_parser import RobotsParser
 from src.models.responses import EthicsContext
-from tests.conftest import mock_response
+from tests.conftest import mock_http_client, mock_response
 
 
 class TestTitle:
@@ -313,24 +312,24 @@ class TestFetchLlmsTxtRobotsCheck:
     @pytest.mark.asyncio
     async def test_skips_when_ai_input_disallowed(self, mocker):
         robots = RobotsParser("User-agent: *\nAllow: /\nContent-Signal: ai-input=no")
-        client = mocker.AsyncMock(spec=httpx.AsyncClient)
+        client, inner = mock_http_client(mocker)
 
         result = await fetch_llms_txt("https://example.com", client, robots=robots)
 
         assert result is None
-        client.get.assert_not_called()
+        inner.get.assert_not_called()
 
     @pytest.mark.asyncio
     async def test_skips_when_path_disallowed(self, mocker):
         robots = RobotsParser(
             "User-agent: *\nDisallow: /llms-full.txt\nDisallow: /llms.txt"
         )
-        client = mocker.AsyncMock(spec=httpx.AsyncClient)
+        client, inner = mock_http_client(mocker)
 
         result = await fetch_llms_txt("https://example.com", client, robots=robots)
 
         assert result is None
-        client.get.assert_not_called()
+        inner.get.assert_not_called()
 
     @pytest.mark.asyncio
     async def test_fetches_robots_when_none_provided(self, mocker):
@@ -343,14 +342,14 @@ class TestFetchLlmsTxtRobotsCheck:
                 )
             return mock_response(text=llms_content, content_type="text/plain")
 
-        client = mocker.AsyncMock(spec=httpx.AsyncClient)
-        client.get = mocker.AsyncMock(side_effect=side_effect)
+        client, inner = mock_http_client(mocker)
+        inner.get = mocker.AsyncMock(side_effect=side_effect)
 
         result = await fetch_llms_txt("https://example.com", client)
 
         assert result is not None
         assert result.title == "Docs"
-        calls = [str(c) for c in client.get.call_args_list]
+        calls = [str(c) for c in inner.get.call_args_list]
         assert any("robots.txt" in c for c in calls)
 
     @pytest.mark.asyncio
@@ -363,8 +362,8 @@ class TestFetchLlmsTxtRobotsCheck:
                 return mock_response(text=content, content_type="text/plain")
             return mock_response(status_code=404)
 
-        client = mocker.AsyncMock(spec=httpx.AsyncClient)
-        client.get = mocker.AsyncMock(side_effect=side_effect)
+        client, inner = mock_http_client(mocker)
+        inner.get = mocker.AsyncMock(side_effect=side_effect)
 
         result = await fetch_llms_txt("https://example.com", client, robots=robots)
 
@@ -382,8 +381,8 @@ class TestFetchLlmsTxtRobotsCheck:
                 return mock_response(text=content, content_type="text/plain")
             return mock_response(status_code=404)
 
-        client = mocker.AsyncMock(spec=httpx.AsyncClient)
-        client.get = mocker.AsyncMock(side_effect=side_effect)
+        client, inner = mock_http_client(mocker)
+        inner.get = mocker.AsyncMock(side_effect=side_effect)
 
         result = await fetch_llms_txt(
             "https://example.com/docs/en/home", client, robots=robots
@@ -403,8 +402,8 @@ class TestFetchLlmsTxtRobotsCheck:
                 return mock_response(text=content, content_type="text/plain")
             return mock_response(status_code=404)
 
-        client = mocker.AsyncMock(spec=httpx.AsyncClient)
-        client.get = mocker.AsyncMock(side_effect=side_effect)
+        client, inner = mock_http_client(mocker)
+        inner.get = mocker.AsyncMock(side_effect=side_effect)
 
         result = await fetch_llms_txt(
             "https://example.com/docs/en/home", client, robots=robots
@@ -425,8 +424,8 @@ class TestFetchLlmsTxtRobotsCheck:
                 return mock_response(text="# Root\n", content_type="text/plain")
             return mock_response(status_code=404)
 
-        client = mocker.AsyncMock(spec=httpx.AsyncClient)
-        client.get = mocker.AsyncMock(side_effect=side_effect)
+        client, inner = mock_http_client(mocker)
+        inner.get = mocker.AsyncMock(side_effect=side_effect)
 
         result = await fetch_llms_txt(
             "https://example.com/docs/en/home", client, robots=robots
@@ -445,8 +444,8 @@ class TestFetchLlmsTxtRobotsCheck:
                 return mock_response(text=content, content_type="text/plain")
             return mock_response(status_code=404)
 
-        client = mocker.AsyncMock(spec=httpx.AsyncClient)
-        client.get = mocker.AsyncMock(side_effect=side_effect)
+        client, inner = mock_http_client(mocker)
+        inner.get = mocker.AsyncMock(side_effect=side_effect)
 
         result = await fetch_llms_txt("https://example.com", client, robots=robots)
 
@@ -462,7 +461,7 @@ class TestFetchLlmsTxtEthicsTracking:
         robots = RobotsParser(
             "User-agent: *\nDisallow: /llms-full.txt\nDisallow: /llms.txt"
         )
-        client = mocker.AsyncMock(spec=httpx.AsyncClient)
+        client, inner = mock_http_client(mocker)
         ethics = EthicsContext()
 
         result = await fetch_llms_txt(
@@ -475,7 +474,7 @@ class TestFetchLlmsTxtEthicsTracking:
     @pytest.mark.asyncio
     async def test_increments_ethics_when_ai_input_disallowed(self, mocker):
         robots = RobotsParser("User-agent: *\nAllow: /\nContent-Signal: ai-input=no")
-        client = mocker.AsyncMock(spec=httpx.AsyncClient)
+        client, inner = mock_http_client(mocker)
         ethics = EthicsContext()
 
         result = await fetch_llms_txt(
@@ -495,8 +494,8 @@ class TestFetchLlmsTxtEthicsTracking:
                 return mock_response(text=content, content_type="text/plain")
             return mock_response(status_code=404)
 
-        client = mocker.AsyncMock(spec=httpx.AsyncClient)
-        client.get = mocker.AsyncMock(side_effect=side_effect)
+        client, inner = mock_http_client(mocker)
+        inner.get = mocker.AsyncMock(side_effect=side_effect)
         ethics = EthicsContext()
 
         result = await fetch_llms_txt(
@@ -511,12 +510,12 @@ class TestFetchLlmsTxtEthicsTracking:
         robots = RobotsParser(
             "User-agent: *\nDisallow: /llms-full.txt\nDisallow: /llms.txt"
         )
-        client = mocker.AsyncMock(spec=httpx.AsyncClient)
+        client, inner = mock_http_client(mocker)
 
         result = await fetch_llms_txt("https://example.com", client, robots=robots)
 
         assert result is None
-        client.get.assert_not_called()
+        inner.get.assert_not_called()
 
     @pytest.mark.asyncio
     async def test_ethics_not_incremented_when_allowed(self, mocker):
@@ -528,8 +527,8 @@ class TestFetchLlmsTxtEthicsTracking:
                 return mock_response(text=content, content_type="text/plain")
             return mock_response(status_code=404)
 
-        client = mocker.AsyncMock(spec=httpx.AsyncClient)
-        client.get = mocker.AsyncMock(side_effect=side_effect)
+        client, inner = mock_http_client(mocker)
+        inner.get = mocker.AsyncMock(side_effect=side_effect)
         ethics = EthicsContext()
 
         result = await fetch_llms_txt(

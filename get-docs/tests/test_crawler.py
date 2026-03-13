@@ -1,4 +1,3 @@
-import httpx
 import pytest
 
 from src.core.crawler import (
@@ -12,7 +11,7 @@ from src.core.robots_parser import RobotsParser
 from src.models.enums import FetchMethod, SourceMethod
 from src.models.requests import GetDocsOptions
 from src.models.responses import EthicsContext
-from tests.conftest import html_page, mock_response
+from tests.conftest import html_page, mock_http_client, mock_response
 
 
 class TestHtmlToDocPage:
@@ -35,8 +34,8 @@ class TestHtmlToDocPage:
 class TestFetchPageAsMarkdown:
     @pytest.mark.asyncio
     async def test_content_negotiation_returns_markdown(self, mocker):
-        client = mocker.AsyncMock(spec=httpx.AsyncClient)
-        client.get = mocker.AsyncMock(
+        client, inner = mock_http_client(mocker)
+        inner.get = mocker.AsyncMock(
             return_value=mock_response(
                 text="# Hello\nWorld",
                 content_type="text/markdown; charset=utf-8",
@@ -51,7 +50,7 @@ class TestFetchPageAsMarkdown:
         )
         assert page is not None
         assert page.content == "# Hello\nWorld"
-        assert client.get.call_count == 1
+        assert inner.get.call_count == 1
 
     @pytest.mark.asyncio
     async def test_md_url_probe_returns_raw_markdown(self, mocker):
@@ -72,8 +71,8 @@ class TestFetchPageAsMarkdown:
                 )
             return mock_response(status_code=404)
 
-        client = mocker.AsyncMock(spec=httpx.AsyncClient)
-        client.get = mocker.AsyncMock(side_effect=mock_get)
+        client, inner = mock_http_client(mocker)
+        inner.get = mocker.AsyncMock(side_effect=mock_get)
 
         page = await fetch_page_as_markdown(
             "https://example.com/docs/intro",
@@ -99,8 +98,8 @@ class TestFetchPageAsMarkdown:
                 content_type="text/html; charset=utf-8",
             )
 
-        client = mocker.AsyncMock(spec=httpx.AsyncClient)
-        client.get = mocker.AsyncMock(side_effect=mock_get)
+        client, inner = mock_http_client(mocker)
+        inner.get = mocker.AsyncMock(side_effect=mock_get)
 
         page = await fetch_page_as_markdown(
             "https://example.com/docs/intro",
@@ -114,8 +113,8 @@ class TestFetchPageAsMarkdown:
 
     @pytest.mark.asyncio
     async def test_returns_none_when_all_fail(self, mocker):
-        client = mocker.AsyncMock(spec=httpx.AsyncClient)
-        client.get = mocker.AsyncMock(return_value=mock_response(status_code=404))
+        client, inner = mock_http_client(mocker)
+        inner.get = mocker.AsyncMock(return_value=mock_response(status_code=404))
 
         page = await fetch_page_as_markdown(
             "https://example.com/docs/intro",
@@ -136,8 +135,8 @@ class TestFetchPageAsMarkdown:
                 content_type="text/plain",
             )
 
-        client = mocker.AsyncMock(spec=httpx.AsyncClient)
-        client.get = mocker.AsyncMock(side_effect=mock_get)
+        client, inner = mock_http_client(mocker)
+        inner.get = mocker.AsyncMock(side_effect=mock_get)
 
         page = await fetch_page_as_markdown(
             "https://docs.stripe.com/connect.md",
@@ -169,8 +168,8 @@ class TestFetchPageAsMarkdown:
                 content_type="text/html",
             )
 
-        client = mocker.AsyncMock(spec=httpx.AsyncClient)
-        client.get = mocker.AsyncMock(side_effect=mock_get)
+        client, inner = mock_http_client(mocker)
+        inner.get = mocker.AsyncMock(side_effect=mock_get)
 
         page = await fetch_page_as_markdown(
             "https://example.com/docs/intro",
@@ -185,8 +184,8 @@ class TestFetchPageAsMarkdown:
 class TestProbeAndFetch:
     @pytest.mark.asyncio
     async def test_returns_content_negotiation_when_markdown_header(self, mocker):
-        client = mocker.AsyncMock(spec=httpx.AsyncClient)
-        client.get = mocker.AsyncMock(
+        client, inner = mock_http_client(mocker)
+        inner.get = mocker.AsyncMock(
             return_value=mock_response(
                 text="# Hello",
                 content_type="text/markdown; charset=utf-8",
@@ -211,8 +210,8 @@ class TestProbeAndFetch:
                 return mock_response(status_code=404)
             return mock_response(text="# MD Content", content_type="text/plain")
 
-        client = mocker.AsyncMock(spec=httpx.AsyncClient)
-        client.get = mocker.AsyncMock(side_effect=mock_get)
+        client, inner = mock_http_client(mocker)
+        inner.get = mocker.AsyncMock(side_effect=mock_get)
 
         page, method = await probe_and_fetch(
             "https://example.com/docs/intro", client, 10.0, SourceMethod.LLMS_TXT
@@ -236,8 +235,8 @@ class TestProbeAndFetch:
                 content_type="text/html; charset=utf-8",
             )
 
-        client = mocker.AsyncMock(spec=httpx.AsyncClient)
-        client.get = mocker.AsyncMock(side_effect=mock_get)
+        client, inner = mock_http_client(mocker)
+        inner.get = mocker.AsyncMock(side_effect=mock_get)
 
         page, method = await probe_and_fetch(
             "https://example.com/docs/intro", client, 10.0, SourceMethod.LLMS_TXT
@@ -249,8 +248,8 @@ class TestProbeAndFetch:
 
     @pytest.mark.asyncio
     async def test_skips_negotiation_for_md_urls(self, mocker):
-        client = mocker.AsyncMock(spec=httpx.AsyncClient)
-        client.get = mocker.AsyncMock(
+        client, inner = mock_http_client(mocker)
+        inner.get = mocker.AsyncMock(
             return_value=mock_response(text="# Direct MD", content_type="text/plain")
         )
 
@@ -259,14 +258,14 @@ class TestProbeAndFetch:
         )
         assert page is not None
         assert method == FetchMethod.MD_URL
-        assert client.get.call_count == 1
+        assert inner.get.call_count == 1
 
 
 class TestFetchPagePreferredMethod:
     @pytest.mark.asyncio
     async def test_preferred_html_makes_single_request(self, mocker):
-        client = mocker.AsyncMock(spec=httpx.AsyncClient)
-        client.get = mocker.AsyncMock(
+        client, inner = mock_http_client(mocker)
+        inner.get = mocker.AsyncMock(
             return_value=mock_response(
                 text=html_page("Page", "Content"),
                 content_type="text/html; charset=utf-8",
@@ -282,7 +281,7 @@ class TestFetchPagePreferredMethod:
         )
         assert page is not None
         assert "Content" in page.content
-        assert client.get.call_count == 1
+        assert inner.get.call_count == 1
 
     @pytest.mark.asyncio
     async def test_preferred_md_url_tries_md_then_html_fallback(self, mocker):
@@ -298,8 +297,8 @@ class TestFetchPagePreferredMethod:
                 content_type="text/html; charset=utf-8",
             )
 
-        client = mocker.AsyncMock(spec=httpx.AsyncClient)
-        client.get = mocker.AsyncMock(side_effect=mock_get)
+        client, inner = mock_http_client(mocker)
+        inner.get = mocker.AsyncMock(side_effect=mock_get)
 
         page = await fetch_page_as_markdown(
             "https://example.com/docs/intro",
@@ -314,8 +313,8 @@ class TestFetchPagePreferredMethod:
 
     @pytest.mark.asyncio
     async def test_preferred_md_url_succeeds(self, mocker):
-        client = mocker.AsyncMock(spec=httpx.AsyncClient)
-        client.get = mocker.AsyncMock(
+        client, inner = mock_http_client(mocker)
+        inner.get = mocker.AsyncMock(
             return_value=mock_response(text="# MD Content", content_type="text/plain")
         )
 
@@ -328,7 +327,7 @@ class TestFetchPagePreferredMethod:
         )
         assert page is not None
         assert page.content == "# MD Content"
-        assert client.get.call_count == 1
+        assert inner.get.call_count == 1
 
     @pytest.mark.asyncio
     async def test_preferred_content_negotiation_falls_back_to_html(self, mocker):
@@ -344,8 +343,8 @@ class TestFetchPagePreferredMethod:
                 content_type="text/html; charset=utf-8",
             )
 
-        client = mocker.AsyncMock(spec=httpx.AsyncClient)
-        client.get = mocker.AsyncMock(side_effect=mock_get)
+        client, inner = mock_http_client(mocker)
+        inner.get = mocker.AsyncMock(side_effect=mock_get)
 
         page = await fetch_page_as_markdown(
             "https://example.com/docs/intro",
@@ -360,8 +359,8 @@ class TestFetchPagePreferredMethod:
 
     @pytest.mark.asyncio
     async def test_md_url_fetched_directly_regardless_of_preferred(self, mocker):
-        client = mocker.AsyncMock(spec=httpx.AsyncClient)
-        client.get = mocker.AsyncMock(
+        client, inner = mock_http_client(mocker)
+        inner.get = mocker.AsyncMock(
             return_value=mock_response(text="# Direct MD", content_type="text/plain")
         )
 
@@ -374,7 +373,7 @@ class TestFetchPagePreferredMethod:
         )
         assert page is not None
         assert page.content == "# Direct MD"
-        assert client.get.call_count == 1
+        assert inner.get.call_count == 1
 
 
 def _html_mock_get(pages: dict[str, str] | None = None):
@@ -407,8 +406,8 @@ class TestFetchAndConvertUrls:
             "https://example.com/careers/apply",
         ]
 
-        client = mocker.AsyncMock(spec=httpx.AsyncClient)
-        client.get = mocker.AsyncMock(side_effect=_html_mock_get())
+        client, inner = mock_http_client(mocker)
+        inner.get = mocker.AsyncMock(side_effect=_html_mock_get())
 
         pages = await fetch_and_convert_urls(
             urls,
@@ -433,8 +432,8 @@ class TestFetchAndConvertUrls:
             "https://example.com/page",
         ]
 
-        client = mocker.AsyncMock(spec=httpx.AsyncClient)
-        client.get = mocker.AsyncMock(side_effect=_html_mock_get())
+        client, inner = mock_http_client(mocker)
+        inner.get = mocker.AsyncMock(side_effect=_html_mock_get())
 
         pages = await fetch_and_convert_urls(
             urls,
@@ -454,8 +453,8 @@ class TestFetchAndConvertUrls:
             "https://other.com/page",
         ]
 
-        client = mocker.AsyncMock(spec=httpx.AsyncClient)
-        client.get = mocker.AsyncMock(side_effect=_html_mock_get())
+        client, inner = mock_http_client(mocker)
+        inner.get = mocker.AsyncMock(side_effect=_html_mock_get())
 
         pages = await fetch_and_convert_urls(
             urls,
@@ -475,8 +474,8 @@ class TestFetchAndConvertUrls:
             "https://example.com/docs/english/intro",
         ]
 
-        client = mocker.AsyncMock(spec=httpx.AsyncClient)
-        client.get = mocker.AsyncMock(side_effect=_html_mock_get())
+        client, inner = mock_http_client(mocker)
+        inner.get = mocker.AsyncMock(side_effect=_html_mock_get())
 
         pages = await fetch_and_convert_urls(
             urls,
@@ -499,8 +498,8 @@ class TestFetchAndConvertUrls:
             "https://example.com/docs/de/guide",
         ]
 
-        client = mocker.AsyncMock(spec=httpx.AsyncClient)
-        client.get = mocker.AsyncMock(side_effect=_html_mock_get())
+        client, inner = mock_http_client(mocker)
+        inner.get = mocker.AsyncMock(side_effect=_html_mock_get())
 
         pages = await fetch_and_convert_urls(
             urls,
@@ -528,8 +527,8 @@ class TestFetchAndConvertUrls:
             "https://example.com/secret/page",
         ]
 
-        client = mocker.AsyncMock(spec=httpx.AsyncClient)
-        client.get = mocker.AsyncMock(side_effect=_html_mock_get())
+        client, inner = mock_http_client(mocker)
+        inner.get = mocker.AsyncMock(side_effect=_html_mock_get())
         ethics = EthicsContext()
 
         pages = await fetch_and_convert_urls(
@@ -551,8 +550,8 @@ class TestFetchAndConvertUrls:
     async def test_max_pages_truncates(self, mocker):
         urls = [f"https://example.com/page{i}" for i in range(10)]
 
-        client = mocker.AsyncMock(spec=httpx.AsyncClient)
-        client.get = mocker.AsyncMock(side_effect=_html_mock_get())
+        client, inner = mock_http_client(mocker)
+        inner.get = mocker.AsyncMock(side_effect=_html_mock_get())
 
         pages = await fetch_and_convert_urls(
             urls,
@@ -579,8 +578,8 @@ class TestFetchAndConvertUrls:
             "https://example.com/page3",
         ]
 
-        client = mocker.AsyncMock(spec=httpx.AsyncClient)
-        client.get = mocker.AsyncMock(side_effect=_html_mock_get())
+        client, inner = mock_http_client(mocker)
+        inner.get = mocker.AsyncMock(side_effect=_html_mock_get())
         progress = mocker.AsyncMock()
 
         pages = await fetch_and_convert_urls(

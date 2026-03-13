@@ -9,7 +9,7 @@ from src.core.sitemap_parser import (
     fetch_sitemap_urls,
 )
 from src.core.sitemap_parser import _dedupe_versioned_sitemaps
-from tests.conftest import mock_response
+from tests.conftest import mock_http_client, mock_response
 
 
 SITEMAP_NS = "http://www.sitemaps.org/schemas/sitemap/0.9"
@@ -334,11 +334,6 @@ def _mock_response(
     )
 
 
-@pytest.fixture(autouse=True)
-def _no_rate_limit_sleep(mocker):
-    mocker.patch("src.utils.rate_limiter.asyncio.sleep", new_callable=mocker.AsyncMock)
-
-
 class TestFetchSitemapUrls:
     @pytest.mark.asyncio
     async def test_simple_urlset(self, mocker):
@@ -347,8 +342,8 @@ class TestFetchSitemapUrls:
             <url><loc>https://example.com/a</loc></url>
             <url><loc>https://example.com/b</loc></url>
         </urlset>"""
-        client = mocker.AsyncMock(spec=httpx.AsyncClient)
-        client.get = mocker.AsyncMock(return_value=_mock_response(text=xml))
+        client, inner = mock_http_client(mocker)
+        inner.get = mocker.AsyncMock(return_value=_mock_response(text=xml))
 
         urls = await fetch_sitemap_urls("https://example.com/sitemap.xml", client)
         assert urls == ["https://example.com/a", "https://example.com/b"]
@@ -363,8 +358,8 @@ class TestFetchSitemapUrls:
         <urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
             <url><loc>https://example.com/page1</loc></url>
         </urlset>"""
-        client = mocker.AsyncMock(spec=httpx.AsyncClient)
-        client.get = mocker.AsyncMock(
+        client, inner = mock_http_client(mocker)
+        inner.get = mocker.AsyncMock(
             side_effect=[_mock_response(text=index_xml), _mock_response(text=child_xml)]
         )
 
@@ -373,16 +368,16 @@ class TestFetchSitemapUrls:
 
     @pytest.mark.asyncio
     async def test_returns_empty_on_404(self, mocker):
-        client = mocker.AsyncMock(spec=httpx.AsyncClient)
-        client.get = mocker.AsyncMock(return_value=_mock_response(status_code=404))
+        client, inner = mock_http_client(mocker)
+        inner.get = mocker.AsyncMock(return_value=_mock_response(status_code=404))
 
         urls = await fetch_sitemap_urls("https://example.com/sitemap.xml", client)
         assert urls == []
 
     @pytest.mark.asyncio
     async def test_returns_empty_on_network_error(self, mocker):
-        client = mocker.AsyncMock(spec=httpx.AsyncClient)
-        client.get = mocker.AsyncMock(side_effect=httpx.ConnectError("fail"))
+        client, inner = mock_http_client(mocker)
+        inner.get = mocker.AsyncMock(side_effect=httpx.ConnectError("fail"))
 
         urls = await fetch_sitemap_urls("https://example.com/sitemap.xml", client)
         assert urls == []
@@ -393,8 +388,8 @@ class TestFetchSitemapUrls:
         <sitemapindex xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
             <sitemap><loc>https://example.com/deeper.xml</loc></sitemap>
         </sitemapindex>"""
-        client = mocker.AsyncMock(spec=httpx.AsyncClient)
-        client.get = mocker.AsyncMock(return_value=_mock_response(text=index_xml))
+        client, inner = mock_http_client(mocker)
+        inner.get = mocker.AsyncMock(return_value=_mock_response(text=index_xml))
 
         urls = await fetch_sitemap_urls(
             "https://example.com/sitemap.xml", client, max_depth=1
@@ -424,8 +419,8 @@ class TestFetchSitemapUrls:
             }
             return responses.get(url, _mock_response(status_code=404))
 
-        client = mocker.AsyncMock(spec=httpx.AsyncClient)
-        client.get = mocker.AsyncMock(side_effect=side_effect)
+        client, inner = mock_http_client(mocker)
+        inner.get = mocker.AsyncMock(side_effect=side_effect)
 
         urls = await fetch_sitemap_urls(
             "https://example.com/sitemap.xml",
@@ -436,7 +431,7 @@ class TestFetchSitemapUrls:
             "https://example.com/docs/guide",
             "https://example.com/docs/intro",
         ]
-        called_urls = [call.args[0] for call in client.get.call_args_list]
+        called_urls = [call.args[0] for call in inner.get.call_args_list]
         assert "https://example.com/blog/sitemap-1.xml" not in called_urls
         assert "https://learn.example.com/sitemap.xml" not in called_urls
 
@@ -447,8 +442,8 @@ class TestFetchSitemapUrls:
             "https://example.com/blog/post",
             "https://example.com/docs/guide",
         )
-        client = mocker.AsyncMock(spec=httpx.AsyncClient)
-        client.get = mocker.AsyncMock(return_value=_mock_response(text=xml))
+        client, inner = mock_http_client(mocker)
+        inner.get = mocker.AsyncMock(return_value=_mock_response(text=xml))
 
         urls = await fetch_sitemap_urls(
             "https://example.com/docs/sitemap.xml",
@@ -484,8 +479,8 @@ class TestFetchSitemapUrls:
             }
             return responses.get(url, _mock_response(status_code=404))
 
-        client = mocker.AsyncMock(spec=httpx.AsyncClient)
-        client.get = mocker.AsyncMock(side_effect=side_effect)
+        client, inner = mock_http_client(mocker)
+        inner.get = mocker.AsyncMock(side_effect=side_effect)
 
         urls = await fetch_sitemap_urls(
             "https://example.com/sitemap.xml",
@@ -493,7 +488,7 @@ class TestFetchSitemapUrls:
             base_url="https://example.com/docs/",
         )
         assert urls == ["https://example.com/docs/manual/page1"]
-        called_urls = [call.args[0] for call in client.get.call_args_list]
+        called_urls = [call.args[0] for call in inner.get.call_args_list]
         assert "https://example.com/blog/sitemap.xml" not in called_urls
         assert "https://example.com/community/sitemap.xml" not in called_urls
 
@@ -514,8 +509,8 @@ class TestFetchSitemapUrls:
             }
             return responses.get(url, _mock_response(status_code=404))
 
-        client = mocker.AsyncMock(spec=httpx.AsyncClient)
-        client.get = mocker.AsyncMock(side_effect=side_effect)
+        client, inner = mock_http_client(mocker)
+        inner.get = mocker.AsyncMock(side_effect=side_effect)
 
         urls = await fetch_sitemap_urls(
             "https://example.com/sitemap.xml",
@@ -620,8 +615,8 @@ class TestCollectSitemapUrls:
             <url><loc>https://example.com/docs/guide</loc></url>
         </urlset>"""
 
-        client = mocker.AsyncMock(spec=httpx.AsyncClient)
-        client.get = mocker.AsyncMock(
+        client, inner = mock_http_client(mocker)
+        inner.get = mocker.AsyncMock(
             return_value=mock_response(text=sitemap_xml),
         )
 
@@ -640,8 +635,8 @@ class TestCollectSitemapUrls:
             <url><loc>https://example.com/page</loc></url>
         </urlset>"""
 
-        client = mocker.AsyncMock(spec=httpx.AsyncClient)
-        client.get = mocker.AsyncMock(
+        client, inner = mock_http_client(mocker)
+        inner.get = mocker.AsyncMock(
             return_value=mock_response(text=sitemap_xml),
         )
 
@@ -652,8 +647,8 @@ class TestCollectSitemapUrls:
     async def test_returns_empty_when_no_sitemap_found(self, mocker):
         robots = RobotsParser("")
 
-        client = mocker.AsyncMock(spec=httpx.AsyncClient)
-        client.get = mocker.AsyncMock(
+        client, inner = mock_http_client(mocker)
+        inner.get = mocker.AsyncMock(
             return_value=mock_response(status_code=404),
         )
 
@@ -671,8 +666,8 @@ class TestCollectSitemapUrls:
             <url><loc>https://example.com/private/secret</loc></url>
         </urlset>"""
 
-        client = mocker.AsyncMock(spec=httpx.AsyncClient)
-        client.get = mocker.AsyncMock(
+        client, inner = mock_http_client(mocker)
+        inner.get = mocker.AsyncMock(
             return_value=mock_response(text=sitemap_xml),
         )
 
@@ -697,8 +692,8 @@ class TestCollectSitemapUrls:
                 return mock_response(text=fallback_xml)
             return mock_response(status_code=404)
 
-        client = mocker.AsyncMock(spec=httpx.AsyncClient)
-        client.get = mocker.AsyncMock(side_effect=side_effect)
+        client, inner = mock_http_client(mocker)
+        inner.get = mocker.AsyncMock(side_effect=side_effect)
 
         urls = await collect_sitemap_urls(
             "https://example.com/docs/",
@@ -723,8 +718,8 @@ class TestSitemapFallbackPathWalking:
                 return mock_response(text=sitemap_xml)
             return mock_response(status_code=404)
 
-        client = mocker.AsyncMock(spec=httpx.AsyncClient)
-        client.get = mocker.AsyncMock(side_effect=side_effect)
+        client, inner = mock_http_client(mocker)
+        inner.get = mocker.AsyncMock(side_effect=side_effect)
 
         urls = await collect_sitemap_urls(
             "https://example.com/docs", client, robots=robots
@@ -745,8 +740,8 @@ class TestSitemapFallbackPathWalking:
                 return mock_response(text=sitemap_xml)
             return mock_response(status_code=404)
 
-        client = mocker.AsyncMock(spec=httpx.AsyncClient)
-        client.get = mocker.AsyncMock(side_effect=side_effect)
+        client, inner = mock_http_client(mocker)
+        inner.get = mocker.AsyncMock(side_effect=side_effect)
 
         urls = await collect_sitemap_urls(
             "https://example.com/docs/en", client, robots=robots
@@ -768,14 +763,14 @@ class TestSitemapFallbackPathWalking:
                 return mock_response(text=sitemap_xml)
             return mock_response(status_code=404)
 
-        client = mocker.AsyncMock(spec=httpx.AsyncClient)
-        client.get = mocker.AsyncMock(side_effect=side_effect)
+        client, inner = mock_http_client(mocker)
+        inner.get = mocker.AsyncMock(side_effect=side_effect)
 
         urls = await collect_sitemap_urls(
             "https://example.com/docs/sub", client, robots=robots
         )
         assert urls == ["https://example.com/docs/sub/page1"]
-        called_urls = [call.args[0] for call in client.get.call_args_list]
+        called_urls = [call.args[0] for call in inner.get.call_args_list]
         assert "https://example.com/sitemap.xml" not in called_urls
 
 

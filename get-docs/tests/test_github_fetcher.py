@@ -17,7 +17,7 @@ from src.core.github_fetcher import (
     _narrow_to_english,
 )
 from src.models.enums import SourceMethod
-from tests.conftest import mock_response
+from tests.conftest import mock_http_client, mock_response
 
 
 class TestParseGithubUrl:
@@ -503,8 +503,8 @@ class TestSkipLists:
 class TestFetchRepoMeta:
     @pytest.mark.asyncio
     async def test_returns_spdx_id_and_branch(self, mocker):
-        client = mocker.AsyncMock(spec=httpx.AsyncClient)
-        client.get = mocker.AsyncMock(
+        client, inner = mock_http_client(mocker)
+        inner.get = mocker.AsyncMock(
             return_value=mock_response(
                 json_data={
                     "license": {"spdx_id": "MIT", "name": "MIT License"},
@@ -518,8 +518,8 @@ class TestFetchRepoMeta:
 
     @pytest.mark.asyncio
     async def test_returns_none_when_no_license(self, mocker):
-        client = mocker.AsyncMock(spec=httpx.AsyncClient)
-        client.get = mocker.AsyncMock(
+        client, inner = mock_http_client(mocker)
+        inner.get = mocker.AsyncMock(
             return_value=mock_response(
                 json_data={"license": None, "default_branch": "main"}
             )
@@ -530,24 +530,24 @@ class TestFetchRepoMeta:
 
     @pytest.mark.asyncio
     async def test_returns_none_on_404(self, mocker):
-        client = mocker.AsyncMock(spec=httpx.AsyncClient)
-        client.get = mocker.AsyncMock(return_value=mock_response(status_code=404))
+        client, inner = mock_http_client(mocker)
+        inner.get = mocker.AsyncMock(return_value=mock_response(status_code=404))
         meta = await _fetch_repo_meta(client, "owner", "repo", 10)
         assert meta.spdx_id is None
         assert meta.default_branch is None
 
     @pytest.mark.asyncio
     async def test_returns_none_on_timeout(self, mocker):
-        client = mocker.AsyncMock(spec=httpx.AsyncClient)
-        client.get = mocker.AsyncMock(side_effect=httpx.TimeoutException("timeout"))
+        client, inner = mock_http_client(mocker)
+        inner.get = mocker.AsyncMock(side_effect=httpx.TimeoutException("timeout"))
         meta = await _fetch_repo_meta(client, "owner", "repo", 10)
         assert meta.spdx_id is None
         assert meta.default_branch is None
 
     @pytest.mark.asyncio
     async def test_returns_noassertion(self, mocker):
-        client = mocker.AsyncMock(spec=httpx.AsyncClient)
-        client.get = mocker.AsyncMock(
+        client, inner = mock_http_client(mocker)
+        inner.get = mocker.AsyncMock(
             return_value=mock_response(
                 json_data={
                     "license": {"spdx_id": "NOASSERTION"},
@@ -561,8 +561,8 @@ class TestFetchRepoMeta:
 
     @pytest.mark.asyncio
     async def test_non_standard_default_branch(self, mocker):
-        client = mocker.AsyncMock(spec=httpx.AsyncClient)
-        client.get = mocker.AsyncMock(
+        client, inner = mock_http_client(mocker)
+        inner.get = mocker.AsyncMock(
             return_value=mock_response(
                 json_data={
                     "license": {"spdx_id": "MIT"},
@@ -575,8 +575,8 @@ class TestFetchRepoMeta:
 
     @pytest.mark.asyncio
     async def test_token_passed_in_headers(self, mocker):
-        client = mocker.AsyncMock(spec=httpx.AsyncClient)
-        client.get = mocker.AsyncMock(
+        client, inner = mock_http_client(mocker)
+        inner.get = mocker.AsyncMock(
             return_value=mock_response(
                 json_data={
                     "license": {"spdx_id": "MIT"},
@@ -585,12 +585,12 @@ class TestFetchRepoMeta:
             )
         )
         await _fetch_repo_meta(client, "owner", "repo", 10, token="ghp_test123")
-        call_kwargs = client.get.call_args[1]
+        call_kwargs = inner.get.call_args[1]
         assert call_kwargs["headers"]["Authorization"] == "Bearer ghp_test123"
 
 
 def _make_github_client(mocker, tree_paths, file_contents=None):
-    client = mocker.AsyncMock(spec=httpx.AsyncClient)
+    client, inner = mock_http_client(mocker)
 
     async def mock_get(url, **kwargs):
         if "/repos/" in url and "/git/trees/" not in url and "/contents/" not in url:
@@ -611,13 +611,13 @@ def _make_github_client(mocker, tree_paths, file_contents=None):
             return mock_response(text="# Content")
         return mock_response(status_code=404)
 
-    client.get = mocker.AsyncMock(side_effect=mock_get)
-    return client
+    inner.get = mocker.AsyncMock(side_effect=mock_get)
+    return client, inner
 
 
 class TestFetchGithubDocsLicenseGate:
     def _make_client(self, mocker, license_spdx_id):
-        client = mocker.AsyncMock(spec=httpx.AsyncClient)
+        client, inner = mock_http_client(mocker)
 
         async def mock_get(url, **kwargs):
             if (
@@ -641,7 +641,7 @@ class TestFetchGithubDocsLicenseGate:
                 return mock_response(text="# Intro\nHello")
             return mock_response(status_code=404)
 
-        client.get = mocker.AsyncMock(side_effect=mock_get)
+        inner.get = mocker.AsyncMock(side_effect=mock_get)
         return client
 
     @pytest.mark.asyncio
@@ -686,7 +686,7 @@ class TestFetchGithubDocsRootOnly:
     @pytest.mark.asyncio
     async def test_root_only_returns_none_when_no_doc_folder(self, mocker):
         tree = ["README.md", "AGENTS.md", "src/main.py"]
-        client = _make_github_client(mocker, tree)
+        client, inner = _make_github_client(mocker, tree)
         result = await fetch_github_docs(
             "https://github.com/owner/repo", client, root_only=True
         )
@@ -695,7 +695,7 @@ class TestFetchGithubDocsRootOnly:
     @pytest.mark.asyncio
     async def test_root_only_returns_docs_when_doc_folder_exists(self, mocker):
         tree = ["docs/intro.md", "docs/guide.md", "README.md", "src/main.py"]
-        client = _make_github_client(mocker, tree)
+        client, inner = _make_github_client(mocker, tree)
         result = await fetch_github_docs(
             "https://github.com/owner/repo", client, root_only=True
         )
@@ -709,7 +709,7 @@ class TestFetchGithubDocsRootOnly:
             "README.md",
             "src/main.py",
         ]
-        client = _make_github_client(mocker, tree)
+        client, inner = _make_github_client(mocker, tree)
         result = await fetch_github_docs(
             "https://github.com/owner/repo", client, root_only=True
         )
@@ -720,7 +720,7 @@ class TestFetchGithubDocsPages:
     @pytest.mark.asyncio
     async def test_pages_have_correct_url_and_source_method(self, mocker):
         tree = ["docs/intro.md"]
-        client = _make_github_client(mocker, tree, {"docs/intro.md": "# Intro"})
+        client, inner = _make_github_client(mocker, tree, {"docs/intro.md": "# Intro"})
         result = await fetch_github_docs("https://github.com/owner/repo", client)
         assert result is not None
         assert len(result.pages) == 1
@@ -734,7 +734,9 @@ class TestFetchGithubDocsPages:
     async def test_mdx_files_are_stripped(self, mocker):
         mdx_content = "import Foo from './foo'\n\n# Hello\n\n<Foo />\n\nWorld"
         tree = ["docs/guide.mdx"]
-        client = _make_github_client(mocker, tree, {"docs/guide.mdx": mdx_content})
+        client, inner = _make_github_client(
+            mocker, tree, {"docs/guide.mdx": mdx_content}
+        )
         result = await fetch_github_docs("https://github.com/owner/repo", client)
         assert result is not None
         page = result.pages[0]
@@ -744,20 +746,20 @@ class TestFetchGithubDocsPages:
     @pytest.mark.asyncio
     async def test_token_passed_to_all_api_calls(self, mocker):
         tree = ["docs/intro.md"]
-        client = _make_github_client(mocker, tree)
+        client, inner = _make_github_client(mocker, tree)
         await fetch_github_docs(
             "https://github.com/owner/repo",
             client,
             github_token="ghp_test_token",
         )
-        for call in client.get.call_args_list:
+        for call in inner.get.call_args_list:
             headers = call[1].get("headers", {})
             assert headers.get("Authorization") == "Bearer ghp_test_token"
 
     @pytest.mark.asyncio
     async def test_no_token_caps_max_files_to_50(self, mocker):
         tree = [f"docs/page{i}.md" for i in range(80)]
-        client = _make_github_client(mocker, tree)
+        client, inner = _make_github_client(mocker, tree)
         result = await fetch_github_docs(
             "https://github.com/owner/repo",
             client,
@@ -769,7 +771,7 @@ class TestFetchGithubDocsPages:
     @pytest.mark.asyncio
     async def test_token_does_not_cap_max_files(self, mocker):
         tree = [f"docs/page{i}.md" for i in range(80)]
-        client = _make_github_client(mocker, tree)
+        client, inner = _make_github_client(mocker, tree)
         result = await fetch_github_docs(
             "https://github.com/owner/repo",
             client,
@@ -784,7 +786,7 @@ class TestFetchGithubDocsRateLimitHandling:
     @pytest.mark.asyncio
     async def test_429_aborts_batch_with_partial_results(self, mocker):
         tree = ["docs/a.md", "docs/b.md", "docs/c.md"]
-        client = mocker.AsyncMock(spec=httpx.AsyncClient)
+        client, inner = mock_http_client(mocker)
         call_count = 0
 
         async def mock_get(url, **kwargs):
@@ -811,7 +813,7 @@ class TestFetchGithubDocsRateLimitHandling:
                 return mock_response(status_code=429)
             return mock_response(status_code=404)
 
-        client.get = mocker.AsyncMock(side_effect=mock_get)
+        inner.get = mocker.AsyncMock(side_effect=mock_get)
         result = await fetch_github_docs("https://github.com/owner/repo", client)
         assert result is not None
         assert result.rate_limited is True
@@ -820,7 +822,7 @@ class TestFetchGithubDocsRateLimitHandling:
     @pytest.mark.asyncio
     async def test_403_with_ratelimit_header_triggers_abort(self, mocker):
         tree = ["docs/a.md", "docs/b.md"]
-        client = mocker.AsyncMock(spec=httpx.AsyncClient)
+        client, inner = mock_http_client(mocker)
 
         async def mock_get(url, **kwargs):
             if (
@@ -850,7 +852,7 @@ class TestFetchGithubDocsRateLimitHandling:
                 )
             return mock_response(status_code=404)
 
-        client.get = mocker.AsyncMock(side_effect=mock_get)
+        inner.get = mocker.AsyncMock(side_effect=mock_get)
         result = await fetch_github_docs("https://github.com/owner/repo", client)
         assert result is not None
         assert result.rate_limited is True
@@ -859,7 +861,7 @@ class TestFetchGithubDocsRateLimitHandling:
     @pytest.mark.asyncio
     async def test_generic_403_does_not_trigger_abort(self, mocker):
         tree = ["docs/a.md", "docs/b.md"]
-        client = mocker.AsyncMock(spec=httpx.AsyncClient)
+        client, inner = mock_http_client(mocker)
 
         async def mock_get(url, **kwargs):
             if (
@@ -883,7 +885,7 @@ class TestFetchGithubDocsRateLimitHandling:
                 return mock_response(text="# B file")
             return mock_response(status_code=404)
 
-        client.get = mocker.AsyncMock(side_effect=mock_get)
+        inner.get = mocker.AsyncMock(side_effect=mock_get)
         result = await fetch_github_docs("https://github.com/owner/repo", client)
         assert result is not None
         assert result.rate_limited is False

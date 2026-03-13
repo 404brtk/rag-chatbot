@@ -3,6 +3,7 @@ import pytest
 
 from src.models.enums import ContentSignal
 from src.core.robots_parser import RobotsParser, fetch_robots_txt
+from tests.conftest import mock_http_client
 
 
 class TestIsAllowed:
@@ -408,8 +409,8 @@ class TestFetchRobotsTxt:
     @pytest.mark.asyncio
     async def test_fetches_and_parses(self, mocker):
         content = "User-agent: *\nDisallow: /private/\nCrawl-delay: 2"
-        client = mocker.AsyncMock(spec=httpx.AsyncClient)
-        client.get = mocker.AsyncMock(return_value=_mock_response(text=content))
+        client, inner = mock_http_client(mocker)
+        inner.get = mocker.AsyncMock(return_value=_mock_response(text=content))
 
         parser = await fetch_robots_txt("https://example.com", client)
 
@@ -419,8 +420,8 @@ class TestFetchRobotsTxt:
 
     @pytest.mark.asyncio
     async def test_returns_permissive_on_404(self, mocker):
-        client = mocker.AsyncMock(spec=httpx.AsyncClient)
-        client.get = mocker.AsyncMock(return_value=_mock_response(status_code=404))
+        client, inner = mock_http_client(mocker)
+        inner.get = mocker.AsyncMock(return_value=_mock_response(status_code=404))
 
         parser = await fetch_robots_txt("https://example.com", client)
 
@@ -429,8 +430,8 @@ class TestFetchRobotsTxt:
 
     @pytest.mark.asyncio
     async def test_returns_permissive_on_network_error(self, mocker):
-        client = mocker.AsyncMock(spec=httpx.AsyncClient)
-        client.get = mocker.AsyncMock(side_effect=httpx.ConnectError("fail"))
+        client, inner = mock_http_client(mocker)
+        inner.get = mocker.AsyncMock(side_effect=httpx.ConnectError("fail"))
 
         parser = await fetch_robots_txt("https://example.com", client)
 

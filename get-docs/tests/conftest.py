@@ -2,10 +2,18 @@ import json
 import httpx
 import pytest
 
+from src.utils.http_client import HttpClient
+
 
 @pytest.fixture(autouse=True)
 def _no_retry_sleep(mocker):
     mocker.patch("src.utils.http_client.asyncio.sleep", new_callable=mocker.AsyncMock)
+
+
+def mock_http_client(mocker) -> tuple[HttpClient, httpx.AsyncClient]:
+    inner = mocker.AsyncMock(spec=httpx.AsyncClient)
+    client = HttpClient(inner, default_delay=0)
+    return client, inner
 
 
 def mock_response(

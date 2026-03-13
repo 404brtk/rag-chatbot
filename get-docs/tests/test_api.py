@@ -2,6 +2,7 @@ import asyncio
 from contextlib import asynccontextmanager
 from unittest.mock import AsyncMock
 
+import httpx
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
@@ -9,6 +10,7 @@ from fastapi.testclient import TestClient
 from src.api.router import router
 from src.core.llms_txt_fetcher import LlmsTxtResult
 from src.core.robots_parser import RobotsParser
+from src.utils.http_client import HttpClient
 
 
 class FakeRedis:
@@ -25,11 +27,24 @@ class FakeRedis:
         pass
 
 
+def _mock_http_client():
+    client = AsyncMock(spec=HttpClient)
+    client.get = AsyncMock(
+        return_value=httpx.Response(
+            status_code=404,
+            text="",
+            headers={"content-type": "text/plain"},
+            request=httpx.Request("GET", "https://example.com"),
+        )
+    )
+    return client
+
+
 def _create_test_app() -> FastAPI:
     @asynccontextmanager
     async def lifespan(app: FastAPI):
         app.state.redis = FakeRedis()
-        app.state.http_client = AsyncMock()
+        app.state.http_client = _mock_http_client()
         yield
 
     test_app = FastAPI(lifespan=lifespan)

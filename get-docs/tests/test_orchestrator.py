@@ -1,4 +1,3 @@
-import httpx
 import pytest
 
 from src.core.github_fetcher import GitHubFetchResult
@@ -8,7 +7,8 @@ from src.core.robots_parser import RobotsParser
 from src.models.enums import SourceMethod
 from src.models.requests import GetDocsOptions, GetDocsRequest
 from src.models.responses import DocPage
-from tests.conftest import html_page, mock_response
+from src.utils.http_client import HttpClient
+from tests.conftest import html_page, mock_response, mock_http_client
 
 
 def _request(url="https://docs.example.com", github_repo=None):
@@ -17,7 +17,6 @@ def _request(url="https://docs.example.com", github_repo=None):
         github_repo=github_repo,
         options=GetDocsOptions(
             max_pages=10,
-            max_concurrent=5,
             delay_seconds=0,
         ),
     )
@@ -75,7 +74,7 @@ class TestGetDocs:
         mock_sitemap = mocker.patch("src.core.orchestrator.collect_sitemap_urls")
         mock_github = mocker.patch("src.core.orchestrator.fetch_github_docs")
 
-        client = mocker.AsyncMock(spec=httpx.AsyncClient)
+        client = mocker.AsyncMock(spec=HttpClient)
 
         result = await get_docs(_request(), client)
 
@@ -122,8 +121,8 @@ class TestGetDocs:
                 content_type="text/html; charset=utf-8",
             )
 
-        client = mocker.AsyncMock(spec=httpx.AsyncClient)
-        client.get = mocker.AsyncMock(side_effect=mock_get)
+        client, inner = mock_http_client(mocker)
+        inner.get = mocker.AsyncMock(side_effect=mock_get)
 
         result = await get_docs(_request(), client)
 
@@ -159,7 +158,7 @@ class TestGetDocs:
             ),
         )
 
-        client = mocker.AsyncMock(spec=httpx.AsyncClient)
+        client = mocker.AsyncMock(spec=HttpClient)
         client.get = mocker.AsyncMock(
             return_value=mock_response(
                 text='<html><a href="https://github.com/owner/repo">GH</a></html>'
@@ -198,7 +197,7 @@ class TestGetDocs:
         )
         mock_sitemap = mocker.patch("src.core.orchestrator.collect_sitemap_urls")
 
-        client = mocker.AsyncMock(spec=httpx.AsyncClient)
+        client = mocker.AsyncMock(spec=HttpClient)
         client.get = mocker.AsyncMock(
             return_value=mock_response(
                 text='<html><a href="https://github.com/owner/repo">GH</a></html>'
@@ -258,7 +257,7 @@ class TestGetDocs:
                 text='<html><a href="https://github.com/owner/repo">GH</a></html>'
             )
 
-        client = mocker.AsyncMock(spec=httpx.AsyncClient)
+        client = mocker.AsyncMock(spec=HttpClient)
         client.get = mocker.AsyncMock(side_effect=mock_get)
 
         result = await get_docs(_request(), client)
@@ -294,7 +293,7 @@ class TestGetDocs:
                 )
             return mock_response(text="<html>no github</html>")
 
-        client = mocker.AsyncMock(spec=httpx.AsyncClient)
+        client = mocker.AsyncMock(spec=HttpClient)
         client.get = mocker.AsyncMock(side_effect=mock_get)
 
         result = await get_docs(_request(), client)
@@ -317,7 +316,7 @@ class TestGetDocs:
             ),
         )
 
-        client = mocker.AsyncMock(spec=httpx.AsyncClient)
+        client = mocker.AsyncMock(spec=HttpClient)
 
         result = await get_docs(
             _request(url=None, github_repo="https://github.com/owner/repo"),
@@ -358,7 +357,7 @@ class TestGetDocs:
             ),
         )
 
-        client = mocker.AsyncMock(spec=httpx.AsyncClient)
+        client = mocker.AsyncMock(spec=HttpClient)
         client.get = mocker.AsyncMock(
             return_value=mock_response(
                 text='<html><a href="https://github.com/discovered/repo">GitHub</a></html>'
@@ -407,8 +406,8 @@ class TestGetDocs:
                 )
             return mock_response(text="<html>no github</html>")
 
-        client = mocker.AsyncMock(spec=httpx.AsyncClient)
-        client.get = mocker.AsyncMock(side_effect=mock_get)
+        client, inner = mock_http_client(mocker)
+        inner.get = mocker.AsyncMock(side_effect=mock_get)
 
         result = await get_docs(_request(), client)
 
@@ -453,7 +452,7 @@ class TestGetDocs:
                 content_type="text/html; charset=utf-8",
             )
 
-        client = mocker.AsyncMock(spec=httpx.AsyncClient)
+        client = mocker.AsyncMock(spec=HttpClient)
         client.get = mocker.AsyncMock(side_effect=mock_get)
 
         result = await get_docs(_request(), client)
@@ -486,7 +485,7 @@ class TestGetDocs:
             ),
         )
 
-        client = mocker.AsyncMock(spec=httpx.AsyncClient)
+        client = mocker.AsyncMock(spec=HttpClient)
 
         result = await get_docs(
             _request(github_repo="https://github.com/owner/repo"), client
@@ -516,7 +515,7 @@ class TestGetDocs:
             ),
         )
 
-        client = mocker.AsyncMock(spec=httpx.AsyncClient)
+        client = mocker.AsyncMock(spec=HttpClient)
 
         await get_docs(
             _request(
@@ -548,7 +547,7 @@ class TestGetDocs:
             ),
         )
 
-        client = mocker.AsyncMock(spec=httpx.AsyncClient)
+        client = mocker.AsyncMock(spec=HttpClient)
 
         await get_docs(
             _request(url=None, github_repo="https://github.com/owner/repo"),
@@ -585,7 +584,7 @@ class TestGetDocs:
             ),
         )
 
-        client = mocker.AsyncMock(spec=httpx.AsyncClient)
+        client = mocker.AsyncMock(spec=HttpClient)
 
         await get_docs(
             _request(
@@ -639,7 +638,7 @@ class TestGetDocs:
                 content_type="text/html; charset=utf-8",
             )
 
-        client = mocker.AsyncMock(spec=httpx.AsyncClient)
+        client = mocker.AsyncMock(spec=HttpClient)
         client.get = mocker.AsyncMock(side_effect=mock_get)
 
         result = await get_docs(_request(), client)
@@ -666,7 +665,7 @@ class TestGetDocs:
             ),
         )
 
-        client = mocker.AsyncMock(spec=httpx.AsyncClient)
+        client = mocker.AsyncMock(spec=HttpClient)
 
         result = await get_docs(_request(), client)
 
@@ -688,7 +687,7 @@ class TestGetDocs:
             ),
         )
 
-        client = mocker.AsyncMock(spec=httpx.AsyncClient)
+        client = mocker.AsyncMock(spec=HttpClient)
 
         result = await get_docs(_request(), client)
 
@@ -726,7 +725,7 @@ class TestGetDocs:
                 content_type="text/html; charset=utf-8",
             )
 
-        client = mocker.AsyncMock(spec=httpx.AsyncClient)
+        client = mocker.AsyncMock(spec=HttpClient)
         client.get = mocker.AsyncMock(side_effect=mock_get)
 
         result = await get_docs(_request(), client)
@@ -752,7 +751,7 @@ class TestGetDocs:
             ),
         )
 
-        client = mocker.AsyncMock(spec=httpx.AsyncClient)
+        client = mocker.AsyncMock(spec=HttpClient)
         progress = mocker.AsyncMock()
 
         await get_docs(_request(), client, on_progress=progress)
