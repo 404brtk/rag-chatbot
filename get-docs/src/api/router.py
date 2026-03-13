@@ -2,6 +2,7 @@ import uuid
 from datetime import datetime, timezone
 from typing import Annotated
 
+import httpx
 import redis.asyncio as aioredis
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request
 from fastapi.responses import JSONResponse
@@ -17,7 +18,7 @@ from src.models.responses import (
     EthicsInfo,
     JobProgress,
 )
-from src.utils.http_client import HttpClient
+from src.utils.http_client import HttpClient, ThrottleState
 from src.utils.logger import logger
 
 router = APIRouter()
@@ -27,12 +28,17 @@ def get_redis(request: Request) -> aioredis.Redis:
     return request.app.state.redis
 
 
-def get_http_client(request: Request) -> HttpClient:
+def get_http_client(request: Request) -> httpx.AsyncClient:
     return request.app.state.http_client
 
 
+def get_throttle(request: Request) -> ThrottleState:
+    return request.app.state.throttle
+
+
 RedisDep = Annotated[aioredis.Redis, Depends(get_redis)]
-HttpClientDep = Annotated[HttpClient, Depends(get_http_client)]
+HttpClientDep = Annotated[httpx.AsyncClient, Depends(get_http_client)]
+ThrottleDep = Annotated[ThrottleState, Depends(get_throttle)]
 
 
 def _build_ethics_info(result) -> EthicsInfo:
@@ -62,7 +68,8 @@ async def _run_job(
     job_id: str,
     request: GetDocsRequest,
     redis: aioredis.Redis,
-    http_client: HttpClient,
+    http_client: httpx.AsyncClient,
+    throttle: ThrottleState,
 ) -> None:
     target = str(request.url or request.github_repo)
     logger.info(f"[job:{job_id}] Starting job for {target}")
@@ -74,6 +81,12 @@ async def _run_job(
         job.progress = JobProgress()
         await update_job(redis, job)
 
+        client = HttpClient(
+            http_client,
+            default_delay=request.delay_seconds,
+            throttle=throttle,
+        )
+
         async def on_progress(fetched: int, total: int | None) -> None:
             logger.info(
                 f"[job:{job_id}] Progress: {fetched}/{total if total is not None else '?'} pages fetched"
@@ -84,7 +97,7 @@ async def _run_job(
             j.progress = JobProgress(pages_fetched=fetched, pages_total=total)
             await update_job(redis, j)
 
-        result = await get_docs(request, http_client, on_progress=on_progress)
+        result = await get_docs(request, client, on_progress=on_progress)
 
         job = await get_job(redis, job_id)
         if job is None:
@@ -122,6 +135,7 @@ async def create_crawl_job(
     background_tasks: BackgroundTasks,
     redis: RedisDep,
     http_client: HttpClientDep,
+    throttle: ThrottleDep,
 ) -> CrawlCreateResponse:
     job_id = str(uuid.uuid4())
     now = datetime.now(timezone.utc)
@@ -137,7 +151,7 @@ async def create_crawl_job(
     )
     await create_job(redis, job)
 
-    background_tasks.add_task(_run_job, job_id, request, redis, http_client)
+    background_tasks.add_task(_run_job, job_id, request, redis, http_client, throttle)
 
     return CrawlCreateResponse(job_id=job_id, status=TaskState.PENDING, created_at=now)
 

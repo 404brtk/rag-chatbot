@@ -7,7 +7,7 @@ from fastapi import FastAPI
 
 from src.api.router import router
 from src.config import settings
-from src.utils.http_client import HttpClient
+from src.utils.http_client import ThrottleState
 
 
 @asynccontextmanager
@@ -18,12 +18,11 @@ async def lifespan(app: FastAPI):
         decode_responses=True,
     )
     app.state.redis = aioredis.Redis(connection_pool=redis_pool)
-    app.state.http_client = HttpClient(
-        httpx.AsyncClient(
-            headers={"User-Agent": settings.USER_AGENT},
-            limits=httpx.Limits(max_connections=5, max_keepalive_connections=5),
-        ),
+    app.state.http_client = httpx.AsyncClient(
+        headers={"User-Agent": settings.USER_AGENT},
+        limits=httpx.Limits(max_connections=5, max_keepalive_connections=5),
     )
+    app.state.throttle = ThrottleState()
     yield
     await app.state.http_client.aclose()
     await redis_pool.disconnect()
