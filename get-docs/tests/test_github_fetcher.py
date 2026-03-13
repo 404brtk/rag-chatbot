@@ -69,22 +69,6 @@ class TestParseGithubUrl:
         result = parse_github_url("")
         assert result is None
 
-    def test_rejects_github_pages(self):
-        result = parse_github_url("https://github.com/features/actions")
-        assert result is None
-
-    def test_rejects_explore_page(self):
-        result = parse_github_url("https://github.com/explore/trending")
-        assert result is None
-
-    def test_rejects_settings_page(self):
-        result = parse_github_url("https://github.com/settings/profile")
-        assert result is None
-
-    def test_case_insensitive_rejection(self):
-        result = parse_github_url("https://github.com/Features/something")
-        assert result is None
-
     def test_preserves_case_of_owner_and_repo(self):
         result = parse_github_url("https://github.com/FastAPI/FastAPI")
         assert result == ParsedGitHubURL("FastAPI", "FastAPI")
@@ -160,48 +144,27 @@ class TestFindDocFolder:
         paths = ["Docs/index.md", "src/main.py"]
         assert _find_doc_folder(paths) == "Docs"
 
-    def test_deeply_nested_docs_not_detected_as_top_level(self):
+    def test_nested_docs_not_detected(self):
         paths = ["src/docs/index.md", "main.py"]
-        result = _find_doc_folder(paths)
-        assert result == "src/docs"
+        assert _find_doc_folder(paths) is None
 
-    def test_prefers_shallower_over_deeper_docs(self):
+    def test_root_docs_found_despite_nested_duplicates(self):
         paths = [
             "docs/index.md",
             "docs/en/docs/intro.md",
         ]
         assert _find_doc_folder(paths) == "docs"
 
-    def test_prefers_content_over_nested_docs(self):
+    def test_root_content_found_despite_nested_docs(self):
         paths = [
             "content/index.md",
             "content/docs/intro.md",
         ]
         assert _find_doc_folder(paths) == "content"
 
-    def test_monorepo_docs_folder_detected(self):
+    def test_monorepo_nested_docs_not_detected(self):
         paths = ["packages/docs/quickstart.mdx", "packages/app/main.ts"]
-        assert _find_doc_folder(paths) == "packages/docs"
-
-    def test_root_only_finds_top_level_docs(self):
-        paths = ["docs/index.md", "src/main.py"]
-        assert _find_doc_folder(paths, root_only=True) == "docs"
-
-    def test_root_only_ignores_nested_docs(self):
-        paths = ["packages/docs/quickstart.mdx", "packages/app/main.ts"]
-        assert _find_doc_folder(paths, root_only=True) is None
-
-    def test_root_only_prefers_docs_over_doc(self):
-        paths = ["docs/a.md", "doc/b.md", "src/main.py"]
-        assert _find_doc_folder(paths, root_only=True) == "docs"
-
-    def test_root_only_case_insensitive(self):
-        paths = ["Docs/index.md", "src/main.py"]
-        assert _find_doc_folder(paths, root_only=True) == "Docs"
-
-    def test_root_only_no_doc_folder(self):
-        paths = ["src/main.py", "README.md"]
-        assert _find_doc_folder(paths, root_only=True) is None
+        assert _find_doc_folder(paths) is None
 
 
 class TestNarrowToEnglish:
@@ -415,9 +378,6 @@ class TestIsDocFile:
     def test_root_skip_file_security(self):
         assert _is_doc_file("SECURITY.md", None) is False
 
-    def test_recognized_subfolder_accepted_without_doc_folder(self):
-        assert _is_doc_file("docs/intro.md", None) is True
-
     def test_non_doc_extension_rejected(self):
         assert _is_doc_file("docs/script.py", None) is False
 
@@ -432,6 +392,16 @@ class TestIsDocFile:
 
     def test_file_in_pycache_rejected(self):
         assert _is_doc_file("__pycache__/something.md", None) is False
+
+    def test_skip_file_rejected_inside_doc_folder(self):
+        assert _is_doc_file("docs/license.md", "docs") is False
+        assert _is_doc_file("apps/demo/changelog.md", "apps") is False
+        assert _is_doc_file("docs/CONTRIBUTING.md", "docs") is False
+
+    def test_skip_file_rejected_with_mdx_extension(self):
+        assert _is_doc_file("docs/changelog.mdx", "docs") is False
+        assert _is_doc_file("docs/license.mdx", "docs") is False
+        assert _is_doc_file("CHANGELOG.mdx", None) is False
 
     def test_nested_skip_dir_rejected(self):
         assert _is_doc_file("docs/tests/fixture.md", "docs") is False
@@ -682,38 +652,58 @@ class TestFetchGithubDocsLicenseGate:
         assert result.license_spdx_id == "WTFPL"
 
 
-class TestFetchGithubDocsRootOnly:
+class TestFetchGithubDocsDocFolderDetection:
     @pytest.mark.asyncio
-    async def test_root_only_returns_none_when_no_doc_folder(self, mocker):
+    async def test_no_root_doc_folder_still_returns_root_md_files(self, mocker):
+        """Without a docs/ folder, root-level .md files are still returned."""
         tree = ["README.md", "AGENTS.md", "src/main.py"]
         client, inner = _make_github_client(mocker, tree)
-        result = await fetch_github_docs(
-            "https://github.com/owner/repo", client, root_only=True
-        )
-        assert result is None
-
-    @pytest.mark.asyncio
-    async def test_root_only_returns_docs_when_doc_folder_exists(self, mocker):
-        tree = ["docs/intro.md", "docs/guide.md", "README.md", "src/main.py"]
-        client, inner = _make_github_client(mocker, tree)
-        result = await fetch_github_docs(
-            "https://github.com/owner/repo", client, root_only=True
-        )
+        result = await fetch_github_docs("https://github.com/owner/repo", client)
         assert result is not None
         assert len(result.pages) == 2
 
     @pytest.mark.asyncio
-    async def test_root_only_skips_nested_doc_folder(self, mocker):
+    async def test_root_doc_folder_fetched(self, mocker):
+        tree = ["docs/intro.md", "docs/guide.md", "README.md", "src/main.py"]
+        client, inner = _make_github_client(mocker, tree)
+        result = await fetch_github_docs("https://github.com/owner/repo", client)
+        assert result is not None
+        # only docs/ folder files, not README.md
+        assert len(result.pages) == 2
+        assert all("docs/" in p.url for p in result.pages)
+
+    @pytest.mark.asyncio
+    async def test_monorepo_nested_docs_not_auto_detected(self, mocker):
+        """Monorepo with docs only in nested packages: auto-detection
+        doesn't find them — only root .md files are returned."""
+        tree = [
+            "packages/web/src/content/docs/intro.md",
+            "src/main.py",
+        ]
+        client, inner = _make_github_client(mocker, tree)
+        result = await fetch_github_docs("https://github.com/owner/repo", client)
+        assert result is not None
+        assert result.pages == []
+
+    @pytest.mark.asyncio
+    async def test_explicit_subpath_overrides_detection(self, mocker):
+        """When user provides a subpath, it's used directly as the doc folder."""
         tree = [
             "packages/web/src/content/docs/intro.md",
             "README.md",
             "src/main.py",
         ]
-        client, inner = _make_github_client(mocker, tree)
-        result = await fetch_github_docs(
-            "https://github.com/owner/repo", client, root_only=True
+        client, inner = _make_github_client(
+            mocker, tree, {"packages/web/src/content/docs/intro.md": "# Nested Docs"}
         )
-        assert result is None
+        result = await fetch_github_docs(
+            "https://github.com/owner/repo",
+            client,
+            doc_folder_override="packages/web/src/content/docs",
+        )
+        assert result is not None
+        assert len(result.pages) == 1
+        assert result.pages[0].content == "# Nested Docs"
 
 
 class TestFetchGithubDocsPages:

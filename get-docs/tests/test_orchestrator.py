@@ -130,57 +130,10 @@ class TestGetDocs:
             assert page.source_method == SourceMethod.LLMS_TXT
 
     @pytest.mark.asyncio
-    async def test_llms_txt_exception_falls_through_to_github(self, mocker):
+    async def test_github_succeeds_skips_sitemap(self, mocker):
         mocker.patch(
             "src.core.orchestrator.fetch_robots_txt",
             return_value=RobotsParser(""),
-        )
-        mocker.patch(
-            "src.core.orchestrator.fetch_llms_txt",
-            side_effect=RuntimeError("connection failed"),
-        )
-        mocker.patch(
-            "src.core.orchestrator.discover_github_repo",
-            return_value="https://github.com/owner/repo",
-        )
-        mocker.patch(
-            "src.core.orchestrator.fetch_github_docs",
-            return_value=GitHubFetchResult(
-                owner="owner",
-                repo="repo",
-                branch="main",
-                doc_folder="docs",
-                pages=[
-                    _gh_page("owner", "repo", "main", "docs/intro.md", "# Fallback")
-                ],
-            ),
-        )
-
-        client = mocker.AsyncMock(spec=HttpClient)
-        client.get = mocker.AsyncMock(
-            return_value=mock_response(
-                text='<html><a href="https://github.com/owner/repo">GH</a></html>'
-            )
-        )
-
-        result = await get_docs(_request(), client)
-
-        assert result.source_method == SourceMethod.GITHUB
-        assert len(result.pages) == 1
-
-    @pytest.mark.asyncio
-    async def test_github_is_tried_before_sitemap(self, mocker):
-        mocker.patch(
-            "src.core.orchestrator.fetch_robots_txt",
-            return_value=RobotsParser(""),
-        )
-        mocker.patch(
-            "src.core.orchestrator.fetch_llms_txt",
-            return_value=None,
-        )
-        mocker.patch(
-            "src.core.orchestrator.discover_github_repo",
-            return_value="https://github.com/owner/repo",
         )
         mocker.patch(
             "src.core.orchestrator.fetch_github_docs",
@@ -196,13 +149,10 @@ class TestGetDocs:
         mock_sitemap = mocker.patch("src.core.orchestrator.collect_sitemap_urls")
 
         client = mocker.AsyncMock(spec=HttpClient)
-        client.get = mocker.AsyncMock(
-            return_value=mock_response(
-                text='<html><a href="https://github.com/owner/repo">GH</a></html>'
-            )
-        )
 
-        result = await get_docs(_request(), client)
+        result = await get_docs(
+            _request(github_repo="https://github.com/owner/repo"), client
+        )
 
         assert result.source_method == SourceMethod.GITHUB
         assert result.github_repo == "https://github.com/owner/repo"
@@ -216,14 +166,6 @@ class TestGetDocs:
         mocker.patch(
             "src.core.orchestrator.fetch_robots_txt",
             return_value=RobotsParser(""),
-        )
-        mocker.patch(
-            "src.core.orchestrator.fetch_llms_txt",
-            return_value=None,
-        )
-        mocker.patch(
-            "src.core.orchestrator.discover_github_repo",
-            return_value="https://github.com/owner/repo",
         )
         mocker.patch(
             "src.core.orchestrator.fetch_github_docs",
@@ -246,32 +188,26 @@ class TestGetDocs:
                 return mock_response(status_code=404)
             if url.endswith(".md"):
                 return mock_response(status_code=404)
-            if url == "https://docs.example.com/intro":
-                return mock_response(
-                    text=html_page("Intro", "Sitemap content"),
-                    content_type="text/html; charset=utf-8",
-                )
             return mock_response(
-                text='<html><a href="https://github.com/owner/repo">GH</a></html>'
+                text=html_page("Intro", "Sitemap content"),
+                content_type="text/html; charset=utf-8",
             )
 
-        client = mocker.AsyncMock(spec=HttpClient)
-        client.get = mocker.AsyncMock(side_effect=mock_get)
+        client, inner = mock_http_client(mocker)
+        inner.get = mocker.AsyncMock(side_effect=mock_get)
 
-        result = await get_docs(_request(), client)
+        result = await get_docs(
+            _request(github_repo="https://github.com/owner/repo"), client
+        )
 
         assert result.source_method == SourceMethod.SITEMAP_CRAWL
         assert len(result.pages) == 1
 
     @pytest.mark.asyncio
-    async def test_falls_back_to_sitemap(self, mocker):
+    async def test_url_only_falls_back_to_sitemap(self, mocker):
         mocker.patch(
             "src.core.orchestrator.fetch_robots_txt",
             return_value=RobotsParser(""),
-        )
-        mocker.patch(
-            "src.core.orchestrator.fetch_llms_txt",
-            return_value=None,
         )
         mocker.patch(
             "src.core.orchestrator.collect_sitemap_urls",
@@ -284,15 +220,13 @@ class TestGetDocs:
                 return mock_response(status_code=404)
             if url.endswith(".md"):
                 return mock_response(status_code=404)
-            if url == "https://docs.example.com/intro":
-                return mock_response(
-                    text=html_page("Intro", "Intro content"),
-                    content_type="text/html; charset=utf-8",
-                )
-            return mock_response(text="<html>no github</html>")
+            return mock_response(
+                text=html_page("Intro", "Intro content"),
+                content_type="text/html; charset=utf-8",
+            )
 
-        client = mocker.AsyncMock(spec=HttpClient)
-        client.get = mocker.AsyncMock(side_effect=mock_get)
+        client, inner = mock_http_client(mocker)
+        inner.get = mocker.AsyncMock(side_effect=mock_get)
 
         result = await get_docs(_request(), client)
 
@@ -327,56 +261,10 @@ class TestGetDocs:
         assert result.ethics.license_spdx_id == "MIT"
 
     @pytest.mark.asyncio
-    async def test_github_auto_discovery(self, mocker):
-        mocker.patch(
-            "src.core.orchestrator.fetch_robots_txt",
-            return_value=RobotsParser(""),
-        )
-        mocker.patch(
-            "src.core.orchestrator.fetch_llms_txt",
-            return_value=None,
-        )
-        mocker.patch(
-            "src.core.orchestrator.discover_github_repo",
-            return_value="https://github.com/discovered/repo",
-        )
-        mocker.patch(
-            "src.core.orchestrator.fetch_github_docs",
-            return_value=GitHubFetchResult(
-                owner="discovered",
-                repo="repo",
-                branch="main",
-                doc_folder="docs",
-                pages=[
-                    _gh_page(
-                        "discovered", "repo", "main", "docs/readme.md", "# Discovered"
-                    )
-                ],
-            ),
-        )
-
-        client = mocker.AsyncMock(spec=HttpClient)
-        client.get = mocker.AsyncMock(
-            return_value=mock_response(
-                text='<html><a href="https://github.com/discovered/repo">GitHub</a></html>'
-            )
-        )
-
-        result = await get_docs(_request(), client)
-
-        assert result.source_method == SourceMethod.GITHUB
-        assert result.github_repo == "https://github.com/discovered/repo"
-        assert len(result.pages) == 1
-
-    @pytest.mark.asyncio
     async def test_empty_pages_filtered(self, mocker):
         mocker.patch(
             "src.core.orchestrator.fetch_robots_txt",
             return_value=RobotsParser(""),
-        )
-        mocker.patch(
-            "src.core.orchestrator.fetch_llms_txt",
-            return_value=None,
         )
         mocker.patch(
             "src.core.orchestrator.collect_sitemap_urls",
@@ -460,48 +348,60 @@ class TestGetDocs:
         assert result.ethics.pages_filtered_by_robots == 1
 
     @pytest.mark.asyncio
-    async def test_explicit_github_repo_used_directly(self, mocker):
+    async def test_url_only_skips_github(self, mocker):
         mocker.patch(
             "src.core.orchestrator.fetch_robots_txt",
             return_value=RobotsParser(""),
         )
+        mock_gh = mocker.patch("src.core.orchestrator.fetch_github_docs")
         mocker.patch(
-            "src.core.orchestrator.fetch_llms_txt",
-            return_value=None,
+            "src.core.orchestrator.collect_sitemap_urls",
+            return_value=["https://docs.example.com/guide"],
         )
-        mock_discover = mocker.patch(
-            "src.core.orchestrator.discover_github_repo",
-        )
+
+        async def mock_get(url, **kwargs):
+            headers = kwargs.get("headers", {})
+            if headers.get("Accept") == "text/markdown":
+                return mock_response(status_code=404)
+            if url.endswith(".md"):
+                return mock_response(status_code=404)
+            return mock_response(
+                text=html_page("Guide", "Content"),
+                content_type="text/html; charset=utf-8",
+            )
+
+        client, inner = mock_http_client(mocker)
+        inner.get = mocker.AsyncMock(side_effect=mock_get)
+
+        result = await get_docs(_request(), client)
+
+        assert result.source_method == SourceMethod.SITEMAP_CRAWL
+        mock_gh.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_github_no_root_docs_no_url_returns_empty(self, mocker):
         mocker.patch(
             "src.core.orchestrator.fetch_github_docs",
             return_value=GitHubFetchResult(
                 owner="owner",
-                repo="repo",
+                repo="monorepo",
                 branch="main",
-                doc_folder="docs",
-                pages=[_gh_page("owner", "repo", "main", "docs/intro.md", "# Intro")],
+                doc_folder=None,
+                pages=[],
             ),
         )
 
         client = mocker.AsyncMock(spec=HttpClient)
 
         result = await get_docs(
-            _request(github_repo="https://github.com/owner/repo"), client
+            _request(url=None, github_repo="https://github.com/owner/monorepo"),
+            client,
         )
 
-        assert result.source_method == SourceMethod.GITHUB
-        mock_discover.assert_not_called()
+        assert len(result.pages) == 0
 
     @pytest.mark.asyncio
-    async def test_github_root_only_when_url_present(self, mocker):
-        mocker.patch(
-            "src.core.orchestrator.fetch_robots_txt",
-            return_value=RobotsParser(""),
-        )
-        mocker.patch(
-            "src.core.orchestrator.fetch_llms_txt",
-            return_value=None,
-        )
+    async def test_github_token_from_request_used(self, mocker):
         mock_fetch_gh = mocker.patch(
             "src.core.orchestrator.fetch_github_docs",
             return_value=GitHubFetchResult(
@@ -512,60 +412,28 @@ class TestGetDocs:
                 pages=[_gh_page("owner", "repo", "main", "docs/intro.md", "# Docs")],
             ),
         )
+        mocker.patch("src.core.orchestrator.settings", GITHUB_TOKEN="env_token")
 
         client = mocker.AsyncMock(spec=HttpClient)
 
         await get_docs(
-            _request(
-                url="https://docs.example.com",
+            GetDocsRequest(
                 github_repo="https://github.com/owner/repo",
+                github_token="request_token",
+                max_pages=10,
+                delay_seconds=0,
             ),
             client,
         )
 
-        mock_fetch_gh.assert_called_once()
         _, kwargs = mock_fetch_gh.call_args
-        assert kwargs["root_only"] is True
-        assert kwargs["doc_folder_override"] is None
-
-    @pytest.mark.asyncio
-    async def test_github_deep_search_when_no_url(self, mocker):
-        mock_fetch_gh = mocker.patch(
-            "src.core.orchestrator.fetch_github_docs",
-            return_value=GitHubFetchResult(
-                owner="owner",
-                repo="repo",
-                branch="main",
-                doc_folder="packages/docs",
-                pages=[
-                    _gh_page(
-                        "owner", "repo", "main", "packages/docs/intro.md", "# Docs"
-                    )
-                ],
-            ),
-        )
-
-        client = mocker.AsyncMock(spec=HttpClient)
-
-        await get_docs(
-            _request(url=None, github_repo="https://github.com/owner/repo"),
-            client,
-        )
-
-        mock_fetch_gh.assert_called_once()
-        _, kwargs = mock_fetch_gh.call_args
-        assert kwargs["root_only"] is False
-        assert kwargs["doc_folder_override"] is None
+        assert kwargs["github_token"] == "request_token"
 
     @pytest.mark.asyncio
     async def test_github_subpath_used_as_doc_folder_override(self, mocker):
         mocker.patch(
             "src.core.orchestrator.fetch_robots_txt",
             return_value=RobotsParser(""),
-        )
-        mocker.patch(
-            "src.core.orchestrator.fetch_llms_txt",
-            return_value=None,
         )
         mock_fetch_gh = mocker.patch(
             "src.core.orchestrator.fetch_github_docs",
@@ -698,33 +566,23 @@ class TestGetDocs:
             return_value=RobotsParser(""),
         )
         mocker.patch(
-            "src.core.orchestrator.fetch_llms_txt",
-            return_value=None,
-        )
-        mocker.patch(
             "src.core.orchestrator.collect_sitemap_urls",
             return_value=[],
         )
 
-        call_count = 0
-
         async def mock_get(url, **kwargs):
-            nonlocal call_count
-            call_count += 1
             headers = kwargs.get("headers", {})
             if headers.get("Accept") == "text/markdown":
                 return mock_response(status_code=404)
             if url.endswith(".md"):
                 return mock_response(status_code=404)
-            if call_count == 1:
-                return mock_response(text="<html>no github</html>")
             return mock_response(
                 text=html_page("Home", "Welcome to the docs"),
                 content_type="text/html; charset=utf-8",
             )
 
-        client = mocker.AsyncMock(spec=HttpClient)
-        client.get = mocker.AsyncMock(side_effect=mock_get)
+        client, inner = mock_http_client(mocker)
+        inner.get = mocker.AsyncMock(side_effect=mock_get)
 
         result = await get_docs(_request(), client)
 
