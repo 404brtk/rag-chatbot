@@ -5,7 +5,6 @@ class GetDocsOptions(BaseModel):
     max_depth: int = 3
     delay_seconds: float = 1.5
     max_pages: int = 300
-    max_concurrent: int = 5
     timeout: float = 15.0
 
 
