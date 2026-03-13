@@ -47,9 +47,7 @@ class ThrottleState:
             last = self._last_request.get(domain, 0.0)
             wait = delay - (now - last)
             if wait > 0:
-                logger.debug(
-                    f"Rate limit: sleeping {wait:.1f}s before next request to {domain}"
-                )
+                # logger.debug(f"Rate limit: sleeping {wait:.1f}s before next request to {domain}")
                 await asyncio.sleep(wait)
             self._last_request[domain] = time.monotonic()
 
