@@ -179,6 +179,7 @@ async def get_docs(
                 doc_folder_override=doc_folder_override,
                 root_only=root_only,
                 github_token=settings.GITHUB_TOKEN,
+                on_progress=on_progress,
             )
             if gh_result:
                 ethics.license_spdx_id = gh_result.license_spdx_id
@@ -187,8 +188,6 @@ async def get_docs(
                 result.pages.extend(gh_result.pages)
                 result.source_method = SourceMethod.GITHUB
                 result.github_repo = repo_url
-                if on_progress:
-                    await on_progress(len(gh_result.pages), len(gh_result.pages))
                 return result
             else:
                 logger.info("GitHub fetch returned no pages, falling through")

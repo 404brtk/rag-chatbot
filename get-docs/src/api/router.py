@@ -96,7 +96,10 @@ async def _run_job(
         job.pages = _to_page_responses(result.pages)
         job.ethics = _build_ethics_info(result)
         job.request = request
-        job.progress = None
+        job.progress = JobProgress(
+            pages_fetched=len(result.pages),
+            pages_total=len(result.pages),
+        )
         await update_job(redis, job)
 
         logger.info(
@@ -110,7 +113,6 @@ async def _run_job(
             return
         job.status = TaskState.FAILED
         job.completed_at = datetime.now(timezone.utc)
-        job.progress = None
         await update_job(redis, job)
 
 

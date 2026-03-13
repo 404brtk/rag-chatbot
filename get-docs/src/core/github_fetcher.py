@@ -1,4 +1,5 @@
 import re
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 
 import httpx
@@ -392,6 +393,7 @@ async def fetch_github_docs(
     doc_folder_override: str | None = None,
     root_only: bool = False,
     github_token: str | None = None,
+    on_progress: Callable[[int, int | None], Awaitable[None]] | None = None,
 ) -> GitHubFetchResult | None:
     """Fetch documentation files from a GitHub repository.
 
@@ -503,6 +505,7 @@ async def fetch_github_docs(
     outcomes = await client.fetch_many(
         doc_paths,
         _fetch_one,
+        on_progress=on_progress,
     )
 
     if rate_limit_hit:
