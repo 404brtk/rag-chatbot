@@ -4,9 +4,8 @@ import xml.etree.ElementTree as ET
 import httpx
 
 from src.core.robots_parser import RobotsParser, fetch_robots_txt
-from src.utils.http_client import get_with_retry
+from src.utils.http_client import HttpClient
 from src.utils.lang_utils import ENGLISH_FOLDERS, is_lang_code
-from src.utils.rate_limiter import fetch_with_rate_limit
 from src.utils.url_utils import (
     extract_path,
     is_url_within_scope,
@@ -163,20 +162,16 @@ def _dedupe_versioned_sitemaps(subs: list[SitemapEntry]) -> list[SitemapEntry]:
 
 async def fetch_sitemap_urls(
     sitemap_url: str,
-    client: httpx.AsyncClient,
-    timeout: float = 10,
+    client: HttpClient,
+    timeout: float = 15,
     max_depth: int = 3,
     base_url: str | None = None,
-    max_concurrent: int = 5,
-    delay_seconds: float = 1.5,
 ) -> list[str]:
     if max_depth <= 0:
         return []
 
     try:
-        resp = await get_with_retry(
-            client, sitemap_url, follow_redirects=True, timeout=timeout
-        )
+        resp = await client.get(sitemap_url, follow_redirects=True, timeout=timeout)
         if resp.status_code != 200:
             return []
     except httpx.HTTPError:
@@ -207,15 +202,11 @@ async def fetch_sitemap_urls(
             timeout,
             max_depth - 1,
             base_url=base_url,
-            max_concurrent=max_concurrent,
-            delay_seconds=delay_seconds,
         )
 
-    outcomes = await fetch_with_rate_limit(
+    outcomes = await client.fetch_many(
         subs,
         _fetch_sub,
-        max_concurrent=max_concurrent,
-        delay_seconds=delay_seconds,
     )
 
     urls: list[str] = []
@@ -265,12 +256,10 @@ def _filter_language_urls(urls: list[str], base_url: str) -> list[str]:
 
 async def collect_sitemap_urls(
     base_url: str,
-    client: httpx.AsyncClient,
+    client: HttpClient,
     robots: RobotsParser | None = None,
     timeout: float = 15,
     max_depth: int = 3,
-    max_concurrent: int = 5,
-    delay_seconds: float = 1.5,
 ) -> list[str]:
     if robots is None:
         robots = await fetch_robots_txt(base_url, client, timeout)
@@ -287,8 +276,6 @@ async def collect_sitemap_urls(
                     timeout,
                     max_depth,
                     base_url=base_url,
-                    max_concurrent=max_concurrent,
-                    delay_seconds=delay_seconds,
                 )
             )
 
@@ -301,8 +288,6 @@ async def collect_sitemap_urls(
                 timeout,
                 max_depth,
                 base_url=base_url,
-                max_concurrent=max_concurrent,
-                delay_seconds=delay_seconds,
             )
             if urls:
                 all_page_urls.extend(urls)

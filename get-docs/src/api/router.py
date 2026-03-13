@@ -1,7 +1,7 @@
 import uuid
 from datetime import datetime, timezone
 from typing import Annotated
-import httpx
+
 import redis.asyncio as aioredis
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request
 from fastapi.responses import JSONResponse
@@ -17,6 +17,7 @@ from src.models.responses import (
     EthicsInfo,
     JobProgress,
 )
+from src.utils.http_client import HttpClient
 from src.utils.logger import logger
 
 router = APIRouter()
@@ -26,12 +27,12 @@ def get_redis(request: Request) -> aioredis.Redis:
     return request.app.state.redis
 
 
-def get_http_client(request: Request) -> httpx.AsyncClient:
+def get_http_client(request: Request) -> HttpClient:
     return request.app.state.http_client
 
 
 RedisDep = Annotated[aioredis.Redis, Depends(get_redis)]
-HttpClientDep = Annotated[httpx.AsyncClient, Depends(get_http_client)]
+HttpClientDep = Annotated[HttpClient, Depends(get_http_client)]
 
 
 def _build_ethics_info(result) -> EthicsInfo:
@@ -61,7 +62,7 @@ async def _run_job(
     job_id: str,
     request: GetDocsRequest,
     redis: aioredis.Redis,
-    http_client: httpx.AsyncClient,
+    http_client: HttpClient,
 ) -> None:
     target = str(request.url or request.github_repo)
     logger.info(f"[job:{job_id}] Starting job for {target}")

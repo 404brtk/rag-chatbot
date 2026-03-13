@@ -4,7 +4,7 @@ import httpx
 
 from src.config import settings
 from src.models.enums import ContentSignal
-from src.utils.http_client import get_with_retry
+from src.utils.http_client import HttpClient
 from src.utils.url_utils import extract_origin
 
 
@@ -216,11 +216,11 @@ class RobotsParser:
 
 
 async def fetch_robots_txt(
-    base_url: str, client: httpx.AsyncClient, timeout: float = 10
+    base_url: str, client: HttpClient, timeout: float = 15
 ) -> RobotsParser:
     url = extract_origin(base_url) + "/robots.txt"
     try:
-        resp = await get_with_retry(client, url, follow_redirects=True, timeout=timeout)
+        resp = await client.get(url, follow_redirects=True, timeout=timeout)
         if resp.status_code == 200:
             return RobotsParser(resp.text, user_agent=settings.BOT_NAME)
     except httpx.HTTPError:

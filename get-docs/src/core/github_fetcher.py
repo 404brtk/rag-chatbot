@@ -6,10 +6,9 @@ import httpx
 from src.models.enums import SourceMethod
 from src.models.responses import DocPage
 from src.parsing.mdx_strip import strip_mdx
-from src.utils.http_client import get_with_retry
+from src.utils.http_client import HttpClient
 from src.utils.lang_utils import ENGLISH_FOLDERS, is_lang_code
 from src.utils.logger import logger
-from src.utils.rate_limiter import fetch_with_rate_limit
 from src.utils.url_utils import strip_git_suffix
 
 # GitHub repo URL patterns:
@@ -304,7 +303,7 @@ class _RepoMeta:
 
 
 async def _fetch_repo_meta(
-    client: httpx.AsyncClient,
+    client: HttpClient,
     owner: str,
     repo: str,
     timeout: float,
@@ -312,8 +311,7 @@ async def _fetch_repo_meta(
 ) -> _RepoMeta:
     url = f"{_API_BASE}/repos/{owner}/{repo}"
     try:
-        resp = await get_with_retry(
-            client,
+        resp = await client.get(
             url,
             headers=_github_headers(token),
             follow_redirects=True,
@@ -331,7 +329,7 @@ async def _fetch_repo_meta(
 
 
 async def _fetch_tree(
-    client: httpx.AsyncClient,
+    client: HttpClient,
     owner: str,
     repo: str,
     branch: str,
@@ -341,8 +339,7 @@ async def _fetch_tree(
     """Fetch the recursive tree for a given branch."""
     url = f"{_API_BASE}/repos/{owner}/{repo}/git/trees/{branch}?recursive=1"
 
-    resp = await get_with_retry(
-        client,
+    resp = await client.get(
         url,
         headers=_github_headers(token),
         follow_redirects=True,
@@ -356,7 +353,7 @@ async def _fetch_tree(
 
 
 async def _fetch_file_content(
-    client: httpx.AsyncClient,
+    client: HttpClient,
     owner: str,
     repo: str,
     branch: str,
@@ -368,8 +365,7 @@ async def _fetch_file_content(
     headers = _github_headers(token)
     headers["Accept"] = "application/vnd.github.raw+json"
 
-    resp = await get_with_retry(
-        client,
+    resp = await client.get(
         url,
         headers=headers,
         follow_redirects=True,
@@ -390,11 +386,9 @@ async def _fetch_file_content(
 
 async def fetch_github_docs(
     repo_url: str,
-    client: httpx.AsyncClient,
+    client: HttpClient,
     timeout: float = 15,
     max_files: int = 300,
-    max_concurrent: int = 5,
-    delay_seconds: float = 1.5,
     doc_folder_override: str | None = None,
     root_only: bool = False,
     github_token: str | None = None,
@@ -491,7 +485,7 @@ async def fetch_github_docs(
     )
 
     # abort remaining fetches early when the rate limit is hit.
-    # the flag is shared across all concurrent tasks via the closure.
+    # the flag is checked before each sequential fetch via the closure.
     rate_limit_hit = False
 
     async def _fetch_one(path: str) -> str | None:
@@ -506,11 +500,9 @@ async def fetch_github_docs(
             rate_limit_hit = True
             return None
 
-    outcomes = await fetch_with_rate_limit(
+    outcomes = await client.fetch_many(
         doc_paths,
         _fetch_one,
-        max_concurrent=max_concurrent,
-        delay_seconds=delay_seconds,
     )
 
     if rate_limit_hit:

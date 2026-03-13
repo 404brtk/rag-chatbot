@@ -8,9 +8,8 @@ from src.models.requests import GetDocsOptions
 from src.models.responses import DocPage, EthicsContext
 from src.parsing.html_extractor import extract_content, extract_title
 from src.parsing.html_to_md import html_to_markdown
-from src.utils.http_client import get_with_retry
+from src.utils.http_client import HttpClient
 from src.utils.logger import logger
-from src.utils.rate_limiter import fetch_with_rate_limit
 from src.utils.url_utils import (
     extract_path,
     has_md_extension,
@@ -31,12 +30,11 @@ def html_to_doc_page(url: str, html: str, source_method: SourceMethod) -> DocPag
 
 async def _try_content_negotiation(
     url: str,
-    client: httpx.AsyncClient,
+    client: HttpClient,
     timeout: float,
 ) -> str | None:
     try:
-        resp = await get_with_retry(
-            client,
+        resp = await client.get(
             url,
             headers={"Accept": "text/markdown"},
             follow_redirects=True,
@@ -55,14 +53,12 @@ async def _try_content_negotiation(
 
 async def _try_md_url(
     url: str,
-    client: httpx.AsyncClient,
+    client: HttpClient,
     timeout: float,
 ) -> str | None:
     md_url = url if has_md_extension(url) else url.rstrip("/") + ".md"
     try:
-        resp = await get_with_retry(
-            client, md_url, follow_redirects=True, timeout=timeout
-        )
+        resp = await client.get(md_url, follow_redirects=True, timeout=timeout)
         content_type = resp.headers.get("content-type", "")
         if resp.status_code != 200:
             return None
@@ -77,12 +73,12 @@ async def _try_md_url(
 
 async def _fetch_html(
     url: str,
-    client: httpx.AsyncClient,
+    client: HttpClient,
     timeout: float,
     source_method: SourceMethod,
 ) -> DocPage | None:
     try:
-        resp = await get_with_retry(client, url, follow_redirects=True, timeout=timeout)
+        resp = await client.get(url, follow_redirects=True, timeout=timeout)
         content_type = resp.headers.get("content-type", "")
         if resp.status_code != 200:
             return None
@@ -96,7 +92,7 @@ async def _fetch_html(
 
 async def probe_and_fetch(
     url: str,
-    client: httpx.AsyncClient,
+    client: HttpClient,
     timeout: float,
     source_method: SourceMethod,
 ) -> tuple[DocPage | None, FetchMethod]:
@@ -121,7 +117,7 @@ async def probe_and_fetch(
 
 async def fetch_page_as_markdown(
     url: str,
-    client: httpx.AsyncClient,
+    client: HttpClient,
     timeout: float,
     source_method: SourceMethod,
     preferred_method: FetchMethod | None = None,
@@ -175,7 +171,7 @@ def filter_urls_by_robots(
 
 async def fetch_and_convert_urls(
     urls: list[str],
-    client: httpx.AsyncClient,
+    client: HttpClient,
     robots: RobotsParser,
     options: GetDocsOptions,
     source_method: SourceMethod,
@@ -207,7 +203,6 @@ async def fetch_and_convert_urls(
     logger.info(f"Fetching {len(filtered)} URLs (method probe on first URL)")
 
     pages: list[DocPage] = []
-    effective_delay = max(options.delay_seconds, robots.get_crawl_delay() or 0)
 
     first_page, method = await probe_and_fetch(
         filtered[0], client, options.timeout, source_method
@@ -222,7 +217,7 @@ async def fetch_and_convert_urls(
 
     remaining = filtered[1:]
     if remaining:
-        outcomes = await fetch_with_rate_limit(
+        outcomes = await client.fetch_many(
             remaining,
             lambda url: fetch_page_as_markdown(
                 url,
@@ -231,8 +226,6 @@ async def fetch_and_convert_urls(
                 source_method,
                 preferred_method=method,
             ),
-            max_concurrent=options.max_concurrent,
-            delay_seconds=effective_delay,
             on_progress=on_progress,
             progress_offset=len(pages),
             progress_total=len(filtered),

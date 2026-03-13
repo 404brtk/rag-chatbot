@@ -18,8 +18,9 @@ from src.core.sitemap_parser import collect_sitemap_urls
 from src.models.enums import SourceMethod
 from src.models.requests import GetDocsOptions, GetDocsRequest
 from src.models.responses import DocPage, EthicsContext, GetDocsResult
-from src.utils.http_client import get_with_retry
+from src.utils.http_client import HttpClient
 from src.utils.logger import logger
+from src.utils.url_utils import extract_domain
 
 
 def _llms_full_to_doc_page(llms_result: LlmsTxtResult) -> DocPage:
@@ -33,7 +34,7 @@ def _llms_full_to_doc_page(llms_result: LlmsTxtResult) -> DocPage:
 
 async def _try_sitemap(
     base_url: str,
-    client: httpx.AsyncClient,
+    client: HttpClient,
     robots: RobotsParser,
     options: GetDocsOptions,
     ethics: EthicsContext,
@@ -45,8 +46,6 @@ async def _try_sitemap(
         robots=robots,
         timeout=options.timeout,
         max_depth=options.max_depth,
-        max_concurrent=options.max_concurrent,
-        delay_seconds=options.delay_seconds,
     )
     if not urls:
         return []
@@ -64,7 +63,7 @@ async def _try_sitemap(
 
 async def _resolve_github_repo(
     request: GetDocsRequest,
-    client: httpx.AsyncClient,
+    client: HttpClient,
     timeout: float,
 ) -> str | None:
     if request.github_repo:
@@ -74,8 +73,8 @@ async def _resolve_github_repo(
         return None
 
     try:
-        resp = await get_with_retry(
-            client, str(request.url), follow_redirects=True, timeout=timeout
+        resp = await client.get(
+            str(request.url), follow_redirects=True, timeout=timeout
         )
         if resp.status_code == 200 and "text/html" in resp.headers.get(
             "content-type", ""
@@ -88,7 +87,7 @@ async def _resolve_github_repo(
 
 async def get_docs(
     request: GetDocsRequest,
-    client: httpx.AsyncClient,
+    client: HttpClient,
     on_progress: ProgressCallback | None = None,
 ) -> GetDocsResult:
     """Main orchestration: fetch docs from the best available source.
@@ -111,6 +110,11 @@ async def get_docs(
             f"robots.txt: crawl_delay={ethics.robots_crawl_delay_seconds}, ai_input={ethics.content_signal_ai_input}"
         )
 
+        crawl_delay = robots.get_crawl_delay() or 0
+        effective_delay = max(options.delay_seconds, crawl_delay)
+        domain = extract_domain(base_url)
+        client.set_domain_delay(domain, effective_delay)
+
     # 1. llms-full.txt / llms.txt
     if base_url and robots:
         logger.info("Step 1: Trying llms.txt / llms-full.txt")
@@ -119,7 +123,6 @@ async def get_docs(
                 base_url,
                 client,
                 robots=robots,
-                delay_seconds=options.delay_seconds,
                 ethics=ethics,
             )
 
@@ -173,8 +176,6 @@ async def get_docs(
                 repo_url,
                 client,
                 max_files=options.max_pages,
-                max_concurrent=options.max_concurrent,
-                delay_seconds=options.delay_seconds,
                 doc_folder_override=doc_folder_override,
                 root_only=root_only,
                 github_token=settings.GITHUB_TOKEN,

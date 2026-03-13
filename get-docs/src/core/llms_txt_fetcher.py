@@ -1,11 +1,10 @@
-import asyncio
 import re
 from dataclasses import dataclass, field
 import httpx
 
 from src.core.robots_parser import RobotsParser, fetch_robots_txt
 from src.models.responses import EthicsContext
-from src.utils.http_client import get_with_retry
+from src.utils.http_client import HttpClient
 from src.utils.logger import logger
 from src.utils.url_utils import (
     extract_path,
@@ -118,16 +117,14 @@ _LLMS_TXT_PATHS = (
 
 async def fetch_llms_txt(
     base_url: str,
-    client: httpx.AsyncClient,
+    client: HttpClient,
     robots: RobotsParser | None = None,
-    timeout: float = 10,
-    delay_seconds: float = 0.5,
+    timeout: float = 15,
     ethics: EthicsContext | None = None,
 ) -> LlmsTxtResult | None:
     if robots is None:
         robots = await fetch_robots_txt(base_url, client, timeout)
 
-    request_count = 0
     for parent in url_path_parents(base_url):
         for filename, is_full in _LLMS_TXT_PATHS:
             url = parent.rstrip("/") + "/" + filename
@@ -144,14 +141,8 @@ async def fetch_llms_txt(
                     ethics.pages_filtered_by_robots += 1
                 continue
 
-            if request_count > 0 and delay_seconds > 0:
-                await asyncio.sleep(delay_seconds)
-
             try:
-                request_count += 1
-                resp = await get_with_retry(
-                    client, url, follow_redirects=True, timeout=timeout
-                )
+                resp = await client.get(url, follow_redirects=True, timeout=timeout)
                 if resp.status_code != 200:
                     continue
 
