@@ -4,7 +4,7 @@ import httpx
 
 from src.core.robots_parser import RobotsParser
 from src.models.enums import FetchMethod, SourceMethod
-from src.models.requests import GetDocsOptions
+from src.models.requests import GetDocsRequest
 from src.models.responses import DocPage, EthicsContext
 from src.parsing.html_extractor import extract_content, extract_title
 from src.parsing.html_to_md import html_to_markdown
@@ -173,7 +173,7 @@ async def fetch_and_convert_urls(
     urls: list[str],
     client: HttpClient,
     robots: RobotsParser,
-    options: GetDocsOptions,
+    options: GetDocsRequest,
     source_method: SourceMethod,
     ethics: EthicsContext,
     base_url: str | None = None,

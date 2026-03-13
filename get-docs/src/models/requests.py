@@ -1,17 +1,13 @@
 from pydantic import BaseModel, HttpUrl, model_validator
 
 
-class GetDocsOptions(BaseModel):
+class GetDocsRequest(BaseModel):
+    url: HttpUrl | None = None
+    github_repo: str | None = None
     max_depth: int = 3
     delay_seconds: float = 1.5
     max_pages: int = 300
     timeout: float = 15.0
-
-
-class GetDocsRequest(BaseModel):
-    url: HttpUrl | None = None
-    github_repo: str | None = None
-    options: GetDocsOptions = GetDocsOptions()
 
     @model_validator(mode="after")
     def at_least_one_source(self):

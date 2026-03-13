@@ -9,7 +9,7 @@ from src.core.crawler import (
 )
 from src.core.robots_parser import RobotsParser
 from src.models.enums import FetchMethod, SourceMethod
-from src.models.requests import GetDocsOptions
+from src.models.requests import GetDocsRequest
 from src.models.responses import EthicsContext
 from tests.conftest import html_page, mock_http_client, mock_response
 
@@ -413,7 +413,7 @@ class TestFetchAndConvertUrls:
             urls,
             client,
             RobotsParser(""),
-            GetDocsOptions(max_pages=10, delay_seconds=0),
+            GetDocsRequest(url="https://example.com", max_pages=10, delay_seconds=0),
             SourceMethod.SITEMAP_CRAWL,
             EthicsContext(),
             base_url="https://example.com/docs/en",
@@ -439,7 +439,7 @@ class TestFetchAndConvertUrls:
             urls,
             client,
             RobotsParser(""),
-            GetDocsOptions(max_pages=10, delay_seconds=0),
+            GetDocsRequest(url="https://example.com", max_pages=10, delay_seconds=0),
             SourceMethod.SITEMAP_CRAWL,
             EthicsContext(),
         )
@@ -460,7 +460,7 @@ class TestFetchAndConvertUrls:
             urls,
             client,
             RobotsParser(""),
-            GetDocsOptions(max_pages=10, delay_seconds=0),
+            GetDocsRequest(url="https://example.com", max_pages=10, delay_seconds=0),
             SourceMethod.LLMS_TXT,
             EthicsContext(),
         )
@@ -481,7 +481,7 @@ class TestFetchAndConvertUrls:
             urls,
             client,
             RobotsParser(""),
-            GetDocsOptions(max_pages=10, delay_seconds=0),
+            GetDocsRequest(url="https://example.com", max_pages=10, delay_seconds=0),
             SourceMethod.SITEMAP_CRAWL,
             EthicsContext(),
             base_url="https://example.com/docs/en",
@@ -505,7 +505,7 @@ class TestFetchAndConvertUrls:
             urls,
             client,
             RobotsParser(""),
-            GetDocsOptions(max_pages=10, delay_seconds=0),
+            GetDocsRequest(url="https://example.com", max_pages=10, delay_seconds=0),
             SourceMethod.SITEMAP_CRAWL,
             EthicsContext(),
             base_url="https://example.com/docs/en",
@@ -535,7 +535,7 @@ class TestFetchAndConvertUrls:
             urls,
             client,
             robots,
-            GetDocsOptions(max_pages=10, delay_seconds=0),
+            GetDocsRequest(url="https://example.com", max_pages=10, delay_seconds=0),
             SourceMethod.SITEMAP_CRAWL,
             ethics,
             base_url="https://example.com",
@@ -557,7 +557,7 @@ class TestFetchAndConvertUrls:
             urls,
             client,
             RobotsParser(""),
-            GetDocsOptions(max_pages=3, delay_seconds=0),
+            GetDocsRequest(url="https://example.com", max_pages=3, delay_seconds=0),
             SourceMethod.SITEMAP_CRAWL,
             EthicsContext(),
         )
@@ -586,7 +586,7 @@ class TestFetchAndConvertUrls:
             urls,
             client,
             RobotsParser(""),
-            GetDocsOptions(max_pages=10, delay_seconds=0),
+            GetDocsRequest(url="https://example.com", max_pages=10, delay_seconds=0),
             SourceMethod.SITEMAP_CRAWL,
             EthicsContext(),
             on_progress=progress,

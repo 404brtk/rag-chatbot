@@ -5,7 +5,7 @@ from src.core.llms_txt_fetcher import LlmsTxtLink, LlmsTxtResult
 from src.core.orchestrator import get_docs
 from src.core.robots_parser import RobotsParser
 from src.models.enums import SourceMethod
-from src.models.requests import GetDocsOptions, GetDocsRequest
+from src.models.requests import GetDocsRequest
 from src.models.responses import DocPage
 from src.utils.http_client import HttpClient
 from tests.conftest import html_page, mock_response, mock_http_client
@@ -15,10 +15,8 @@ def _request(url="https://docs.example.com", github_repo=None):
     return GetDocsRequest(
         url=url,
         github_repo=github_repo,
-        options=GetDocsOptions(
-            max_pages=10,
-            delay_seconds=0,
-        ),
+        max_pages=10,
+        delay_seconds=0,
     )
 
 

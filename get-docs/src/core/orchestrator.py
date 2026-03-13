@@ -16,7 +16,7 @@ from src.core.llms_txt_fetcher import LlmsTxtResult, fetch_llms_txt
 from src.core.robots_parser import RobotsParser, fetch_robots_txt
 from src.core.sitemap_parser import collect_sitemap_urls
 from src.models.enums import SourceMethod
-from src.models.requests import GetDocsOptions, GetDocsRequest
+from src.models.requests import GetDocsRequest
 from src.models.responses import DocPage, EthicsContext, GetDocsResult
 from src.utils.http_client import HttpClient
 from src.utils.logger import logger
@@ -36,7 +36,7 @@ async def _try_sitemap(
     base_url: str,
     client: HttpClient,
     robots: RobotsParser,
-    options: GetDocsOptions,
+    request: GetDocsRequest,
     ethics: EthicsContext,
     on_progress: ProgressCallback | None = None,
 ) -> list[DocPage]:
@@ -44,8 +44,8 @@ async def _try_sitemap(
         base_url,
         client,
         robots=robots,
-        timeout=options.timeout,
-        max_depth=options.max_depth,
+        timeout=request.timeout,
+        max_depth=request.max_depth,
     )
     if not urls:
         return []
@@ -53,7 +53,7 @@ async def _try_sitemap(
         urls,
         client,
         robots,
-        options,
+        request,
         SourceMethod.SITEMAP_CRAWL,
         ethics,
         base_url=base_url,
@@ -96,7 +96,6 @@ async def get_docs(
     llms-full.txt -> llms.txt links -> GitHub docs -> sitemap crawl.
     """
     base_url = str(request.url) if request.url else None
-    options = request.options
     ethics = EthicsContext()
     result = GetDocsResult(url=base_url or "", ethics=ethics)
 
@@ -111,7 +110,7 @@ async def get_docs(
         )
 
         crawl_delay = robots.get_crawl_delay() or 0
-        effective_delay = max(options.delay_seconds, crawl_delay)
+        effective_delay = max(request.delay_seconds, crawl_delay)
         domain = extract_domain(base_url)
         client.set_domain_delay(domain, effective_delay)
 
@@ -141,7 +140,7 @@ async def get_docs(
                     urls,
                     client,
                     robots,
-                    options,
+                    request,
                     SourceMethod.LLMS_TXT,
                     ethics,
                     on_progress=on_progress,
@@ -160,7 +159,7 @@ async def get_docs(
 
     # 2. GitHub docs
     logger.info("Step 2: Trying GitHub docs")
-    repo_url = await _resolve_github_repo(request, client, timeout=options.timeout)
+    repo_url = await _resolve_github_repo(request, client, timeout=request.timeout)
     if repo_url:
         logger.info(f"Resolved GitHub repo: {repo_url}")
         doc_folder_override: str | None = None
@@ -175,7 +174,7 @@ async def get_docs(
             gh_result: GitHubFetchResult | None = await fetch_github_docs(
                 repo_url,
                 client,
-                max_files=options.max_pages,
+                max_files=request.max_pages,
                 doc_folder_override=doc_folder_override,
                 root_only=root_only,
                 github_token=settings.GITHUB_TOKEN,
@@ -204,7 +203,7 @@ async def get_docs(
                 base_url,
                 client,
                 robots,
-                options,
+                request,
                 ethics,
                 on_progress,
             )
@@ -221,7 +220,7 @@ async def get_docs(
     if not result.pages and base_url:
         logger.info(f"Step 4: Falling back to single-page fetch for {base_url}")
         page = await fetch_page_as_markdown(
-            base_url, client, options.timeout, SourceMethod.SINGLE_PAGE
+            base_url, client, request.timeout, SourceMethod.SINGLE_PAGE
         )
         if page:
             result.pages.append(page)
