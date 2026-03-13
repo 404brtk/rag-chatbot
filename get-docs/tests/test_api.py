@@ -10,7 +10,7 @@ from fastapi.testclient import TestClient
 from src.api.router import router
 from src.core.llms_txt_fetcher import LlmsTxtResult
 from src.core.robots_parser import RobotsParser
-from src.utils.http_client import HttpClient
+from src.utils.http_client import ThrottleState
 
 
 class FakeRedis:
@@ -28,7 +28,8 @@ class FakeRedis:
 
 
 def _mock_http_client():
-    client = AsyncMock(spec=HttpClient)
+    """Mock httpx.AsyncClient that returns 404 for all GET requests."""
+    client = AsyncMock(spec=httpx.AsyncClient)
     client.get = AsyncMock(
         return_value=httpx.Response(
             status_code=404,
@@ -45,6 +46,7 @@ def _create_test_app() -> FastAPI:
     async def lifespan(app: FastAPI):
         app.state.redis = FakeRedis()
         app.state.http_client = _mock_http_client()
+        app.state.throttle = ThrottleState()
         yield
 
     test_app = FastAPI(lifespan=lifespan)

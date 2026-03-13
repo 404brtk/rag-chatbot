@@ -2,34 +2,24 @@ import httpx
 import pytest
 
 from src.utils.http_client import HttpClient
-from tests.conftest import mock_response
-
-
-@pytest.fixture()
-def client(mocker):
-    inner = mocker.AsyncMock(spec=httpx.AsyncClient)
-    return HttpClient(inner, default_delay=0)
-
-
-def _inner(client: HttpClient):
-    return client._client
+from tests.conftest import mock_http_client, mock_response
 
 
 class TestRetryBehavior:
     @pytest.mark.asyncio
-    async def test_success_no_retry(self, client):
-        _inner(client).get = _inner(client).get.__class__(
-            return_value=mock_response(text="ok")
-        )
+    async def test_success_no_retry(self, mocker):
+        client, inner = mock_http_client(mocker)
+        inner.get = mocker.AsyncMock(return_value=mock_response(text="ok"))
 
         resp = await client.get("https://example.com")
         assert resp.status_code == 200
-        assert _inner(client).get.call_count == 1
+        assert inner.get.call_count == 1
 
     @pytest.mark.asyncio
     @pytest.mark.parametrize("status_code", [429, 500, 502, 503, 504])
-    async def test_retryable_status_triggers_retry(self, client, status_code):
-        _inner(client).get = _inner(client).get.__class__(
+    async def test_retryable_status_triggers_retry(self, mocker, status_code):
+        client, inner = mock_http_client(mocker)
+        inner.get = mocker.AsyncMock(
             side_effect=[
                 mock_response(status_code=status_code),
                 mock_response(text="ok"),
@@ -38,76 +28,72 @@ class TestRetryBehavior:
 
         resp = await client.get("https://example.com")
         assert resp.status_code == 200
-        assert _inner(client).get.call_count == 2
+        assert inner.get.call_count == 2
 
     @pytest.mark.asyncio
-    async def test_retry_after_header_respected(self, mocker, client):
+    async def test_retry_after_header_respected(self, mocker):
         sleep_mock = mocker.patch(
             "src.utils.http_client.asyncio.sleep", new_callable=mocker.AsyncMock
         )
+        client, inner = mock_http_client(mocker)
 
         retry_resp = httpx.Response(
             status_code=429,
             headers={"Retry-After": "7", "content-type": "text/plain"},
             request=httpx.Request("GET", "https://example.com"),
         )
-        _inner(client).get = _inner(client).get.__class__(
-            side_effect=[retry_resp, mock_response(text="ok")]
-        )
+        inner.get = mocker.AsyncMock(side_effect=[retry_resp, mock_response(text="ok")])
 
         resp = await client.get("https://example.com")
         assert resp.status_code == 200
         sleep_mock.assert_awaited_once_with(7.0)
 
     @pytest.mark.asyncio
-    async def test_max_retries_exhausted_returns_last_response(self, client):
-        _inner(client).get = _inner(client).get.__class__(
-            return_value=mock_response(status_code=500)
-        )
+    async def test_max_retries_exhausted_returns_last_response(self, mocker):
+        client, inner = mock_http_client(mocker)
+        inner.get = mocker.AsyncMock(return_value=mock_response(status_code=500))
 
         resp = await client.get("https://example.com", max_retries=2)
         assert resp.status_code == 500
-        assert _inner(client).get.call_count == 3
+        assert inner.get.call_count == 3
 
     @pytest.mark.asyncio
     @pytest.mark.parametrize("status_code", [403, 404])
-    async def test_non_retryable_status_returned_immediately(self, client, status_code):
-        _inner(client).get = _inner(client).get.__class__(
+    async def test_non_retryable_status_returned_immediately(self, mocker, status_code):
+        client, inner = mock_http_client(mocker)
+        inner.get = mocker.AsyncMock(
             return_value=mock_response(status_code=status_code)
         )
 
         resp = await client.get("https://example.com")
         assert resp.status_code == status_code
-        assert _inner(client).get.call_count == 1
+        assert inner.get.call_count == 1
 
     @pytest.mark.asyncio
     @pytest.mark.parametrize(
         "exc", [httpx.ReadTimeout("slow"), httpx.ConnectError("refused")]
     )
-    async def test_transient_error_triggers_retry(self, client, exc):
-        _inner(client).get = _inner(client).get.__class__(
-            side_effect=[exc, mock_response(text="ok")]
-        )
+    async def test_transient_error_triggers_retry(self, mocker, exc):
+        client, inner = mock_http_client(mocker)
+        inner.get = mocker.AsyncMock(side_effect=[exc, mock_response(text="ok")])
 
         resp = await client.get("https://example.com")
         assert resp.status_code == 200
-        assert _inner(client).get.call_count == 2
+        assert inner.get.call_count == 2
 
     @pytest.mark.asyncio
-    async def test_transient_error_exhausted_raises(self, client):
-        _inner(client).get = _inner(client).get.__class__(
-            side_effect=httpx.ReadTimeout("slow")
-        )
+    async def test_transient_error_exhausted_raises(self, mocker):
+        client, inner = mock_http_client(mocker)
+        inner.get = mocker.AsyncMock(side_effect=httpx.ReadTimeout("slow"))
 
         with pytest.raises(httpx.ReadTimeout):
             await client.get("https://example.com", max_retries=1)
-        assert _inner(client).get.call_count == 2
+        assert inner.get.call_count == 2
 
     @pytest.mark.asyncio
-    async def test_kwargs_passed_through(self, client):
-        _inner(client).get = _inner(client).get.__class__(
-            return_value=mock_response(text="ok")
-        )
+    async def test_kwargs_passed_through(self, mocker):
+        client, inner = mock_http_client(mocker)
+        inner.get = mocker.AsyncMock(return_value=mock_response(text="ok"))
 
         await client.get(
             "https://example.com",
@@ -115,7 +101,7 @@ class TestRetryBehavior:
             timeout=5.0,
             headers={"Accept": "text/html"},
         )
-        _inner(client).get.assert_called_once_with(
+        inner.get.assert_called_once_with(
             "https://example.com",
             follow_redirects=True,
             timeout=5.0,
@@ -178,9 +164,8 @@ class TestThrottling:
         sleep_mock = mocker.patch(
             "src.utils.http_client.asyncio.sleep", new_callable=mocker.AsyncMock
         )
-        inner = mocker.AsyncMock(spec=httpx.AsyncClient)
+        client, inner = mock_http_client(mocker)
         inner.get = mocker.AsyncMock(return_value=mock_response(text="ok"))
-        client = HttpClient(inner, default_delay=0)
 
         await client.get("https://example.com/a")
         await client.get("https://example.com/b")
@@ -191,21 +176,18 @@ class TestThrottling:
 
 class TestAclose:
     @pytest.mark.asyncio
-    async def test_delegates_to_inner_client(self, client):
+    async def test_delegates_to_inner_client(self, mocker):
+        client, inner = mock_http_client(mocker)
         await client.aclose()
-        _inner(client).aclose.assert_awaited_once()
+        inner.aclose.assert_awaited_once()
 
 
 class TestFetchMany:
-    @pytest.fixture()
-    def fetch_client(self, mocker):
-        inner = mocker.AsyncMock(spec=httpx.AsyncClient)
-        return HttpClient(inner, default_delay=0)
-
     @pytest.mark.asyncio
-    async def test_runs_sequentially_not_concurrently(self, fetch_client):
+    async def test_runs_sequentially_not_concurrently(self, mocker):
         import asyncio
 
+        client, _ = mock_http_client(mocker)
         active = 0
         max_active = 0
 
@@ -217,18 +199,20 @@ class TestFetchMany:
             active -= 1
             return item * 10
 
-        results = await fetch_client.fetch_many(list(range(5)), fetch)
+        results = await client.fetch_many(list(range(5)), fetch)
 
         assert max_active == 1
         assert len(results) == 5
         assert [item for item, _ in results] == [0, 1, 2, 3, 4]
 
     @pytest.mark.asyncio
-    async def test_order_preserved(self, fetch_client):
+    async def test_order_preserved(self, mocker):
+        client, _ = mock_http_client(mocker)
+
         async def fetch(item):
             return item * 2
 
-        results = await fetch_client.fetch_many([1, 2, 3, 4, 5], fetch)
+        results = await client.fetch_many([1, 2, 3, 4, 5], fetch)
 
         items = [item for item, _ in results]
         assert items == [1, 2, 3, 4, 5]
@@ -236,13 +220,15 @@ class TestFetchMany:
         assert values == [2, 4, 6, 8, 10]
 
     @pytest.mark.asyncio
-    async def test_exceptions_returned_not_raised(self, fetch_client):
+    async def test_exceptions_returned_not_raised(self, mocker):
+        client, _ = mock_http_client(mocker)
+
         async def fetch(item):
             if item == 2:
                 raise ValueError("boom")
             return item * 10
 
-        results = await fetch_client.fetch_many([1, 2, 3], fetch)
+        results = await client.fetch_many([1, 2, 3], fetch)
 
         assert len(results) == 3
         assert results[0] == (1, 10)
@@ -251,28 +237,33 @@ class TestFetchMany:
         assert results[2] == (3, 30)
 
     @pytest.mark.asyncio
-    async def test_continues_after_exception(self, fetch_client):
+    async def test_continues_after_exception(self, mocker):
+        client, _ = mock_http_client(mocker)
+
         async def fetch(item):
             if item == 1:
                 raise RuntimeError("fail")
             return item
 
-        results = await fetch_client.fetch_many([1, 2, 3], fetch)
+        results = await client.fetch_many([1, 2, 3], fetch)
 
         assert isinstance(results[0][1], RuntimeError)
         assert results[1] == (2, 2)
         assert results[2] == (3, 3)
 
     @pytest.mark.asyncio
-    async def test_empty_items(self, fetch_client):
+    async def test_empty_items(self, mocker):
+        client, _ = mock_http_client(mocker)
+
         async def fetch(item):
             return item
 
-        results = await fetch_client.fetch_many([], fetch)
+        results = await client.fetch_many([], fetch)
         assert results == []
 
     @pytest.mark.asyncio
-    async def test_progress_called_for_each_item(self, fetch_client):
+    async def test_progress_called_for_each_item(self, mocker):
+        client, _ = mock_http_client(mocker)
         progress_calls: list[tuple[int, int]] = []
 
         async def on_progress(completed, total):
@@ -281,7 +272,7 @@ class TestFetchMany:
         async def fetch(item):
             return item
 
-        await fetch_client.fetch_many(
+        await client.fetch_many(
             [1, 2, 3],
             fetch,
             on_progress=on_progress,
@@ -290,7 +281,8 @@ class TestFetchMany:
         assert progress_calls == [(1, 3), (2, 3), (3, 3)]
 
     @pytest.mark.asyncio
-    async def test_progress_offset_and_total(self, fetch_client):
+    async def test_progress_offset_and_total(self, mocker):
+        client, _ = mock_http_client(mocker)
         progress_calls: list[tuple[int, int]] = []
 
         async def on_progress(completed, total):
@@ -299,7 +291,7 @@ class TestFetchMany:
         async def fetch(item):
             return item
 
-        await fetch_client.fetch_many(
+        await client.fetch_many(
             [1, 2],
             fetch,
             on_progress=on_progress,
@@ -310,7 +302,8 @@ class TestFetchMany:
         assert progress_calls == [(6, 10), (7, 10)]
 
     @pytest.mark.asyncio
-    async def test_progress_called_even_on_exception(self, fetch_client):
+    async def test_progress_called_even_on_exception(self, mocker):
+        client, _ = mock_http_client(mocker)
         progress_calls: list[tuple[int, int]] = []
 
         async def on_progress(completed, total):
@@ -321,7 +314,7 @@ class TestFetchMany:
                 raise ValueError("boom")
             return item
 
-        await fetch_client.fetch_many(
+        await client.fetch_many(
             [1, 2, 3],
             fetch,
             on_progress=on_progress,
