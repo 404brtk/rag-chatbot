@@ -9,6 +9,7 @@ from src.models.responses import DocPage, EthicsContext
 from src.parsing.html_extractor import extract_content, extract_title
 from src.parsing.html_to_md import html_to_markdown
 from src.utils.http_client import HttpClient
+from src.utils.lang_utils import filter_language_urls
 from src.utils.logger import logger
 from src.utils.url_utils import (
     extract_path,
@@ -18,6 +19,7 @@ from src.utils.url_utils import (
     make_url_prefix,
     normalize_url,
 )
+from src.utils.version_utils import dedupe_versioned_urls
 
 ProgressCallback = Callable[[int, int | None], Awaitable[None]]
 
@@ -85,7 +87,7 @@ async def _fetch_html(
             return None
         if "text/html" not in content_type:
             return None
-        page = html_to_doc_page(url, resp.text, source_method)
+        page = html_to_doc_page(url=url, html=resp.text, source_method=source_method)
         return page if page.content else None
     except httpx.HTTPError:
         return None
@@ -98,14 +100,14 @@ async def probe_and_fetch(
     source_method: SourceMethod,
 ) -> tuple[DocPage | None, FetchMethod]:
     if not has_md_extension(url):
-        md = await _try_content_negotiation(url, client, timeout)
+        md = await _try_content_negotiation(url=url, client=client, timeout=timeout)
         if md:
             logger.info(f"Probed {url} -> content_negotiation (markdown)")
             return DocPage(
                 url=url, title="", content=md, source_method=source_method
             ), FetchMethod.CONTENT_NEGOTIATION
 
-    md = await _try_md_url(url, client, timeout)
+    md = await _try_md_url(url=url, client=client, timeout=timeout)
     if md:
         logger.info(f"Probed {url} -> md_url")
         return DocPage(
@@ -113,7 +115,9 @@ async def probe_and_fetch(
         ), FetchMethod.MD_URL
 
     logger.info(f"Probed {url} -> html")
-    return await _fetch_html(url, client, timeout, source_method), FetchMethod.HTML
+    return await _fetch_html(
+        url=url, client=client, timeout=timeout, source_method=source_method
+    ), FetchMethod.HTML
 
 
 async def fetch_page_as_markdown(
@@ -124,29 +128,37 @@ async def fetch_page_as_markdown(
     preferred_method: FetchMethod | None = None,
 ) -> DocPage | None:
     if preferred_method is None:
-        page, _ = await probe_and_fetch(url, client, timeout, source_method)
+        page, _ = await probe_and_fetch(
+            url=url, client=client, timeout=timeout, source_method=source_method
+        )
         return page
 
     if has_md_extension(url):
-        md = await _try_md_url(url, client, timeout)
+        md = await _try_md_url(url=url, client=client, timeout=timeout)
         if md:
             return DocPage(url=url, title="", content=md, source_method=source_method)
-        return await _fetch_html(url, client, timeout, source_method)
+        return await _fetch_html(
+            url=url, client=client, timeout=timeout, source_method=source_method
+        )
 
     if preferred_method == FetchMethod.CONTENT_NEGOTIATION:
-        md = await _try_content_negotiation(url, client, timeout)
+        md = await _try_content_negotiation(url=url, client=client, timeout=timeout)
         if md:
             return DocPage(url=url, title="", content=md, source_method=source_method)
 
     elif preferred_method == FetchMethod.MD_URL:
-        md = await _try_md_url(url, client, timeout)
+        md = await _try_md_url(url=url, client=client, timeout=timeout)
         if md:
             return DocPage(url=url, title="", content=md, source_method=source_method)
 
     elif preferred_method == FetchMethod.HTML:
-        return await _fetch_html(url, client, timeout, source_method)
+        return await _fetch_html(
+            url=url, client=client, timeout=timeout, source_method=source_method
+        )
 
-    return await _fetch_html(url, client, timeout, source_method)
+    return await _fetch_html(
+        url=url, client=client, timeout=timeout, source_method=source_method
+    )
 
 
 def filter_urls_by_robots(
@@ -191,8 +203,13 @@ async def fetch_and_convert_urls(
     if base_url is not None:
         prefix = make_url_prefix(base_url)
         unique = [u for u in unique if is_url_within_scope(u, prefix)]
+        unique = filter_language_urls(unique, base_url)
 
-    filtered, robots_count, signal_count = filter_urls_by_robots(unique, robots)
+    unique = dedupe_versioned_urls(unique)
+
+    filtered, robots_count, signal_count = filter_urls_by_robots(
+        urls=unique, robots=robots
+    )
     ethics.pages_filtered_by_robots += robots_count
     ethics.pages_filtered_by_content_signal += signal_count
 
@@ -212,7 +229,10 @@ async def fetch_and_convert_urls(
     pages: list[DocPage] = []
 
     probe_page, method = await probe_and_fetch(
-        probe_url, client, options.timeout, source_method
+        url=probe_url,
+        client=client,
+        timeout=options.timeout,
+        source_method=source_method,
     )
     if probe_page:
         pages.append(probe_page)
@@ -225,12 +245,12 @@ async def fetch_and_convert_urls(
     remaining = [u for u in filtered if u != probe_url]
     if remaining:
         outcomes = await client.fetch_many(
-            remaining,
-            lambda url: fetch_page_as_markdown(
-                url,
-                client,
-                options.timeout,
-                source_method,
+            items=remaining,
+            fetch_fn=lambda url: fetch_page_as_markdown(
+                url=url,
+                client=client,
+                timeout=options.timeout,
+                source_method=source_method,
                 preferred_method=method,
             ),
             on_progress=on_progress,

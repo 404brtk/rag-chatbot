@@ -1,16 +1,19 @@
 from dataclasses import dataclass
-import re
 import xml.etree.ElementTree as ET
 import httpx
 
 from src.core.robots_parser import RobotsParser, fetch_robots_txt
 from src.utils.http_client import HttpClient
-from src.utils.lang_utils import ENGLISH_FOLDERS, is_lang_code
 from src.utils.url_utils import (
     extract_path,
     is_url_within_scope,
     make_url_prefix,
     url_path_parents,
+)
+from src.utils.version_utils import (
+    LATEST_KEYWORDS,
+    parse_version,
+    find_version_index,
 )
 
 
@@ -101,21 +104,6 @@ def _filter_by_scope(urls: list[str], base_url: str | None) -> list[str]:
     return [u for u in urls if is_url_within_scope(u, prefix)]
 
 
-_VERSION_RE = re.compile(r"^v?\d+(?:\.\d+)*(?:\.x)?$")
-_LATEST_KEYWORDS = frozenset({"current", "latest", "next", "stable", "main"})
-
-
-def _parse_version(segment: str) -> tuple[int, ...] | None:
-    if segment in _LATEST_KEYWORDS:
-        return (9999,)
-    if segment.startswith("version-"):
-        segment = segment[8:]
-    m = re.match(r"^v?(\d+(?:\.\d+)*)(?:\.x)?$", segment)
-    if not m:
-        return None
-    return tuple(int(p) for p in m.group(1).split("."))
-
-
 def _dedupe_versioned_sitemaps(subs: list[SitemapEntry]) -> list[SitemapEntry]:
     groups: dict[str, list[SitemapEntry]] = {}
     ungrouped: list[SitemapEntry] = []
@@ -124,12 +112,7 @@ def _dedupe_versioned_sitemaps(subs: list[SitemapEntry]) -> list[SitemapEntry]:
         path = extract_path(entry.loc)
         parts = [p for p in path.strip("/").split("/") if p]
 
-        version_idx = None
-        for i, part in enumerate(parts):
-            if part in _LATEST_KEYWORDS or _VERSION_RE.match(part):
-                version_idx = i
-                break
-
+        version_idx = find_version_index(parts)
         if version_idx is None:
             ungrouped.append(entry)
             continue
@@ -140,7 +123,7 @@ def _dedupe_versioned_sitemaps(subs: list[SitemapEntry]) -> list[SitemapEntry]:
     result = list(ungrouped)
     for entries in groups.values():
         latest = [
-            e for e in entries if any(f"/{kw}/" in e.loc for kw in _LATEST_KEYWORDS)
+            e for e in entries if any(f"/{kw}/" in e.loc for kw in LATEST_KEYWORDS)
         ]
         if latest:
             result.append(latest[0])
@@ -151,7 +134,7 @@ def _dedupe_versioned_sitemaps(subs: list[SitemapEntry]) -> list[SitemapEntry]:
         for e in entries:
             parts = extract_path(e.loc).strip("/").split("/")
             for p in parts:
-                ver = _parse_version(p)
+                ver = parse_version(p)
                 if ver and ver > best_ver:
                     best_ver = ver
                     best = e
@@ -212,8 +195,8 @@ async def fetch_sitemap_urls(
         )
 
     outcomes = await client.fetch_many(
-        subs,
-        _fetch_sub,
+        items=subs,
+        fetch_fn=_fetch_sub,
     )
 
     urls: list[str] = []
@@ -222,43 +205,6 @@ async def fetch_sitemap_urls(
             continue
         urls.extend(result)
     return urls
-
-
-def _relative_parts(url: str, base_path: str) -> list[str]:
-    path = extract_path(url)
-    if path.startswith(base_path):
-        path = path[len(base_path) :]
-    return [p for p in path.strip("/").split("/") if p]
-
-
-def _has_lang_segment(parts: list[str]) -> str | None:
-    for p in parts:
-        if is_lang_code(p):
-            return p
-    return None
-
-
-def _filter_language_urls(urls: list[str], base_url: str) -> list[str]:
-    if not urls:
-        return urls
-
-    base_path = extract_path(base_url).rstrip("/") + "/"
-
-    all_lang_codes: set[str] = set()
-    for url in urls:
-        parts = _relative_parts(url, base_path)
-        lang = _has_lang_segment(parts)
-        if lang:
-            all_lang_codes.add(lang)
-
-    if len(all_lang_codes) < 2:
-        return urls
-
-    for enf in ENGLISH_FOLDERS:
-        if enf in all_lang_codes:
-            return [u for u in urls if enf in _relative_parts(u, base_path)]
-
-    return [u for u in urls if _has_lang_segment(_relative_parts(u, base_path)) is None]
 
 
 async def collect_sitemap_urls(
@@ -300,4 +246,4 @@ async def collect_sitemap_urls(
                 all_page_urls.extend(urls)
                 break
 
-    return _filter_language_urls(all_page_urls, base_url)
+    return all_page_urls
