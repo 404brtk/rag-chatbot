@@ -18,7 +18,9 @@ class TestHtmlToDocPage:
     def test_extracts_title_and_markdown(self):
         html = html_page("Getting Started", "Welcome to the docs")
         page = html_to_doc_page(
-            "https://example.com/start", html, SourceMethod.SITEMAP_CRAWL
+            url="https://example.com/start",
+            html=html,
+            source_method=SourceMethod.SITEMAP_CRAWL,
         )
         assert page.title == "Getting Started"
         assert "Welcome to the docs" in page.content
@@ -26,7 +28,9 @@ class TestHtmlToDocPage:
 
     def test_empty_html_returns_empty_markdown(self):
         page = html_to_doc_page(
-            "https://example.com", "<html></html>", SourceMethod.LLMS_TXT
+            url="https://example.com",
+            html="<html></html>",
+            source_method=SourceMethod.LLMS_TXT,
         )
         assert page.content == ""
 
@@ -43,10 +47,10 @@ class TestFetchPageAsMarkdown:
         )
 
         page = await fetch_page_as_markdown(
-            "https://example.com/docs/intro",
-            client,
-            10.0,
-            SourceMethod.LLMS_TXT,
+            url="https://example.com/docs/intro",
+            client=client,
+            timeout=10.0,
+            source_method=SourceMethod.LLMS_TXT,
         )
         assert page is not None
         assert page.content == "# Hello\nWorld"
@@ -75,10 +79,10 @@ class TestFetchPageAsMarkdown:
         inner.get = mocker.AsyncMock(side_effect=mock_get)
 
         page = await fetch_page_as_markdown(
-            "https://example.com/docs/intro",
-            client,
-            10.0,
-            SourceMethod.SITEMAP_CRAWL,
+            url="https://example.com/docs/intro",
+            client=client,
+            timeout=10.0,
+            source_method=SourceMethod.SITEMAP_CRAWL,
         )
         assert page is not None
         assert page.content == "# Raw Markdown\nContent here"
@@ -102,10 +106,10 @@ class TestFetchPageAsMarkdown:
         inner.get = mocker.AsyncMock(side_effect=mock_get)
 
         page = await fetch_page_as_markdown(
-            "https://example.com/docs/intro",
-            client,
-            10.0,
-            SourceMethod.SITEMAP_CRAWL,
+            url="https://example.com/docs/intro",
+            client=client,
+            timeout=10.0,
+            source_method=SourceMethod.SITEMAP_CRAWL,
         )
         assert page is not None
         assert "Fallback content" in page.content
@@ -117,10 +121,10 @@ class TestFetchPageAsMarkdown:
         inner.get = mocker.AsyncMock(return_value=mock_response(status_code=404))
 
         page = await fetch_page_as_markdown(
-            "https://example.com/docs/intro",
-            client,
-            10.0,
-            SourceMethod.SITEMAP_CRAWL,
+            url="https://example.com/docs/intro",
+            client=client,
+            timeout=10.0,
+            source_method=SourceMethod.SITEMAP_CRAWL,
         )
         assert page is None
 
@@ -139,10 +143,10 @@ class TestFetchPageAsMarkdown:
         inner.get = mocker.AsyncMock(side_effect=mock_get)
 
         page = await fetch_page_as_markdown(
-            "https://docs.stripe.com/connect.md",
-            client,
-            10.0,
-            SourceMethod.LLMS_TXT,
+            url="https://docs.stripe.com/connect.md",
+            client=client,
+            timeout=10.0,
+            source_method=SourceMethod.LLMS_TXT,
         )
         assert page is not None
         assert page.content == "# Markdown Content\nHello"
@@ -172,10 +176,10 @@ class TestFetchPageAsMarkdown:
         inner.get = mocker.AsyncMock(side_effect=mock_get)
 
         page = await fetch_page_as_markdown(
-            "https://example.com/docs/intro",
-            client,
-            10.0,
-            SourceMethod.SITEMAP_CRAWL,
+            url="https://example.com/docs/intro",
+            client=client,
+            timeout=10.0,
+            source_method=SourceMethod.SITEMAP_CRAWL,
         )
         assert page is not None
         assert call_count == 3
@@ -193,7 +197,10 @@ class TestProbeAndFetch:
         )
 
         page, method = await probe_and_fetch(
-            "https://example.com/docs/intro", client, 10.0, SourceMethod.LLMS_TXT
+            url="https://example.com/docs/intro",
+            client=client,
+            timeout=10.0,
+            source_method=SourceMethod.LLMS_TXT,
         )
         assert page is not None
         assert page.content == "# Hello"
@@ -214,7 +221,10 @@ class TestProbeAndFetch:
         inner.get = mocker.AsyncMock(side_effect=mock_get)
 
         page, method = await probe_and_fetch(
-            "https://example.com/docs/intro", client, 10.0, SourceMethod.LLMS_TXT
+            url="https://example.com/docs/intro",
+            client=client,
+            timeout=10.0,
+            source_method=SourceMethod.LLMS_TXT,
         )
         assert page is not None
         assert page.content == "# MD Content"
@@ -239,7 +249,10 @@ class TestProbeAndFetch:
         inner.get = mocker.AsyncMock(side_effect=mock_get)
 
         page, method = await probe_and_fetch(
-            "https://example.com/docs/intro", client, 10.0, SourceMethod.LLMS_TXT
+            url="https://example.com/docs/intro",
+            client=client,
+            timeout=10.0,
+            source_method=SourceMethod.LLMS_TXT,
         )
         assert page is not None
         assert "HTML content" in page.content
@@ -254,7 +267,10 @@ class TestProbeAndFetch:
         )
 
         page, method = await probe_and_fetch(
-            "https://example.com/docs/intro.md", client, 10.0, SourceMethod.LLMS_TXT
+            url="https://example.com/docs/intro.md",
+            client=client,
+            timeout=10.0,
+            source_method=SourceMethod.LLMS_TXT,
         )
         assert page is not None
         assert method == FetchMethod.MD_URL
@@ -273,10 +289,10 @@ class TestFetchPagePreferredMethod:
         )
 
         page = await fetch_page_as_markdown(
-            "https://example.com/docs/intro",
-            client,
-            10.0,
-            SourceMethod.LLMS_TXT,
+            url="https://example.com/docs/intro",
+            client=client,
+            timeout=10.0,
+            source_method=SourceMethod.LLMS_TXT,
             preferred_method=FetchMethod.HTML,
         )
         assert page is not None
@@ -301,10 +317,10 @@ class TestFetchPagePreferredMethod:
         inner.get = mocker.AsyncMock(side_effect=mock_get)
 
         page = await fetch_page_as_markdown(
-            "https://example.com/docs/intro",
-            client,
-            10.0,
-            SourceMethod.LLMS_TXT,
+            url="https://example.com/docs/intro",
+            client=client,
+            timeout=10.0,
+            source_method=SourceMethod.LLMS_TXT,
             preferred_method=FetchMethod.MD_URL,
         )
         assert page is not None
@@ -319,10 +335,10 @@ class TestFetchPagePreferredMethod:
         )
 
         page = await fetch_page_as_markdown(
-            "https://example.com/docs/intro",
-            client,
-            10.0,
-            SourceMethod.LLMS_TXT,
+            url="https://example.com/docs/intro",
+            client=client,
+            timeout=10.0,
+            source_method=SourceMethod.LLMS_TXT,
             preferred_method=FetchMethod.MD_URL,
         )
         assert page is not None
@@ -347,10 +363,10 @@ class TestFetchPagePreferredMethod:
         inner.get = mocker.AsyncMock(side_effect=mock_get)
 
         page = await fetch_page_as_markdown(
-            "https://example.com/docs/intro",
-            client,
-            10.0,
-            SourceMethod.LLMS_TXT,
+            url="https://example.com/docs/intro",
+            client=client,
+            timeout=10.0,
+            source_method=SourceMethod.LLMS_TXT,
             preferred_method=FetchMethod.CONTENT_NEGOTIATION,
         )
         assert page is not None
@@ -365,10 +381,10 @@ class TestFetchPagePreferredMethod:
         )
 
         page = await fetch_page_as_markdown(
-            "https://example.com/docs/intro.md",
-            client,
-            10.0,
-            SourceMethod.LLMS_TXT,
+            url="https://example.com/docs/intro.md",
+            client=client,
+            timeout=10.0,
+            source_method=SourceMethod.LLMS_TXT,
             preferred_method=FetchMethod.CONTENT_NEGOTIATION,
         )
         assert page is not None
@@ -410,12 +426,14 @@ class TestFetchAndConvertUrls:
         inner.get = mocker.AsyncMock(side_effect=_html_mock_get())
 
         pages = await fetch_and_convert_urls(
-            urls,
-            client,
-            RobotsParser(""),
-            GetDocsRequest(url="https://example.com", max_pages=10, delay_seconds=0),
-            SourceMethod.SITEMAP_CRAWL,
-            EthicsContext(),
+            urls=urls,
+            client=client,
+            robots=RobotsParser(""),
+            options=GetDocsRequest(
+                url="https://example.com", max_pages=10, delay_seconds=0
+            ),
+            source_method=SourceMethod.SITEMAP_CRAWL,
+            ethics=EthicsContext(),
             base_url="https://example.com/docs/en",
         )
 
@@ -436,12 +454,14 @@ class TestFetchAndConvertUrls:
         inner.get = mocker.AsyncMock(side_effect=_html_mock_get())
 
         pages = await fetch_and_convert_urls(
-            urls,
-            client,
-            RobotsParser(""),
-            GetDocsRequest(url="https://example.com", max_pages=10, delay_seconds=0),
-            SourceMethod.SITEMAP_CRAWL,
-            EthicsContext(),
+            urls=urls,
+            client=client,
+            robots=RobotsParser(""),
+            options=GetDocsRequest(
+                url="https://example.com", max_pages=10, delay_seconds=0
+            ),
+            source_method=SourceMethod.SITEMAP_CRAWL,
+            ethics=EthicsContext(),
         )
 
         assert len(pages) == 1
@@ -457,12 +477,14 @@ class TestFetchAndConvertUrls:
         inner.get = mocker.AsyncMock(side_effect=_html_mock_get())
 
         pages = await fetch_and_convert_urls(
-            urls,
-            client,
-            RobotsParser(""),
-            GetDocsRequest(url="https://example.com", max_pages=10, delay_seconds=0),
-            SourceMethod.LLMS_TXT,
-            EthicsContext(),
+            urls=urls,
+            client=client,
+            robots=RobotsParser(""),
+            options=GetDocsRequest(
+                url="https://example.com", max_pages=10, delay_seconds=0
+            ),
+            source_method=SourceMethod.LLMS_TXT,
+            ethics=EthicsContext(),
         )
 
         assert len(pages) == 2
@@ -478,12 +500,14 @@ class TestFetchAndConvertUrls:
         inner.get = mocker.AsyncMock(side_effect=_html_mock_get())
 
         pages = await fetch_and_convert_urls(
-            urls,
-            client,
-            RobotsParser(""),
-            GetDocsRequest(url="https://example.com", max_pages=10, delay_seconds=0),
-            SourceMethod.SITEMAP_CRAWL,
-            EthicsContext(),
+            urls=urls,
+            client=client,
+            robots=RobotsParser(""),
+            options=GetDocsRequest(
+                url="https://example.com", max_pages=10, delay_seconds=0
+            ),
+            source_method=SourceMethod.SITEMAP_CRAWL,
+            ethics=EthicsContext(),
             base_url="https://example.com/docs/en",
         )
 
@@ -502,12 +526,14 @@ class TestFetchAndConvertUrls:
         inner.get = mocker.AsyncMock(side_effect=_html_mock_get())
 
         pages = await fetch_and_convert_urls(
-            urls,
-            client,
-            RobotsParser(""),
-            GetDocsRequest(url="https://example.com", max_pages=10, delay_seconds=0),
-            SourceMethod.SITEMAP_CRAWL,
-            EthicsContext(),
+            urls=urls,
+            client=client,
+            robots=RobotsParser(""),
+            options=GetDocsRequest(
+                url="https://example.com", max_pages=10, delay_seconds=0
+            ),
+            source_method=SourceMethod.SITEMAP_CRAWL,
+            ethics=EthicsContext(),
             base_url="https://example.com/docs/en",
         )
 
@@ -532,12 +558,14 @@ class TestFetchAndConvertUrls:
         ethics = EthicsContext()
 
         pages = await fetch_and_convert_urls(
-            urls,
-            client,
-            robots,
-            GetDocsRequest(url="https://example.com", max_pages=10, delay_seconds=0),
-            SourceMethod.SITEMAP_CRAWL,
-            ethics,
+            urls=urls,
+            client=client,
+            robots=robots,
+            options=GetDocsRequest(
+                url="https://example.com", max_pages=10, delay_seconds=0
+            ),
+            source_method=SourceMethod.SITEMAP_CRAWL,
+            ethics=ethics,
             base_url="https://example.com",
         )
 
@@ -554,12 +582,14 @@ class TestFetchAndConvertUrls:
         inner.get = mocker.AsyncMock(side_effect=_html_mock_get())
 
         pages = await fetch_and_convert_urls(
-            urls,
-            client,
-            RobotsParser(""),
-            GetDocsRequest(url="https://example.com", max_pages=3, delay_seconds=0),
-            SourceMethod.SITEMAP_CRAWL,
-            EthicsContext(),
+            urls=urls,
+            client=client,
+            robots=RobotsParser(""),
+            options=GetDocsRequest(
+                url="https://example.com", max_pages=3, delay_seconds=0
+            ),
+            source_method=SourceMethod.SITEMAP_CRAWL,
+            ethics=EthicsContext(),
         )
 
         assert len(pages) == 3
@@ -583,17 +613,77 @@ class TestFetchAndConvertUrls:
         progress = mocker.AsyncMock()
 
         pages = await fetch_and_convert_urls(
-            urls,
-            client,
-            RobotsParser(""),
-            GetDocsRequest(url="https://example.com", max_pages=10, delay_seconds=0),
-            SourceMethod.SITEMAP_CRAWL,
-            EthicsContext(),
+            urls=urls,
+            client=client,
+            robots=RobotsParser(""),
+            options=GetDocsRequest(
+                url="https://example.com", max_pages=10, delay_seconds=0
+            ),
+            source_method=SourceMethod.SITEMAP_CRAWL,
+            ethics=EthicsContext(),
             on_progress=progress,
         )
 
         assert len(pages) == 3
         assert progress.await_count >= 2
+
+    @pytest.mark.asyncio
+    async def test_language_filter_in_pipeline(self, mocker):
+        urls = [
+            "https://example.com/docs/en/guide",
+            "https://example.com/docs/en/api",
+            "https://example.com/docs/fr/guide",
+            "https://example.com/docs/de/guide",
+        ]
+
+        client, inner = mock_http_client(mocker)
+        inner.get = mocker.AsyncMock(side_effect=_html_mock_get())
+
+        pages = await fetch_and_convert_urls(
+            urls=urls,
+            client=client,
+            robots=RobotsParser(""),
+            options=GetDocsRequest(
+                url="https://example.com", max_pages=10, delay_seconds=0
+            ),
+            source_method=SourceMethod.SITEMAP_CRAWL,
+            ethics=EthicsContext(),
+            base_url="https://example.com/docs",
+        )
+
+        assert len(pages) == 2
+        fetched_urls = {p.url for p in pages}
+        assert "https://example.com/docs/en/guide" in fetched_urls
+        assert "https://example.com/docs/en/api" in fetched_urls
+
+    @pytest.mark.asyncio
+    async def test_version_dedup_in_pipeline(self, mocker):
+        urls = [
+            "https://example.com/docs/driver/current/guide",
+            "https://example.com/docs/driver/v1.0/guide",
+            "https://example.com/docs/driver/current/api",
+            "https://example.com/docs/driver/v1.0/api",
+        ]
+
+        client, inner = mock_http_client(mocker)
+        inner.get = mocker.AsyncMock(side_effect=_html_mock_get())
+
+        pages = await fetch_and_convert_urls(
+            urls=urls,
+            client=client,
+            robots=RobotsParser(""),
+            options=GetDocsRequest(
+                url="https://example.com", max_pages=10, delay_seconds=0
+            ),
+            source_method=SourceMethod.SITEMAP_CRAWL,
+            ethics=EthicsContext(),
+            base_url="https://example.com/docs",
+        )
+
+        assert len(pages) == 2
+        fetched_urls = {p.url for p in pages}
+        assert "https://example.com/docs/driver/current/guide" in fetched_urls
+        assert "https://example.com/docs/driver/current/api" in fetched_urls
 
 
 class TestProbeUrlSelection:
@@ -622,12 +712,14 @@ class TestProbeUrlSelection:
         inner.get = mocker.AsyncMock(side_effect=mock_get)
 
         pages = await fetch_and_convert_urls(
-            urls,
-            client,
-            RobotsParser(""),
-            GetDocsRequest(url="https://example.com", max_pages=10, delay_seconds=0),
-            SourceMethod.SITEMAP_CRAWL,
-            EthicsContext(),
+            urls=urls,
+            client=client,
+            robots=RobotsParser(""),
+            options=GetDocsRequest(
+                url="https://example.com", max_pages=10, delay_seconds=0
+            ),
+            source_method=SourceMethod.SITEMAP_CRAWL,
+            ethics=EthicsContext(),
         )
 
         assert len(pages) == 3
@@ -642,12 +734,14 @@ class TestProbeUrlSelection:
         inner.get = mocker.AsyncMock(side_effect=_html_mock_get())
 
         pages = await fetch_and_convert_urls(
-            urls,
-            client,
-            RobotsParser(""),
-            GetDocsRequest(url="https://example.com", max_pages=10, delay_seconds=0),
-            SourceMethod.SITEMAP_CRAWL,
-            EthicsContext(),
+            urls=urls,
+            client=client,
+            robots=RobotsParser(""),
+            options=GetDocsRequest(
+                url="https://example.com", max_pages=10, delay_seconds=0
+            ),
+            source_method=SourceMethod.SITEMAP_CRAWL,
+            ethics=EthicsContext(),
         )
 
         assert len(pages) == 1
@@ -657,8 +751,8 @@ class TestFilterUrlsByRobots:
     def test_all_allowed(self):
         robots = RobotsParser("")
         allowed, robots_count, signal_count = filter_urls_by_robots(
-            ["https://example.com/a", "https://example.com/b"],
-            robots,
+            urls=["https://example.com/a", "https://example.com/b"],
+            robots=robots,
         )
         assert allowed == ["https://example.com/a", "https://example.com/b"]
         assert robots_count == 0
@@ -667,12 +761,12 @@ class TestFilterUrlsByRobots:
     def test_disallow_filters(self):
         robots = RobotsParser("User-agent: *\nDisallow: /private/")
         allowed, robots_count, signal_count = filter_urls_by_robots(
-            [
+            urls=[
                 "https://example.com/public/page",
                 "https://example.com/private/page",
                 "https://example.com/private/other",
             ],
-            robots,
+            robots=robots,
         )
         assert allowed == ["https://example.com/public/page"]
         assert robots_count == 2
@@ -683,11 +777,11 @@ class TestFilterUrlsByRobots:
             "User-agent: *\nAllow: /\nContent-Signal: /secret/ ai-input=no"
         )
         allowed, robots_count, signal_count = filter_urls_by_robots(
-            [
+            urls=[
                 "https://example.com/public/page",
                 "https://example.com/secret/page",
             ],
-            robots,
+            robots=robots,
         )
         assert allowed == ["https://example.com/public/page"]
         assert robots_count == 0
@@ -698,12 +792,12 @@ class TestFilterUrlsByRobots:
             "User-agent: *\nDisallow: /blocked/\nContent-Signal: /noinput/ ai-input=no"
         )
         allowed, robots_count, signal_count = filter_urls_by_robots(
-            [
+            urls=[
                 "https://example.com/ok",
                 "https://example.com/blocked/page",
                 "https://example.com/noinput/page",
             ],
-            robots,
+            robots=robots,
         )
         assert allowed == ["https://example.com/ok"]
         assert robots_count == 1
@@ -711,7 +805,9 @@ class TestFilterUrlsByRobots:
 
     def test_empty_input(self):
         robots = RobotsParser("User-agent: *\nDisallow: /")
-        allowed, robots_count, signal_count = filter_urls_by_robots([], robots)
+        allowed, robots_count, signal_count = filter_urls_by_robots(
+            urls=[], robots=robots
+        )
         assert allowed == []
         assert robots_count == 0
         assert signal_count == 0

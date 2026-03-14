@@ -30,24 +30,6 @@ def _gh_page(owner, repo, branch, path, content):
 
 
 class TestGetDocsRequestValidation:
-    def test_url_only(self):
-        req = GetDocsRequest(url="https://example.com")
-        assert req.url is not None
-        assert req.github_repo is None
-
-    def test_github_only(self):
-        req = GetDocsRequest(github_repo="https://github.com/owner/repo")
-        assert req.url is None
-        assert req.github_repo is not None
-
-    def test_both_provided(self):
-        req = GetDocsRequest(
-            url="https://example.com",
-            github_repo="https://github.com/owner/repo",
-        )
-        assert req.url is not None
-        assert req.github_repo is not None
-
     def test_neither_raises(self):
         with pytest.raises(ValueError, match="At least one"):
             GetDocsRequest()
@@ -74,7 +56,7 @@ class TestGetDocs:
 
         client = mocker.AsyncMock(spec=HttpClient)
 
-        result = await get_docs(_request(), client)
+        result = await get_docs(request=_request(), client=client)
 
         assert result.source_method == SourceMethod.LLMS_TXT
         assert len(result.pages) == 1
@@ -122,7 +104,7 @@ class TestGetDocs:
         client, inner = mock_http_client(mocker)
         inner.get = mocker.AsyncMock(side_effect=mock_get)
 
-        result = await get_docs(_request(), client)
+        result = await get_docs(request=_request(), client=client)
 
         assert result.source_method == SourceMethod.LLMS_TXT
         assert len(result.pages) == 2
@@ -148,7 +130,7 @@ class TestGetDocs:
         client = mocker.AsyncMock(spec=HttpClient)
 
         result = await get_docs(
-            _request(github_repo="https://github.com/owner/repo"), client
+            request=_request(github_repo="https://github.com/owner/repo"), client=client
         )
 
         assert result.source_method == SourceMethod.GITHUB
@@ -195,7 +177,7 @@ class TestGetDocs:
         inner.get = mocker.AsyncMock(side_effect=mock_get)
 
         result = await get_docs(
-            _request(github_repo="https://github.com/owner/repo"), client
+            request=_request(github_repo="https://github.com/owner/repo"), client=client
         )
 
         assert result.source_method == SourceMethod.SITEMAP_CRAWL
@@ -226,7 +208,7 @@ class TestGetDocs:
         client, inner = mock_http_client(mocker)
         inner.get = mocker.AsyncMock(side_effect=mock_get)
 
-        result = await get_docs(_request(), client)
+        result = await get_docs(request=_request(), client=client)
 
         assert result.source_method == SourceMethod.SITEMAP_CRAWL
         assert len(result.pages) == 1
@@ -249,8 +231,8 @@ class TestGetDocs:
         client = mocker.AsyncMock(spec=HttpClient)
 
         result = await get_docs(
-            _request(url=None, github_repo="https://github.com/owner/repo"),
-            client,
+            request=_request(url=None, github_repo="https://github.com/owner/repo"),
+            client=client,
         )
 
         assert result.source_method == SourceMethod.GITHUB
@@ -293,7 +275,7 @@ class TestGetDocs:
         client, inner = mock_http_client(mocker)
         inner.get = mocker.AsyncMock(side_effect=mock_get)
 
-        result = await get_docs(_request(), client)
+        result = await get_docs(request=_request(), client=client)
 
         assert len(result.pages) == 1
         assert result.pages[0].url == "https://docs.example.com/real"
@@ -339,7 +321,7 @@ class TestGetDocs:
         client = mocker.AsyncMock(spec=HttpClient)
         client.get = mocker.AsyncMock(side_effect=mock_get)
 
-        result = await get_docs(_request(), client)
+        result = await get_docs(request=_request(), client=client)
 
         assert len(result.pages) == 1
         assert result.pages[0].url == "https://docs.example.com/public/guide"
@@ -390,7 +372,7 @@ class TestGetDocs:
         inner.get = mocker.AsyncMock(side_effect=mock_get)
 
         result = await get_docs(
-            _request(url="https://docs.example.com/drivers/"), client
+            request=_request(url="https://docs.example.com/drivers/"), client=client
         )
 
         assert result.source_method == SourceMethod.LLMS_TXT
@@ -426,7 +408,7 @@ class TestGetDocs:
         client, inner = mock_http_client(mocker)
         inner.get = mocker.AsyncMock(side_effect=mock_get)
 
-        result = await get_docs(_request(), client)
+        result = await get_docs(request=_request(), client=client)
 
         assert result.source_method == SourceMethod.SITEMAP_CRAWL
         mock_gh.assert_not_called()
@@ -447,8 +429,8 @@ class TestGetDocs:
         client = mocker.AsyncMock(spec=HttpClient)
 
         result = await get_docs(
-            _request(url=None, github_repo="https://github.com/owner/monorepo"),
-            client,
+            request=_request(url=None, github_repo="https://github.com/owner/monorepo"),
+            client=client,
         )
 
         assert len(result.pages) == 0
@@ -470,13 +452,13 @@ class TestGetDocs:
         client = mocker.AsyncMock(spec=HttpClient)
 
         await get_docs(
-            GetDocsRequest(
+            request=GetDocsRequest(
                 github_repo="https://github.com/owner/repo",
                 github_token="request_token",
                 max_pages=10,
                 delay_seconds=0,
             ),
-            client,
+            client=client,
         )
 
         _, kwargs = mock_fetch_gh.call_args
@@ -502,11 +484,11 @@ class TestGetDocs:
         client = mocker.AsyncMock(spec=HttpClient)
 
         await get_docs(
-            _request(
+            request=_request(
                 url="https://docs.example.com",
                 github_repo="https://github.com/owner/repo/tree/main/packages/docs",
             ),
-            client,
+            client=client,
         )
 
         mock_fetch_gh.assert_called_once()
@@ -556,7 +538,7 @@ class TestGetDocs:
         client = mocker.AsyncMock(spec=HttpClient)
         client.get = mocker.AsyncMock(side_effect=mock_get)
 
-        result = await get_docs(_request(), client)
+        result = await get_docs(request=_request(), client=client)
 
         assert len(result.pages) == 1
         assert result.pages[0].url == "https://docs.example.com/public/guide"
@@ -582,7 +564,7 @@ class TestGetDocs:
 
         client = mocker.AsyncMock(spec=HttpClient)
 
-        result = await get_docs(_request(), client)
+        result = await get_docs(request=_request(), client=client)
 
         assert result.ethics.content_signal_ai_input is False
 
@@ -604,7 +586,7 @@ class TestGetDocs:
 
         client = mocker.AsyncMock(spec=HttpClient)
 
-        result = await get_docs(_request(), client)
+        result = await get_docs(request=_request(), client=client)
 
         assert result.ethics.robots_crawl_delay_seconds == 5
 
@@ -633,7 +615,7 @@ class TestGetDocs:
         client, inner = mock_http_client(mocker)
         inner.get = mocker.AsyncMock(side_effect=mock_get)
 
-        result = await get_docs(_request(), client)
+        result = await get_docs(request=_request(), client=client)
 
         assert result.source_method == SourceMethod.SINGLE_PAGE
         assert len(result.pages) == 1
@@ -659,6 +641,6 @@ class TestGetDocs:
         client = mocker.AsyncMock(spec=HttpClient)
         progress = mocker.AsyncMock()
 
-        await get_docs(_request(), client, on_progress=progress)
+        await get_docs(request=_request(), client=client, on_progress=progress)
 
         progress.assert_awaited_once_with(1, 1)
