@@ -706,6 +706,46 @@ class TestFetchGithubDocsDocFolderDetection:
         assert result.pages[0].content == "# Nested Docs"
 
 
+class TestFetchGithubDocsLicenseWarning:
+    @pytest.mark.asyncio
+    async def test_root_license_does_not_warn(self, mocker, caplog):
+        tree = ["docs/intro.md", "LICENSE.md"]
+        client, _ = _make_github_client(mocker, tree)
+        await fetch_github_docs("https://github.com/owner/repo", client)
+        assert "License file" not in caplog.text
+
+    @pytest.mark.asyncio
+    async def test_license_in_doc_folder_warns(self, mocker, caplog):
+        tree = ["docs/intro.md", "docs/license.md"]
+        client, _ = _make_github_client(mocker, tree)
+        await fetch_github_docs("https://github.com/owner/repo", client)
+        assert "docs/license.md" in caplog.text
+
+    @pytest.mark.asyncio
+    async def test_license_in_subpath_chain_warns(self, mocker, caplog):
+        tree = [
+            "apps/docs/intro.md",
+            "apps/license.md",
+        ]
+        client, _ = _make_github_client(mocker, tree)
+        await fetch_github_docs(
+            "https://github.com/owner/repo",
+            client,
+            doc_folder_override="apps/docs",
+        )
+        assert "apps/license.md" in caplog.text
+
+    @pytest.mark.asyncio
+    async def test_license_outside_doc_path_does_not_warn(self, mocker, caplog):
+        tree = [
+            "docs/intro.md",
+            "packages/other/license.md",
+        ]
+        client, _ = _make_github_client(mocker, tree)
+        await fetch_github_docs("https://github.com/owner/repo", client)
+        assert "packages/other/license.md" not in caplog.text
+
+
 class TestFetchGithubDocsPages:
     @pytest.mark.asyncio
     async def test_pages_have_correct_url_and_source_method(self, mocker):
