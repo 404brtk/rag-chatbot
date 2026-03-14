@@ -73,21 +73,6 @@ async def get_docs(
     ethics = EthicsContext()
     result = GetDocsResult(url=base_url or "", ethics=ethics)
 
-    robots: RobotsParser | None = None
-    if base_url:
-        logger.info(f"Fetching robots.txt for {base_url}")
-        robots = await fetch_robots_txt(base_url, client)
-        ethics.robots_crawl_delay_seconds = robots.get_crawl_delay()
-        ethics.content_signal_ai_input = robots.is_ai_input_allowed()
-        logger.info(
-            f"robots.txt: crawl_delay={ethics.robots_crawl_delay_seconds}, ai_input={ethics.content_signal_ai_input}"
-        )
-
-        crawl_delay = robots.get_crawl_delay() or 0
-        effective_delay = max(request.delay_seconds, crawl_delay)
-        domain = extract_domain(base_url)
-        client.set_domain_delay(domain, effective_delay)
-
     step = 0
 
     # GitHub
@@ -122,8 +107,21 @@ async def get_docs(
         except Exception:
             logger.exception("GitHub fetch failed")
 
-    if not base_url or not robots:
+    if not base_url:
         return result
+
+    logger.info(f"Fetching robots.txt for {base_url}")
+    robots = await fetch_robots_txt(base_url, client)
+    ethics.robots_crawl_delay_seconds = robots.get_crawl_delay()
+    ethics.content_signal_ai_input = robots.is_ai_input_allowed()
+    logger.info(
+        f"robots.txt: crawl_delay={ethics.robots_crawl_delay_seconds}, ai_input={ethics.content_signal_ai_input}"
+    )
+
+    crawl_delay = robots.get_crawl_delay() or 0
+    effective_delay = max(request.delay_seconds, crawl_delay)
+    domain = extract_domain(base_url)
+    client.set_domain_delay(domain, effective_delay)
 
     # llms-full.txt / llms.txt
     step += 1

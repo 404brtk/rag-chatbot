@@ -131,10 +131,7 @@ class TestGetDocs:
 
     @pytest.mark.asyncio
     async def test_github_succeeds_skips_sitemap(self, mocker):
-        mocker.patch(
-            "src.core.orchestrator.fetch_robots_txt",
-            return_value=RobotsParser(""),
-        )
+        mock_robots = mocker.patch("src.core.orchestrator.fetch_robots_txt")
         mocker.patch(
             "src.core.orchestrator.fetch_github_docs",
             return_value=GitHubFetchResult(
@@ -160,6 +157,7 @@ class TestGetDocs:
         assert result.pages[0].content == "# GH Docs"
         assert result.ethics.license_spdx_id == "MIT"
         mock_sitemap.assert_not_called()
+        mock_robots.assert_not_called()
 
     @pytest.mark.asyncio
     async def test_github_empty_files_falls_through_to_sitemap(self, mocker):
@@ -431,10 +429,6 @@ class TestGetDocs:
 
     @pytest.mark.asyncio
     async def test_github_subpath_used_as_doc_folder_override(self, mocker):
-        mocker.patch(
-            "src.core.orchestrator.fetch_robots_txt",
-            return_value=RobotsParser(""),
-        )
         mock_fetch_gh = mocker.patch(
             "src.core.orchestrator.fetch_github_docs",
             return_value=GitHubFetchResult(
