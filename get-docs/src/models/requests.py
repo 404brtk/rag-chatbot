@@ -9,6 +9,7 @@ class GetDocsRequest(BaseModel):
     delay_seconds: float = 1.5
     max_pages: int = 300
     timeout: float = 15.0
+    skip_llms_full: bool = False
 
     @model_validator(mode="after")
     def at_least_one_source(self):

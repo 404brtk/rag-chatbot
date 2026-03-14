@@ -132,6 +132,7 @@ async def get_docs(
             client=client,
             robots=robots,
             ethics=ethics,
+            skip_full=request.skip_llms_full,
         )
 
         if llms_result is not None:

@@ -121,12 +121,15 @@ async def fetch_llms_txt(
     robots: RobotsParser | None = None,
     timeout: float = 15,
     ethics: EthicsContext | None = None,
+    skip_full: bool = False,
 ) -> LlmsTxtResult | None:
     if robots is None:
         robots = await fetch_robots_txt(base_url, client, timeout)
 
     for parent in url_path_parents(base_url):
         for filename, is_full in _LLMS_TXT_PATHS:
+            if is_full and skip_full:
+                continue
             url = parent.rstrip("/") + "/" + filename
 
             url_path = extract_path(url)
