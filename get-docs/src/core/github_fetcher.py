@@ -401,7 +401,7 @@ async def fetch_github_docs(
     doc_folder, lang_excludes = _narrow_to_english(all_paths, doc_folder)
 
     if doc_folder:
-        check_dirs: set[str] = {""}  # root
+        check_dirs: set[str] = set()
         parts = doc_folder.lower().split("/")
         for i in range(1, len(parts) + 1):
             check_dirs.add("/".join(parts[:i]))
