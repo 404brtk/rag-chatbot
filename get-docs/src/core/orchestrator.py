@@ -38,8 +38,8 @@ async def _try_sitemap(
     on_progress: ProgressCallback | None = None,
 ) -> list[DocPage]:
     urls = await collect_sitemap_urls(
-        base_url,
-        client,
+        base_url=base_url,
+        client=client,
         robots=robots,
         timeout=request.timeout,
         max_depth=request.max_depth,
@@ -47,12 +47,12 @@ async def _try_sitemap(
     if not urls:
         return []
     return await fetch_and_convert_urls(
-        urls,
-        client,
-        robots,
-        request,
-        SourceMethod.SITEMAP_CRAWL,
-        ethics,
+        urls=urls,
+        client=client,
+        robots=robots,
+        options=request,
+        source_method=SourceMethod.SITEMAP_CRAWL,
+        ethics=ethics,
         base_url=base_url,
         on_progress=on_progress,
     )
@@ -80,15 +80,15 @@ async def get_docs(
         step += 1
         logger.info(f"Step {step}: Trying GitHub docs for {request.github_repo}")
         doc_folder_override: str | None = None
-        parsed_gh = parse_github_url(request.github_repo)
+        parsed_gh = parse_github_url(url=request.github_repo)
         if parsed_gh and parsed_gh.subpath:
             doc_folder_override = parsed_gh.subpath
 
         github_token = request.github_token or settings.GITHUB_TOKEN
         try:
             gh_result: GitHubFetchResult | None = await fetch_github_docs(
-                request.github_repo,
-                client,
+                repo_url=request.github_repo,
+                client=client,
                 max_files=request.max_pages,
                 doc_folder_override=doc_folder_override,
                 github_token=github_token,
@@ -111,7 +111,7 @@ async def get_docs(
         return result
 
     logger.info(f"Fetching robots.txt for {base_url}")
-    robots = await fetch_robots_txt(base_url, client)
+    robots = await fetch_robots_txt(base_url=base_url, client=client)
     ethics.robots_crawl_delay_seconds = robots.get_crawl_delay()
     ethics.content_signal_ai_input = robots.is_ai_input_allowed()
     logger.info(
@@ -120,16 +120,16 @@ async def get_docs(
 
     crawl_delay = robots.get_crawl_delay() or 0
     effective_delay = max(request.delay_seconds, crawl_delay)
-    domain = extract_domain(base_url)
-    client.set_domain_delay(domain, effective_delay)
+    domain = extract_domain(url=base_url)
+    client.set_domain_delay(domain=domain, delay=effective_delay)
 
     # llms-full.txt / llms.txt
     step += 1
     logger.info(f"Step {step}: Trying llms.txt / llms-full.txt")
     try:
         llms_result = await fetch_llms_txt(
-            base_url,
-            client,
+            base_url=base_url,
+            client=client,
             robots=robots,
             ethics=ethics,
         )
@@ -137,7 +137,7 @@ async def get_docs(
         if llms_result is not None:
             if llms_result.is_full:
                 logger.info("Found llms-full.txt - using as single doc page")
-                result.pages.append(_llms_full_to_doc_page(llms_result))
+                result.pages.append(_llms_full_to_doc_page(llms_result=llms_result))
                 result.source_method = SourceMethod.LLMS_TXT
                 if on_progress:
                     await on_progress(1, 1)
@@ -146,14 +146,14 @@ async def get_docs(
             urls = [link.url for link in llms_result.links if not link.optional]
             logger.info(f"Found llms.txt with {len(urls)} links - fetching pages")
             pages = await fetch_and_convert_urls(
-                urls,
-                client,
-                robots,
-                request,
-                SourceMethod.LLMS_TXT,
-                ethics,
-                on_progress=on_progress,
+                urls=urls,
+                client=client,
+                robots=robots,
+                options=request,
+                source_method=SourceMethod.LLMS_TXT,
+                ethics=ethics,
                 base_url=base_url,
+                on_progress=on_progress,
             )
             if pages:
                 logger.info(f"llms.txt crawl returned {len(pages)} pages")
@@ -172,12 +172,12 @@ async def get_docs(
     logger.info(f"Step {step}: Trying sitemap crawl for {base_url}")
     try:
         pages = await _try_sitemap(
-            base_url,
-            client,
-            robots,
-            request,
-            ethics,
-            on_progress,
+            base_url=base_url,
+            client=client,
+            robots=robots,
+            request=request,
+            ethics=ethics,
+            on_progress=on_progress,
         )
         if pages:
             logger.info(f"Sitemap crawl returned {len(pages)} pages")
@@ -193,7 +193,10 @@ async def get_docs(
         step += 1
         logger.info(f"Step {step}: Falling back to single-page fetch for {base_url}")
         page = await fetch_page_as_markdown(
-            base_url, client, request.timeout, SourceMethod.SINGLE_PAGE
+            url=base_url,
+            client=client,
+            timeout=request.timeout,
+            source_method=SourceMethod.SINGLE_PAGE,
         )
         if page:
             result.pages.append(page)
