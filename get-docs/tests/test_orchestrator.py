@@ -346,6 +346,61 @@ class TestGetDocs:
         assert result.ethics.pages_filtered_by_robots == 1
 
     @pytest.mark.asyncio
+    async def test_llms_txt_links_filtered_by_scope(self, mocker):
+        mocker.patch(
+            "src.core.orchestrator.fetch_robots_txt",
+            return_value=RobotsParser(""),
+        )
+        mocker.patch(
+            "src.core.orchestrator.fetch_llms_txt",
+            return_value=LlmsTxtResult(
+                source_url="https://docs.example.com/llms.txt",
+                raw_content="",
+                title="Docs",
+                is_full=False,
+                links=[
+                    LlmsTxtLink(
+                        title="Drivers Guide",
+                        url="https://docs.example.com/drivers/guide",
+                    ),
+                    LlmsTxtLink(
+                        title="Atlas Intro",
+                        url="https://docs.example.com/atlas/intro",
+                    ),
+                    LlmsTxtLink(
+                        title="Drivers API",
+                        url="https://docs.example.com/drivers/api",
+                    ),
+                ],
+            ),
+        )
+
+        async def mock_get(url, **kwargs):
+            headers = kwargs.get("headers", {})
+            if headers.get("Accept") == "text/markdown":
+                return mock_response(status_code=404)
+            if url.endswith(".md"):
+                return mock_response(status_code=404)
+            return mock_response(
+                text=html_page("Page", f"Content for {url}"),
+                content_type="text/html; charset=utf-8",
+            )
+
+        client, inner = mock_http_client(mocker)
+        inner.get = mocker.AsyncMock(side_effect=mock_get)
+
+        result = await get_docs(
+            _request(url="https://docs.example.com/drivers/"), client
+        )
+
+        assert result.source_method == SourceMethod.LLMS_TXT
+        assert len(result.pages) == 2
+        page_urls = {p.url for p in result.pages}
+        assert "https://docs.example.com/drivers/guide" in page_urls
+        assert "https://docs.example.com/drivers/api" in page_urls
+        assert "https://docs.example.com/atlas/intro" not in page_urls
+
+    @pytest.mark.asyncio
     async def test_url_only_skips_github(self, mocker):
         mocker.patch(
             "src.core.orchestrator.fetch_robots_txt",

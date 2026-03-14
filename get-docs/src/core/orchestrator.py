@@ -153,6 +153,7 @@ async def get_docs(
                 SourceMethod.LLMS_TXT,
                 ethics,
                 on_progress=on_progress,
+                base_url=base_url,
             )
             if pages:
                 logger.info(f"llms.txt crawl returned {len(pages)} pages")
