@@ -596,6 +596,63 @@ class TestFetchAndConvertUrls:
         assert progress.await_count >= 2
 
 
+class TestProbeUrlSelection:
+    @pytest.mark.asyncio
+    async def test_root_url_skipped_for_probe(self, mocker):
+        urls = [
+            "https://example.com/",
+            "https://example.com/docs/intro",
+            "https://example.com/docs/guide",
+        ]
+        fetched_urls: list[str] = []
+
+        async def mock_get(url, **kwargs):
+            fetched_urls.append(url)
+            headers = kwargs.get("headers", {})
+            if headers.get("Accept") == "text/markdown":
+                return mock_response(status_code=404)
+            if url.endswith(".md"):
+                return mock_response(status_code=404)
+            return mock_response(
+                text=html_page("Page", f"Content for {url}"),
+                content_type="text/html; charset=utf-8",
+            )
+
+        client, inner = mock_http_client(mocker)
+        inner.get = mocker.AsyncMock(side_effect=mock_get)
+
+        pages = await fetch_and_convert_urls(
+            urls,
+            client,
+            RobotsParser(""),
+            GetDocsRequest(url="https://example.com", max_pages=10, delay_seconds=0),
+            SourceMethod.SITEMAP_CRAWL,
+            EthicsContext(),
+        )
+
+        assert len(pages) == 3
+        assert fetched_urls[0] == "https://example.com/docs/intro"
+        assert not any("example.com.md" in u for u in fetched_urls)
+
+    @pytest.mark.asyncio
+    async def test_all_root_urls_still_works(self, mocker):
+        urls = ["https://example.com/"]
+
+        client, inner = mock_http_client(mocker)
+        inner.get = mocker.AsyncMock(side_effect=_html_mock_get())
+
+        pages = await fetch_and_convert_urls(
+            urls,
+            client,
+            RobotsParser(""),
+            GetDocsRequest(url="https://example.com", max_pages=10, delay_seconds=0),
+            SourceMethod.SITEMAP_CRAWL,
+            EthicsContext(),
+        )
+
+        assert len(pages) == 1
+
+
 class TestFilterUrlsByRobots:
     def test_all_allowed(self):
         robots = RobotsParser("")

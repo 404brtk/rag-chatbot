@@ -13,6 +13,7 @@ from src.utils.logger import logger
 from src.utils.url_utils import (
     extract_path,
     has_md_extension,
+    is_root_url,
     is_url_within_scope,
     make_url_prefix,
     normalize_url,
@@ -200,22 +201,28 @@ async def fetch_and_convert_urls(
     if not filtered:
         return []
 
-    logger.info(f"Fetching {len(filtered)} URLs (method probe on first URL)")
+    probe_url = filtered[0]
+    for url in filtered:
+        if not is_root_url(url):
+            probe_url = url
+            break
+
+    logger.info(f"Fetching {len(filtered)} URLs (method probe on {probe_url})")
 
     pages: list[DocPage] = []
 
-    first_page, method = await probe_and_fetch(
-        filtered[0], client, options.timeout, source_method
+    probe_page, method = await probe_and_fetch(
+        probe_url, client, options.timeout, source_method
     )
-    if first_page:
-        pages.append(first_page)
+    if probe_page:
+        pages.append(probe_page)
 
     logger.info(f"Preferred fetch method: {method.value}")
 
     if on_progress:
         await on_progress(len(pages), len(filtered))
 
-    remaining = filtered[1:]
+    remaining = [u for u in filtered if u != probe_url]
     if remaining:
         outcomes = await client.fetch_many(
             remaining,

@@ -7,6 +7,7 @@ from src.utils.url_utils import (
     is_same_domain,
     is_asset_url,
     is_absolute_url,
+    is_root_url,
     has_md_extension,
     strip_git_suffix,
     url_path_parents,
@@ -173,6 +174,23 @@ class TestHasMdExtension:
 
     def test_mdx_extension(self):
         assert has_md_extension("https://example.com/docs/intro.mdx") is False
+
+
+class TestIsRootUrl:
+    def test_root_with_trailing_slash(self):
+        assert is_root_url("https://example.com/") is True
+
+    def test_root_without_trailing_slash(self):
+        assert is_root_url("https://example.com") is True
+
+    def test_url_with_path(self):
+        assert is_root_url("https://example.com/docs") is False
+
+    def test_url_with_deep_path(self):
+        assert is_root_url("https://example.com/docs/intro") is False
+
+    def test_url_with_path_trailing_slash(self):
+        assert is_root_url("https://example.com/docs/") is False
 
 
 class TestStripGitSuffix:

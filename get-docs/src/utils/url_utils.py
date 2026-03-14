@@ -149,6 +149,10 @@ def is_url_within_scope(url: str, prefix: str) -> bool:
     return url == prefix or url.startswith(prefix + "/")
 
 
+def is_root_url(url: str) -> bool:
+    return not urlparse(url).path.rstrip("/")
+
+
 def has_md_extension(url: str) -> bool:
     return url.rstrip("/").endswith(".md")
 

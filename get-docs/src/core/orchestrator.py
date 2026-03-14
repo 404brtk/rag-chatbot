@@ -88,9 +88,12 @@ async def get_docs(
         domain = extract_domain(base_url)
         client.set_domain_delay(domain, effective_delay)
 
-    # 1. GitHub
+    step = 0
+
+    # GitHub
     if request.github_repo:
-        logger.info(f"Step 1: Trying GitHub docs for {request.github_repo}")
+        step += 1
+        logger.info(f"Step {step}: Trying GitHub docs for {request.github_repo}")
         doc_folder_override: str | None = None
         parsed_gh = parse_github_url(request.github_repo)
         if parsed_gh and parsed_gh.subpath:
@@ -122,8 +125,9 @@ async def get_docs(
     if not base_url or not robots:
         return result
 
-    # 2. llms-full.txt / llms.txt
-    logger.info("Step 2: Trying llms.txt / llms-full.txt")
+    # llms-full.txt / llms.txt
+    step += 1
+    logger.info(f"Step {step}: Trying llms.txt / llms-full.txt")
     try:
         llms_result = await fetch_llms_txt(
             base_url,
@@ -164,8 +168,9 @@ async def get_docs(
     except Exception:
         logger.exception("llms.txt fetch failed")
 
-    # 3. Sitemap crawl
-    logger.info(f"Step 3: Trying sitemap crawl for {base_url}")
+    # Sitemap crawl
+    step += 1
+    logger.info(f"Step {step}: Trying sitemap crawl for {base_url}")
     try:
         pages = await _try_sitemap(
             base_url,
@@ -184,9 +189,10 @@ async def get_docs(
     except Exception:
         logger.exception("Sitemap crawl failed")
 
-    # 4. single-page fallback
+    # single-page fallback
     if not result.pages:
-        logger.info(f"Step 4: Falling back to single-page fetch for {base_url}")
+        step += 1
+        logger.info(f"Step {step}: Falling back to single-page fetch for {base_url}")
         page = await fetch_page_as_markdown(
             base_url, client, request.timeout, SourceMethod.SINGLE_PAGE
         )
