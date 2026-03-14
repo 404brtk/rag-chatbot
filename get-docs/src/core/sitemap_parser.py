@@ -160,6 +160,13 @@ def _dedupe_versioned_sitemaps(subs: list[SitemapEntry]) -> list[SitemapEntry]:
     return result
 
 
+def _sitemap_could_contain_scope(sitemap_url: str, scope_prefix: str) -> bool:
+    if is_url_within_scope(sitemap_url, scope_prefix):
+        return True
+    sitemap_dir = make_url_prefix(sitemap_url)
+    return is_url_within_scope(scope_prefix, sitemap_dir)
+
+
 async def fetch_sitemap_urls(
     sitemap_url: str,
     client: HttpClient,
@@ -188,7 +195,7 @@ async def fetch_sitemap_urls(
     subs = parser.get_sub_sitemaps()
     if base_url:
         prefix = make_url_prefix(base_url)
-        subs = [s for s in subs if is_url_within_scope(s.loc, prefix)]
+        subs = [s for s in subs if _sitemap_could_contain_scope(s.loc, prefix)]
 
     subs = _dedupe_versioned_sitemaps(subs)
 

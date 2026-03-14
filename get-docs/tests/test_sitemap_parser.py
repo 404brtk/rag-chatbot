@@ -493,6 +493,64 @@ class TestFetchSitemapUrls:
         assert "https://example.com/community/sitemap.xml" not in called_urls
 
     @pytest.mark.asyncio
+    async def test_parent_sitemap_recursed_for_deep_scope(self, mocker):
+        root_index = _index_xml(
+            "https://example.com/sitemap-pages.xml",
+            "https://example.com/community/sitemap.xml",
+            "https://example.com/docs/sitemap-index.xml",
+        )
+        docs_index = _index_xml(
+            "https://example.com/docs/drivers/node/current/sitemap.xml",
+            "https://example.com/docs/drivers/go/current/sitemap.xml",
+            "https://example.com/docs/manual/sitemap.xml",
+            "https://example.com/docs/kubernetes/current/sitemap.xml",
+        )
+        node_xml = _urlset_xml(
+            "https://example.com/docs/drivers/node/current/intro",
+            "https://example.com/docs/drivers/node/current/quickstart",
+        )
+        go_xml = _urlset_xml(
+            "https://example.com/docs/drivers/go/current/intro",
+        )
+
+        def side_effect(url, **kw):
+            responses = {
+                "https://example.com/sitemap.xml": _mock_response(text=root_index),
+                "https://example.com/docs/sitemap-index.xml": _mock_response(
+                    text=docs_index
+                ),
+                "https://example.com/docs/drivers/node/current/sitemap.xml": _mock_response(
+                    text=node_xml
+                ),
+                "https://example.com/docs/drivers/go/current/sitemap.xml": _mock_response(
+                    text=go_xml
+                ),
+            }
+            return responses.get(url, _mock_response(status_code=404))
+
+        client, inner = mock_http_client(mocker)
+        inner.get = mocker.AsyncMock(side_effect=side_effect)
+
+        urls = await fetch_sitemap_urls(
+            "https://example.com/sitemap.xml",
+            client,
+            base_url="https://example.com/docs/drivers/",
+        )
+
+        assert sorted(urls) == [
+            "https://example.com/docs/drivers/go/current/intro",
+            "https://example.com/docs/drivers/node/current/intro",
+            "https://example.com/docs/drivers/node/current/quickstart",
+        ]
+        called_urls = [call.args[0] for call in inner.get.call_args_list]
+        assert "https://example.com/docs/sitemap-index.xml" in called_urls
+        assert "https://example.com/community/sitemap.xml" not in called_urls
+        assert "https://example.com/docs/manual/sitemap.xml" not in called_urls
+        assert (
+            "https://example.com/docs/kubernetes/current/sitemap.xml" not in called_urls
+        )
+
+    @pytest.mark.asyncio
     async def test_no_base_url_fetches_all(self, mocker):
         index_xml = _index_xml(
             "https://example.com/docs/sitemap.xml",
