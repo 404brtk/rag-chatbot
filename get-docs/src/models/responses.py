@@ -64,8 +64,9 @@ class CrawlResponse(BaseModel):
     status: TaskState
     created_at: datetime
     completed_at: datetime | None = None
-    source_method: SourceMethod | None = None
+    url: str | None = None
     github_repo: str | None = None
+    source_method: SourceMethod | None = None
     progress: JobProgress | None = None
 
     # verbose-only fields (excluded from standard responses)

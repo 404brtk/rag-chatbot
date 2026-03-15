@@ -148,6 +148,8 @@ async def create_crawl_job(
         status=TaskState.PENDING,
         created_at=now,
         request=request,
+        url=str(request.url) if request.url else None,
+        github_repo=request.github_repo,
     )
     await create_job(redis, job)
 
