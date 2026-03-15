@@ -8,6 +8,7 @@ from src.models.requests import GetDocsRequest
 from src.models.responses import DocPage, EthicsContext
 from src.parsing.html_extractor import extract_content, extract_title
 from src.parsing.html_to_md import html_to_markdown
+from src.parsing.md_utils import extract_md_title, strip_frontmatter
 from src.utils.http_client import HttpClient
 from src.utils.lang_utils import filter_language_urls
 from src.utils.logger import logger
@@ -28,6 +29,8 @@ def html_to_doc_page(url: str, html: str, source_method: SourceMethod) -> DocPag
     title = extract_title(html)
     element = extract_content(html)
     markdown = html_to_markdown(element) if element else ""
+    if not title:
+        title = extract_md_title(markdown)
     return DocPage(url=url, title=title, content=markdown, source_method=source_method)
 
 
@@ -104,14 +107,20 @@ async def probe_and_fetch(
         if md:
             logger.info(f"Probed {url} -> content_negotiation (markdown)")
             return DocPage(
-                url=url, title="", content=md, source_method=source_method
+                url=url,
+                title=extract_md_title(md),
+                content=strip_frontmatter(md),
+                source_method=source_method,
             ), FetchMethod.CONTENT_NEGOTIATION
 
     md = await _try_md_url(url=url, client=client, timeout=timeout)
     if md:
         logger.info(f"Probed {url} -> md_url")
         return DocPage(
-            url=url, title="", content=md, source_method=source_method
+            url=url,
+            title=extract_md_title(md),
+            content=strip_frontmatter(md),
+            source_method=source_method,
         ), FetchMethod.MD_URL
 
     logger.info(f"Probed {url} -> html")
@@ -136,7 +145,12 @@ async def fetch_page_as_markdown(
     if has_md_extension(url):
         md = await _try_md_url(url=url, client=client, timeout=timeout)
         if md:
-            return DocPage(url=url, title="", content=md, source_method=source_method)
+            return DocPage(
+                url=url,
+                title=extract_md_title(md),
+                content=strip_frontmatter(md),
+                source_method=source_method,
+            )
         return await _fetch_html(
             url=url, client=client, timeout=timeout, source_method=source_method
         )
@@ -144,12 +158,22 @@ async def fetch_page_as_markdown(
     if preferred_method == FetchMethod.CONTENT_NEGOTIATION:
         md = await _try_content_negotiation(url=url, client=client, timeout=timeout)
         if md:
-            return DocPage(url=url, title="", content=md, source_method=source_method)
+            return DocPage(
+                url=url,
+                title=extract_md_title(md),
+                content=strip_frontmatter(md),
+                source_method=source_method,
+            )
 
     elif preferred_method == FetchMethod.MD_URL:
         md = await _try_md_url(url=url, client=client, timeout=timeout)
         if md:
-            return DocPage(url=url, title="", content=md, source_method=source_method)
+            return DocPage(
+                url=url,
+                title=extract_md_title(md),
+                content=strip_frontmatter(md),
+                source_method=source_method,
+            )
 
     elif preferred_method == FetchMethod.HTML:
         return await _fetch_html(
