@@ -615,47 +615,75 @@ class TestFetchGithubDocsLicenseGate:
         return client
 
     @pytest.mark.asyncio
-    async def test_no_license_blocks_fetch(self, mocker):
+    async def test_no_license_blocks_when_fair_use_off(self, mocker):
         client = self._make_client(mocker, None)
-        result = await fetch_github_docs("https://github.com/owner/repo", client)
+        result = await fetch_github_docs(
+            "https://github.com/owner/repo", client, fair_use=False
+        )
         assert result is not None
         assert result.pages == []
         assert result.license_spdx_id is None
 
     @pytest.mark.asyncio
-    async def test_noassertion_blocks_fetch(self, mocker):
+    async def test_noassertion_blocks_when_fair_use_off(self, mocker):
         client = self._make_client(mocker, "NOASSERTION")
-        result = await fetch_github_docs("https://github.com/owner/repo", client)
+        result = await fetch_github_docs(
+            "https://github.com/owner/repo", client, fair_use=False
+        )
         assert result is not None
         assert result.pages == []
         assert result.license_spdx_id == "NOASSERTION"
 
     @pytest.mark.asyncio
+    async def test_unknown_license_blocks_when_fair_use_off(self, mocker):
+        client = self._make_client(mocker, "WTFPL")
+        result = await fetch_github_docs(
+            "https://github.com/owner/repo", client, fair_use=False
+        )
+        assert result is not None
+        assert result.pages == []
+        assert result.license_spdx_id == "WTFPL"
+
+    @pytest.mark.asyncio
     async def test_permissive_license_allows_fetch(self, mocker):
         client = self._make_client(mocker, "MIT")
-        result = await fetch_github_docs("https://github.com/owner/repo", client)
+        result = await fetch_github_docs(
+            "https://github.com/owner/repo", client, fair_use=False
+        )
         assert result is not None
         assert len(result.pages) == 1
 
     @pytest.mark.asyncio
     async def test_copyleft_license_allows_fetch(self, mocker):
         client = self._make_client(mocker, "GPL-3.0-only")
-        result = await fetch_github_docs("https://github.com/owner/repo", client)
+        result = await fetch_github_docs(
+            "https://github.com/owner/repo", client, fair_use=False
+        )
         assert result is not None
 
     @pytest.mark.asyncio
-    async def test_unknown_license_blocks_fetch(self, mocker):
-        client = self._make_client(mocker, "WTFPL")
-        result = await fetch_github_docs("https://github.com/owner/repo", client)
+    async def test_fair_use_proceeds_with_no_license(self, mocker):
+        client = self._make_client(mocker, None)
+        result = await fetch_github_docs(
+            "https://github.com/owner/repo", client, fair_use=True
+        )
         assert result is not None
-        assert result.pages == []
+        assert len(result.pages) == 1
+
+    @pytest.mark.asyncio
+    async def test_fair_use_proceeds_with_unknown_license(self, mocker):
+        client = self._make_client(mocker, "WTFPL")
+        result = await fetch_github_docs(
+            "https://github.com/owner/repo", client, fair_use=True
+        )
+        assert result is not None
+        assert len(result.pages) == 1
         assert result.license_spdx_id == "WTFPL"
 
 
 class TestFetchGithubDocsDocFolderDetection:
     @pytest.mark.asyncio
     async def test_no_root_doc_folder_still_returns_root_md_files(self, mocker):
-        """Without a docs/ folder, root-level .md files are still returned."""
         tree = ["README.md", "AGENTS.md", "src/main.py"]
         client, inner = _make_github_client(mocker, tree)
         result = await fetch_github_docs("https://github.com/owner/repo", client)
@@ -668,14 +696,11 @@ class TestFetchGithubDocsDocFolderDetection:
         client, inner = _make_github_client(mocker, tree)
         result = await fetch_github_docs("https://github.com/owner/repo", client)
         assert result is not None
-        # only docs/ folder files, not README.md
         assert len(result.pages) == 2
         assert all("docs/" in p.url for p in result.pages)
 
     @pytest.mark.asyncio
     async def test_monorepo_nested_docs_not_auto_detected(self, mocker):
-        """Monorepo with docs only in nested packages: auto-detection
-        doesn't find them — only root .md files are returned."""
         tree = [
             "packages/web/src/content/docs/intro.md",
             "src/main.py",
@@ -687,7 +712,6 @@ class TestFetchGithubDocsDocFolderDetection:
 
     @pytest.mark.asyncio
     async def test_explicit_subpath_overrides_detection(self, mocker):
-        """When user provides a subpath, it's used directly as the doc folder."""
         tree = [
             "packages/web/src/content/docs/intro.md",
             "README.md",

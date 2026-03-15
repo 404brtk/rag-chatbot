@@ -93,6 +93,7 @@ async def get_docs(
                 doc_folder_override=doc_folder_override,
                 github_token=github_token,
                 on_progress=on_progress,
+                fair_use=request.fair_use,
             )
             if gh_result:
                 ethics.license_spdx_id = gh_result.license_spdx_id

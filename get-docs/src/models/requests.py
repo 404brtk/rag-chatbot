@@ -10,6 +10,7 @@ class GetDocsRequest(BaseModel):
     delay_seconds: float = 1.5
     timeout: float = 15.0
     skip_llms_full: bool = False
+    fair_use: bool = True
 
     @model_validator(mode="after")
     def at_least_one_source(self):

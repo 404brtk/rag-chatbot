@@ -338,6 +338,7 @@ async def fetch_github_docs(
     doc_folder_override: str | None = None,
     github_token: str | None = None,
     on_progress: Callable[[int, int | None], Awaitable[None]] | None = None,
+    fair_use: bool = True,
 ) -> GitHubFetchResult | None:
     """Fetch documentation files from a GitHub repository.
 
@@ -363,19 +364,30 @@ async def fetch_github_docs(
 
     # check license before fetching any content
     meta = await _fetch_repo_meta(client, owner, repo, timeout, token=github_token)
-    if (
+
+    if fair_use:
+        logger.info(
+            f"License: {meta.spdx_id} ({owner}/{repo}) - proceeding under the "
+            f"fair-use/private-study doctrine (non-commercial, local-only use; "
+            f"no redistribution intended)"
+        )
+    elif (
         not meta.spdx_id
         or meta.spdx_id == "NOASSERTION"
         or meta.spdx_id not in ALLOWED_LICENSES
     ):
         logger.info(
-            f"Skipping {owner}/{repo}: license {meta.spdx_id!r} not in allowed set"
+            f"License: {meta.spdx_id} ({owner}/{repo}) - not in allowed set. "
+            f"If this is for private, non-commercial use with no redistribution intended, "
+            f"set fair_use=true to proceed under the fair-use/private-study doctrine"
         )
         return GitHubFetchResult(
             owner=owner,
             repo=repo,
             license_spdx_id=meta.spdx_id,
         )
+    else:
+        logger.info(f"License: {meta.spdx_id} ({owner}/{repo})")
 
     resolved_branch = parsed.branch or meta.default_branch
     if not resolved_branch:
