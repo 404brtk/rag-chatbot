@@ -405,6 +405,95 @@ def _mock_response(
     )
 
 
+class TestGroupMerging:
+    def test_multiple_wildcard_groups_merged(self):
+        content = (
+            "User-agent: *\nDisallow: /private/\n\nUser-agent: *\nDisallow: /secret/\n"
+        )
+        parser = RobotsParser(content)
+        assert parser.is_allowed("/private/page") is False
+        assert parser.is_allowed("/secret/page") is False
+        assert parser.is_allowed("/public/page") is True
+
+    def test_multiple_specific_groups_merged(self):
+        content = (
+            "User-agent: mybot\nDisallow: /a/\n\nUser-agent: mybot\nDisallow: /b/\n"
+        )
+        parser = RobotsParser(content, user_agent="mybot")
+        assert parser.is_allowed("/a/page") is False
+        assert parser.is_allowed("/b/page") is False
+
+    def test_merged_crawl_delay_uses_first(self):
+        content = (
+            "User-agent: *\nCrawl-delay: 2\nDisallow: /a/\n\n"
+            "User-agent: *\nCrawl-delay: 5\nDisallow: /b/\n"
+        )
+        parser = RobotsParser(content)
+        assert parser.get_crawl_delay() == 2.0
+
+    def test_merged_content_signals_combined(self):
+        content = (
+            "User-agent: *\nContent-Signal: ai-input=no\nDisallow: /a/\n\n"
+            "User-agent: *\nContent-Signal: /docs/ ai-input=yes\nDisallow: /b/\n"
+        )
+        parser = RobotsParser(content)
+        assert parser.is_ai_input_allowed("/") is False
+        assert parser.is_ai_input_allowed("/docs/page") is True
+
+    def test_specific_groups_not_merged_with_wildcard(self):
+        content = (
+            "User-agent: *\nDisallow: /wildcard-only/\n\n"
+            "User-agent: mybot\nDisallow: /specific/\n"
+        )
+        parser = RobotsParser(content, user_agent="mybot")
+        assert parser.is_allowed("/specific/page") is False
+        assert parser.is_allowed("/wildcard-only/page") is True
+
+    def test_allow_and_disallow_across_groups(self):
+        content = (
+            "User-agent: *\nDisallow: /docs/\n\nUser-agent: *\nAllow: /docs/public/\n"
+        )
+        parser = RobotsParser(content)
+        assert parser.is_allowed("/docs/private") is False
+        assert parser.is_allowed("/docs/public/page") is True
+
+
+class TestPercentEncoding:
+    def test_encoded_rule_matches_decoded_path(self):
+        parser = RobotsParser("User-agent: *\nDisallow: /docs/%7Efile")
+        assert parser.is_allowed("/docs/~file") is False
+
+    def test_decoded_rule_matches_encoded_path(self):
+        parser = RobotsParser("User-agent: *\nDisallow: /docs/~file")
+        assert parser.is_allowed("/docs/%7Efile") is False
+
+    def test_reserved_char_stays_encoded(self):
+        parser = RobotsParser("User-agent: *\nDisallow: /docs%2Fhidden")
+        assert parser.is_allowed("/docs/hidden") is True
+        assert parser.is_allowed("/docs%2Fhidden") is False
+
+    def test_unreserved_letter_decoded(self):
+        parser = RobotsParser("User-agent: *\nDisallow: /%61pi/")
+        assert parser.is_allowed("/api/page") is False
+        assert parser.is_allowed("/%61pi/page") is False
+
+    def test_hex_case_normalized(self):
+        parser = RobotsParser("User-agent: *\nDisallow: /path%2fmore")
+        assert parser.is_allowed("/path%2Fmore") is False
+        assert parser.is_allowed("/path%2fmore") is False
+
+    def test_control_chars_stay_encoded(self):
+        parser = RobotsParser("User-agent: *\nDisallow: /path%00value")
+        assert parser.is_allowed("/path%00value") is False
+        assert parser.is_allowed("/path%00other") is True
+
+    def test_content_signal_path_normalized(self):
+        content = "User-agent: *\nContent-Signal: /docs/%7Epage ai-input=no\nAllow: /"
+        parser = RobotsParser(content)
+        assert parser.is_ai_input_allowed("/docs/~page") is False
+        assert parser.is_ai_input_allowed("/docs/%7Epage") is False
+
+
 class TestFetchRobotsTxt:
     @pytest.mark.asyncio
     async def test_fetches_and_parses(self, mocker):

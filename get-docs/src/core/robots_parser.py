@@ -27,6 +27,10 @@ class _RuleGroup:
 
 
 class RobotsParser:
+    _UNRESERVED_CHARS = frozenset(
+        b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-._~"
+    )
+
     def __init__(self, robots_txt_content: str, user_agent: str = "*"):
         self._user_agent = user_agent.lower()
         self._allow: list[str] = []
@@ -81,9 +85,9 @@ class RobotsParser:
                 if rule:
                     current_group.content_signals.append(rule)
             elif directive == "disallow" and value:
-                current_group.disallow.append(value)
+                current_group.disallow.append(self._normalize_path(value))
             elif directive == "allow" and value:
-                current_group.allow.append(value)
+                current_group.allow.append(self._normalize_path(value))
             elif directive == "crawl-delay":
                 try:
                     current_group.crawl_delay = float(value)
@@ -97,6 +101,17 @@ class RobotsParser:
             self._disallow = matched.disallow
             self._crawl_delay = matched.crawl_delay
             self._content_signals = matched.content_signals
+
+    @staticmethod
+    def _decode_pct(m: re.Match) -> str:
+        byte_val = int(m.group(1), 16)
+        if byte_val in RobotsParser._UNRESERVED_CHARS:
+            return chr(byte_val)
+        return m.group(0).upper()
+
+    @staticmethod
+    def _normalize_path(path: str) -> str:
+        return re.sub(r"%([0-9A-Fa-f]{2})", RobotsParser._decode_pct, path)
 
     @staticmethod
     def _parse_content_signal(value: str) -> _ContentSignalRule | None:
@@ -141,29 +156,54 @@ class RobotsParser:
         if not signals:
             return None
 
-        return _ContentSignalRule(path=path, signals=signals)
+        return _ContentSignalRule(
+            path=RobotsParser._normalize_path(path), signals=signals
+        )
 
     def _find_matching_group(self, groups: list[_RuleGroup]) -> _RuleGroup | None:
-        specific_match: _RuleGroup | None = (
-            None  # specific user-agent match (higher priority)
-        )
-        wildcard_match: _RuleGroup | None = (
-            None  # wildcard user-agent match ("*") - default for all bots
-        )
+        # if more than one group matches the user-agent,
+        # the matching groups' rules MUST be combined into one group
+        specific_matches: list[_RuleGroup] = []
+        wildcard_matches: list[_RuleGroup] = []
 
         for group in groups:
             for ua in group.user_agents:
                 if ua == self._user_agent:
-                    specific_match = group
-                elif ua == "*":
-                    wildcard_match = group
+                    specific_matches.append(group)
+                    break
+                if ua == "*":
+                    wildcard_matches.append(group)
+                    break
 
-        return specific_match or wildcard_match
+        matches = specific_matches or wildcard_matches
+        if not matches:
+            return None
+        if len(matches) == 1:
+            return matches[0]
+
+        merged = _RuleGroup()
+        for g in matches:
+            merged.allow.extend(g.allow)
+            merged.disallow.extend(g.disallow)
+            merged.content_signals.extend(g.content_signals)
+            if merged.crawl_delay is None and g.crawl_delay is not None:
+                merged.crawl_delay = g.crawl_delay
+        return merged
+
+    @staticmethod
+    def _path_matches(path: str, rule: str) -> bool:
+        if rule.endswith("$"):
+            pattern = re.escape(rule[:-1]).replace(r"\*", ".*") + "$"
+            return bool(re.match(pattern, path))
+
+        pattern = re.escape(rule).replace(r"\*", ".*")
+        return bool(re.match(pattern, path))
 
     def is_allowed(self, url_path: str) -> bool:
         if not self._allow and not self._disallow:
             return True
 
+        url_path = self._normalize_path(url_path)
         best_match_len = 0
         best_match_allowed = True
 
@@ -179,15 +219,6 @@ class RobotsParser:
 
         return best_match_allowed
 
-    @staticmethod
-    def _path_matches(path: str, rule: str) -> bool:
-        if rule.endswith("$"):
-            pattern = re.escape(rule[:-1]).replace(r"\*", ".*") + "$"
-            return bool(re.match(pattern, path))
-
-        pattern = re.escape(rule).replace(r"\*", ".*")
-        return bool(re.match(pattern, path))
-
     def get_crawl_delay(self) -> float | None:
         return self._crawl_delay
 
@@ -197,6 +228,7 @@ class RobotsParser:
     def get_content_signal(
         self, signal: ContentSignal, url_path: str = "/"
     ) -> bool | None:
+        url_path = self._normalize_path(url_path)
         best_match: _ContentSignalRule | None = None
         best_match_len = -1
 
