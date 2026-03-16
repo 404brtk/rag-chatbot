@@ -113,15 +113,16 @@ async def probe_and_fetch(
                 source_method=source_method,
             ), FetchMethod.CONTENT_NEGOTIATION
 
-    md = await _try_md_url(url=url, client=client, timeout=timeout)
-    if md:
-        logger.info(f"Probed {url} -> md_url")
-        return DocPage(
-            url=url,
-            title=extract_md_title(md),
-            content=strip_frontmatter(md),
-            source_method=source_method,
-        ), FetchMethod.MD_URL
+    if not is_root_url(url):
+        md = await _try_md_url(url=url, client=client, timeout=timeout)
+        if md:
+            logger.info(f"Probed {url} -> md_url")
+            return DocPage(
+                url=url,
+                title=extract_md_title(md),
+                content=strip_frontmatter(md),
+                source_method=source_method,
+            ), FetchMethod.MD_URL
 
     logger.info(f"Probed {url} -> html")
     return await _fetch_html(
@@ -134,14 +135,8 @@ async def fetch_page_as_markdown(
     client: HttpClient,
     timeout: float,
     source_method: SourceMethod,
-    preferred_method: FetchMethod | None = None,
+    preferred_method: FetchMethod,
 ) -> DocPage | None:
-    if preferred_method is None:
-        page, _ = await probe_and_fetch(
-            url=url, client=client, timeout=timeout, source_method=source_method
-        )
-        return page
-
     if has_md_extension(url):
         md = await _try_md_url(url=url, client=client, timeout=timeout)
         if md:
@@ -165,7 +160,10 @@ async def fetch_page_as_markdown(
                 source_method=source_method,
             )
 
-    elif preferred_method == FetchMethod.MD_URL:
+    if preferred_method in (
+        FetchMethod.CONTENT_NEGOTIATION,
+        FetchMethod.MD_URL,
+    ) and not is_root_url(url):
         md = await _try_md_url(url=url, client=client, timeout=timeout)
         if md:
             return DocPage(
@@ -174,11 +172,6 @@ async def fetch_page_as_markdown(
                 content=strip_frontmatter(md),
                 source_method=source_method,
             )
-
-    elif preferred_method == FetchMethod.HTML:
-        return await _fetch_html(
-            url=url, client=client, timeout=timeout, source_method=source_method
-        )
 
     return await _fetch_html(
         url=url, client=client, timeout=timeout, source_method=source_method
