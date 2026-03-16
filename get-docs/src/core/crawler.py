@@ -34,11 +34,21 @@ def html_to_doc_page(url: str, html: str, source_method: SourceMethod) -> DocPag
     return DocPage(url=url, title=title, content=markdown, source_method=source_method)
 
 
+def _md_to_doc_page(url: str, md: str, source_method: SourceMethod) -> DocPage:
+    return DocPage(
+        url=url,
+        title=extract_md_title(md),
+        content=strip_frontmatter(md),
+        source_method=source_method,
+    )
+
+
 async def _try_content_negotiation(
     url: str,
     client: HttpClient,
     timeout: float,
-) -> str | None:
+    source_method: SourceMethod,
+) -> DocPage | None:
     try:
         resp = await client.get(
             url,
@@ -51,7 +61,8 @@ async def _try_content_negotiation(
             return None
         if "text/markdown" in content_type:
             text = resp.text.strip()
-            return text if text else None
+            if text:
+                return _md_to_doc_page(url, text, source_method)
     except httpx.HTTPError:
         pass
     return None
@@ -61,7 +72,8 @@ async def _try_md_url(
     url: str,
     client: HttpClient,
     timeout: float,
-) -> str | None:
+    source_method: SourceMethod,
+) -> DocPage | None:
     md_url = url if has_md_extension(url) else url.rstrip("/") + ".md"
     try:
         resp = await client.get(md_url, follow_redirects=True, timeout=timeout)
@@ -71,7 +83,7 @@ async def _try_md_url(
         if "text/markdown" in content_type or "text/plain" in content_type:
             text = resp.text.strip()
             if text and not text.lstrip().startswith("<!"):
-                return text
+                return _md_to_doc_page(url, text, source_method)
     except httpx.HTTPError:
         pass
     return None
@@ -103,26 +115,20 @@ async def probe_and_fetch(
     source_method: SourceMethod,
 ) -> tuple[DocPage | None, FetchMethod]:
     if not has_md_extension(url):
-        md = await _try_content_negotiation(url=url, client=client, timeout=timeout)
-        if md:
+        page = await _try_content_negotiation(
+            url=url, client=client, timeout=timeout, source_method=source_method
+        )
+        if page:
             logger.info(f"Probed {url} -> content_negotiation (markdown)")
-            return DocPage(
-                url=url,
-                title=extract_md_title(md),
-                content=strip_frontmatter(md),
-                source_method=source_method,
-            ), FetchMethod.CONTENT_NEGOTIATION
+            return page, FetchMethod.CONTENT_NEGOTIATION
 
     if not is_root_url(url):
-        md = await _try_md_url(url=url, client=client, timeout=timeout)
-        if md:
+        page = await _try_md_url(
+            url=url, client=client, timeout=timeout, source_method=source_method
+        )
+        if page:
             logger.info(f"Probed {url} -> md_url")
-            return DocPage(
-                url=url,
-                title=extract_md_title(md),
-                content=strip_frontmatter(md),
-                source_method=source_method,
-            ), FetchMethod.MD_URL
+            return page, FetchMethod.MD_URL
 
     logger.info(f"Probed {url} -> html")
     return await _fetch_html(
@@ -138,40 +144,31 @@ async def fetch_page_as_markdown(
     preferred_method: FetchMethod,
 ) -> DocPage | None:
     if has_md_extension(url):
-        md = await _try_md_url(url=url, client=client, timeout=timeout)
-        if md:
-            return DocPage(
-                url=url,
-                title=extract_md_title(md),
-                content=strip_frontmatter(md),
-                source_method=source_method,
-            )
+        page = await _try_md_url(
+            url=url, client=client, timeout=timeout, source_method=source_method
+        )
+        if page:
+            return page
         return await _fetch_html(
             url=url, client=client, timeout=timeout, source_method=source_method
         )
 
     if preferred_method == FetchMethod.CONTENT_NEGOTIATION:
-        md = await _try_content_negotiation(url=url, client=client, timeout=timeout)
-        if md:
-            return DocPage(
-                url=url,
-                title=extract_md_title(md),
-                content=strip_frontmatter(md),
-                source_method=source_method,
-            )
+        page = await _try_content_negotiation(
+            url=url, client=client, timeout=timeout, source_method=source_method
+        )
+        if page:
+            return page
 
     if preferred_method in (
         FetchMethod.CONTENT_NEGOTIATION,
         FetchMethod.MD_URL,
     ) and not is_root_url(url):
-        md = await _try_md_url(url=url, client=client, timeout=timeout)
-        if md:
-            return DocPage(
-                url=url,
-                title=extract_md_title(md),
-                content=strip_frontmatter(md),
-                source_method=source_method,
-            )
+        page = await _try_md_url(
+            url=url, client=client, timeout=timeout, source_method=source_method
+        )
+        if page:
+            return page
 
     return await _fetch_html(
         url=url, client=client, timeout=timeout, source_method=source_method
