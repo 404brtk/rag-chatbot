@@ -623,6 +623,38 @@ class TestGetDocs:
         assert "Welcome to the docs" in result.pages[0].content
 
     @pytest.mark.asyncio
+    async def test_single_page_fallback_blocked_by_robots(self, mocker):
+        mocker.patch(
+            "src.core.orchestrator.fetch_robots_txt",
+            return_value=RobotsParser("User-agent: *\nDisallow: /"),
+        )
+        mocker.patch("src.core.orchestrator.fetch_llms_txt", return_value=None)
+        mocker.patch("src.core.orchestrator.collect_sitemap_urls", return_value=[])
+
+        client, _ = mock_http_client(mocker)
+        result = await get_docs(request=_request(), client=client)
+
+        assert len(result.pages) == 0
+        assert result.ethics.pages_filtered_by_robots == 1
+
+    @pytest.mark.asyncio
+    async def test_single_page_fallback_blocked_by_content_signal(self, mocker):
+        mocker.patch(
+            "src.core.orchestrator.fetch_robots_txt",
+            return_value=RobotsParser(
+                "User-agent: *\nAllow: /\nContent-Signal: ai-input=no"
+            ),
+        )
+        mocker.patch("src.core.orchestrator.fetch_llms_txt", return_value=None)
+        mocker.patch("src.core.orchestrator.collect_sitemap_urls", return_value=[])
+
+        client, _ = mock_http_client(mocker)
+        result = await get_docs(request=_request(), client=client)
+
+        assert len(result.pages) == 0
+        assert result.ethics.pages_filtered_by_content_signal == 1
+
+    @pytest.mark.asyncio
     async def test_on_progress_callback(self, mocker):
         mocker.patch(
             "src.core.orchestrator.fetch_robots_txt",

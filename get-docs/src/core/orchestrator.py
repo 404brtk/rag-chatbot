@@ -2,7 +2,6 @@ from src.config import settings
 from src.core.crawler import (
     ProgressCallback,
     fetch_and_convert_urls,
-    fetch_page_as_markdown,
 )
 from src.core.github_fetcher import (
     GitHubFetchResult,
@@ -194,16 +193,17 @@ async def get_docs(
     if not result.pages:
         step += 1
         logger.info(f"Step {step}: Falling back to single-page fetch for {base_url}")
-        page = await fetch_page_as_markdown(
-            url=base_url,
+        pages = await fetch_and_convert_urls(
+            urls=[base_url],
             client=client,
-            timeout=request.timeout,
+            robots=robots,
+            options=request,
             source_method=SourceMethod.SINGLE_PAGE,
+            ethics=ethics,
+            on_progress=on_progress,
         )
-        if page:
-            result.pages.append(page)
+        if pages:
+            result.pages.extend(pages)
             result.source_method = SourceMethod.SINGLE_PAGE
-            if on_progress:
-                await on_progress(1, 1)
 
     return result
