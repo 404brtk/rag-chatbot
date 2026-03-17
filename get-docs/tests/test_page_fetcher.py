@@ -212,7 +212,7 @@ class TestProbeAndFetch:
             url="https://example.com/",
             client=client,
             timeout=10.0,
-            source_method=SourceMethod.SINGLE_PAGE,
+            source_method=SourceMethod.SITEMAP_CRAWL,
         )
         assert page is not None
         assert "Welcome" in page.content
@@ -362,7 +362,7 @@ class TestFetchPagePreferredMethod:
             url="https://example.com/",
             client=client,
             timeout=10.0,
-            source_method=SourceMethod.SINGLE_PAGE,
+            source_method=SourceMethod.SITEMAP_CRAWL,
             preferred_method=FetchMethod.MD_URL,
         )
         assert page is not None
@@ -431,7 +431,7 @@ class TestFetchPagePreferredMethod:
             url="https://example.com/",
             client=client,
             timeout=10.0,
-            source_method=SourceMethod.SINGLE_PAGE,
+            source_method=SourceMethod.SITEMAP_CRAWL,
             preferred_method=FetchMethod.CONTENT_NEGOTIATION,
         )
         assert page is not None

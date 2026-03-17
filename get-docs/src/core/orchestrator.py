@@ -25,7 +25,7 @@ async def get_docs(
     """Main orchestration: fetch docs from the best available source.
 
     priority:
-    - url only: llms-full.txt -> llms.txt -> sitemap crawl -> link crawl -> single-page fallback
+    - url only: llms-full.txt -> llms.txt -> sitemap crawl -> link crawl
     - github_repo: GitHub, url-based fallback if url also provided
     """
     base_url = str(request.url) if request.url else None
@@ -183,28 +183,7 @@ async def get_docs(
             logger.info(f"Link crawl returned {len(pages)} pages")
             result.pages.extend(pages)
             result.source_method = SourceMethod.LINK_CRAWL
-            return result
-        logger.info("Link crawl returned no pages, falling through")
     except Exception:
         logger.exception("Link crawl failed")
-
-    # single-page fallback
-    step += 1
-    logger.info(f"Step {step}: Falling back to single-page fetch for {base_url}")
-    try:
-        pages = await fetch_and_convert_urls(
-            urls=[base_url],
-            client=client,
-            robots=robots,
-            options=request,
-            source_method=SourceMethod.SINGLE_PAGE,
-            ethics=ethics,
-            on_progress=on_progress,
-        )
-        if pages:
-            result.pages.extend(pages)
-            result.source_method = SourceMethod.SINGLE_PAGE
-    except Exception:
-        logger.exception("Single-page fetch failed")
 
     return result

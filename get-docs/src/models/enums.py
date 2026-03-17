@@ -13,7 +13,6 @@ class SourceMethod(StrEnum):
     GITHUB = "github"
     SITEMAP_CRAWL = "sitemap_crawl"
     LINK_CRAWL = "link_crawl"
-    SINGLE_PAGE = "single_page"
 
 
 class FetchMethod(StrEnum):
