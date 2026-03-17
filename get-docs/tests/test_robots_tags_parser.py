@@ -4,6 +4,8 @@ import pytest
 from src.core.page_fetcher import _fetch_html, probe_and_fetch
 from src.core.robots_tags_parser import (
     RobotsMetaBlocked,
+    check_html_meta,
+    has_nofollow_header,
     is_html_blocked,
     is_response_blocked,
     parse_robots_directives,
@@ -115,6 +117,28 @@ class TestIsResponseBlocked:
         assert is_response_blocked(resp, bot_name="get-docs") is False
 
 
+class TestHasNofollowHeader:
+    def test_nofollow_header(self):
+        resp = _response([("x-robots-tag", "nofollow")])
+        assert has_nofollow_header(resp) is True
+
+    def test_noindex_header_not_nofollow(self):
+        resp = _response([("x-robots-tag", "noindex")])
+        assert has_nofollow_header(resp) is False
+
+    def test_none_not_nofollow(self):
+        resp = _response([("x-robots-tag", "none")])
+        assert has_nofollow_header(resp) is False
+
+    def test_bot_targeted_nofollow(self):
+        resp = _response([("x-robots-tag", "get-docs: nofollow")])
+        assert has_nofollow_header(resp, bot_name="get-docs") is True
+
+    def test_no_header(self):
+        resp = _response([])
+        assert has_nofollow_header(resp) is False
+
+
 class TestIsHtmlBlocked:
     def test_noindex_blocks(self):
         html = '<html><head><meta name="robots" content="noindex"></head><body></body></html>'
@@ -161,6 +185,44 @@ class TestIsHtmlBlocked:
     def test_bot_targeted_other_bot_does_not_block(self):
         html = '<html><head><meta name="otherbot" content="noindex"></head><body></body></html>'
         assert is_html_blocked(html, bot_name="get-docs") is False
+
+
+class TestCheckHtmlMeta:
+    def test_noindex_blocked_no_nofollow(self):
+        html = '<html><head><meta name="robots" content="noindex"></head><body></body></html>'
+        blocked, nofollow = check_html_meta(html)
+        assert blocked is True
+        assert nofollow is False
+
+    def test_nofollow_not_blocked(self):
+        html = '<html><head><meta name="robots" content="nofollow"></head><body></body></html>'
+        blocked, nofollow = check_html_meta(html)
+        assert blocked is False
+        assert nofollow is True
+
+    def test_both_noindex_and_nofollow(self):
+        html = '<html><head><meta name="robots" content="noindex, nofollow"></head><body></body></html>'
+        blocked, nofollow = check_html_meta(html)
+        assert blocked is True
+        assert nofollow is True
+
+    def test_clean_page(self):
+        html = "<html><head><title>Test</title></head><body></body></html>"
+        blocked, nofollow = check_html_meta(html)
+        assert blocked is False
+        assert nofollow is False
+
+    def test_bot_targeted_nofollow(self):
+        html = '<html><head><meta name="get-docs" content="nofollow"></head><body></body></html>'
+        blocked, nofollow = check_html_meta(html, bot_name="get-docs")
+        assert blocked is False
+        assert nofollow is True
+
+    def test_other_bot_nofollow_ignored(self):
+        html = '<html><head><meta name="otherbot" content="nofollow"></head><body></body></html>'
+        blocked, nofollow = check_html_meta(html, bot_name="get-docs")
+        assert blocked is False
+        assert nofollow is False
 
 
 class TestPageFetcherIntegration:

@@ -591,6 +591,33 @@ class TestGetDocs:
         assert result.ethics.robots_crawl_delay_seconds == 5
 
     @pytest.mark.asyncio
+    async def test_falls_back_to_link_crawl(self, mocker):
+        mocker.patch(
+            "src.core.orchestrator.fetch_robots_txt",
+            return_value=RobotsParser(""),
+        )
+        mocker.patch(
+            "src.core.orchestrator.collect_sitemap_urls",
+            return_value=[],
+        )
+
+        home = html_page("Home", "Welcome to docs")
+
+        async def mock_get(url, **kwargs):
+            if url == "https://docs.example.com/":
+                return mock_response(text=home)
+            return mock_response(status_code=404)
+
+        client, inner = mock_http_client(mocker)
+        inner.get = mocker.AsyncMock(side_effect=mock_get)
+
+        result = await get_docs(request=_request(), client=client)
+
+        assert result.source_method == SourceMethod.LINK_CRAWL
+        assert len(result.pages) == 1
+        assert "Welcome to docs" in result.pages[0].content
+
+    @pytest.mark.asyncio
     async def test_falls_back_to_single_page_scrape(self, mocker):
         mocker.patch(
             "src.core.orchestrator.fetch_robots_txt",
@@ -600,6 +627,7 @@ class TestGetDocs:
             "src.core.orchestrator.collect_sitemap_urls",
             return_value=[],
         )
+        mocker.patch("src.core.orchestrator.crawl_links", return_value=[])
 
         async def mock_get(url, **kwargs):
             headers = kwargs.get("headers", {})
@@ -630,6 +658,7 @@ class TestGetDocs:
         )
         mocker.patch("src.core.orchestrator.fetch_llms_txt", return_value=None)
         mocker.patch("src.core.orchestrator.collect_sitemap_urls", return_value=[])
+        mocker.patch("src.core.orchestrator.crawl_links", return_value=[])
 
         client, _ = mock_http_client(mocker)
         result = await get_docs(request=_request(), client=client)
@@ -647,6 +676,7 @@ class TestGetDocs:
         )
         mocker.patch("src.core.orchestrator.fetch_llms_txt", return_value=None)
         mocker.patch("src.core.orchestrator.collect_sitemap_urls", return_value=[])
+        mocker.patch("src.core.orchestrator.crawl_links", return_value=[])
 
         client, _ = mock_http_client(mocker)
         result = await get_docs(request=_request(), client=client)
