@@ -12,6 +12,7 @@ class SourceMethod(StrEnum):
     LLMS_TXT = "llms_txt"
     GITHUB = "github"
     SITEMAP_CRAWL = "sitemap_crawl"
+    LINK_CRAWL = "link_crawl"
     SINGLE_PAGE = "single_page"
 
 

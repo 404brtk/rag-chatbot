@@ -40,15 +40,30 @@ def is_response_blocked(resp: httpx.Response, bot_name: str | None = None) -> bo
     return False
 
 
-def is_html_blocked(html: str, bot_name: str | None = None) -> bool:
+def has_nofollow_header(resp: httpx.Response, bot_name: str | None = None) -> bool:
+    for value in resp.headers.get_list("x-robots-tag"):
+        if "nofollow" in parse_robots_directives(value, bot_name):
+            return True
+    return False
+
+
+def _get_meta_directives(html: str, bot_name: str | None = None) -> set[str]:
     allowed_names = {"robots"}
     if bot_name is not None:
         allowed_names.add(bot_name.lower())
     soup = BeautifulSoup(html, "html.parser")
+    result: set[str] = set()
     for meta in soup.find_all("meta", attrs={"name": True, "content": True}):
         if meta["name"].lower() not in allowed_names:
             continue
-        directives = {d.strip().lower() for d in meta["content"].split(",")}
-        if directives & BLOCKING_DIRECTIVES:
-            return True
-    return False
+        result.update(d.strip().lower() for d in meta["content"].split(","))
+    return result
+
+
+def is_html_blocked(html: str, bot_name: str | None = None) -> bool:
+    return bool(_get_meta_directives(html, bot_name) & BLOCKING_DIRECTIVES)
+
+
+def check_html_meta(html: str, bot_name: str | None = None) -> tuple[bool, bool]:
+    directives = _get_meta_directives(html, bot_name)
+    return bool(directives & BLOCKING_DIRECTIVES), "nofollow" in directives

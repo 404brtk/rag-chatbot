@@ -1,60 +1,20 @@
 from src.config import settings
-from src.core.page_fetcher import (
-    ProgressCallback,
-    fetch_and_convert_urls,
-)
 from src.core.github_fetcher import (
     GitHubFetchResult,
     fetch_github_docs,
     parse_github_url,
 )
-from src.core.llms_txt_parser import LlmsTxtResult, fetch_llms_txt
-from src.core.robots_txt_parser import RobotsParser, fetch_robots_txt
+from src.core.robots_txt_parser import fetch_robots_txt
+from src.core.llms_txt_parser import fetch_llms_txt
 from src.core.sitemap_parser import collect_sitemap_urls
+from src.core.link_crawler import crawl_links
+from src.core.page_fetcher import ProgressCallback, fetch_and_convert_urls
 from src.models.enums import SourceMethod
 from src.models.requests import GetDocsRequest
 from src.models.responses import DocPage, EthicsContext, GetDocsResult
 from src.utils.http_client import HttpClient
 from src.utils.logger import logger
 from src.utils.url_utils import extract_domain
-
-
-def _llms_full_to_doc_page(llms_result: LlmsTxtResult) -> DocPage:
-    return DocPage(
-        url=llms_result.source_url,
-        title=llms_result.title or "",
-        content=llms_result.raw_content,
-        source_method=SourceMethod.LLMS_TXT,
-    )
-
-
-async def _try_sitemap(
-    base_url: str,
-    client: HttpClient,
-    robots: RobotsParser,
-    request: GetDocsRequest,
-    ethics: EthicsContext,
-    on_progress: ProgressCallback | None = None,
-) -> list[DocPage]:
-    urls = await collect_sitemap_urls(
-        base_url=base_url,
-        client=client,
-        robots=robots,
-        timeout=request.timeout,
-        max_depth=request.max_depth,
-    )
-    if not urls:
-        return []
-    return await fetch_and_convert_urls(
-        urls=urls,
-        client=client,
-        robots=robots,
-        options=request,
-        source_method=SourceMethod.SITEMAP_CRAWL,
-        ethics=ethics,
-        base_url=base_url,
-        on_progress=on_progress,
-    )
 
 
 async def get_docs(
@@ -65,7 +25,7 @@ async def get_docs(
     """Main orchestration: fetch docs from the best available source.
 
     priority:
-    - url only: llms-full.txt -> llms.txt -> sitemap crawl -> single-page fallback
+    - url only: llms-full.txt -> llms.txt -> sitemap crawl -> link crawl -> single-page fallback
     - github_repo: GitHub, url-based fallback if url also provided
     """
     base_url = str(request.url) if request.url else None
@@ -138,30 +98,36 @@ async def get_docs(
         if llms_result is not None:
             if llms_result.is_full:
                 logger.info("Found llms-full.txt - using as single doc page")
-                result.pages.append(_llms_full_to_doc_page(llms_result=llms_result))
+                result.pages.append(
+                    DocPage(
+                        url=llms_result.source_url,
+                        title=llms_result.title or "",
+                        content=llms_result.raw_content,
+                        source_method=SourceMethod.LLMS_TXT,
+                    )
+                )
                 result.source_method = SourceMethod.LLMS_TXT
                 if on_progress:
                     await on_progress(1, 1)
                 return result
-
-            urls = [link.url for link in llms_result.links if not link.optional]
-            logger.info(f"Found llms.txt with {len(urls)} links - fetching pages")
-            pages = await fetch_and_convert_urls(
-                urls=urls,
-                client=client,
-                robots=robots,
-                options=request,
-                source_method=SourceMethod.LLMS_TXT,
-                ethics=ethics,
-                base_url=base_url,
-                on_progress=on_progress,
-            )
-            if pages:
-                logger.info(f"llms.txt crawl returned {len(pages)} pages")
-                result.pages.extend(pages)
-                result.source_method = SourceMethod.LLMS_TXT
-                return result
             else:
+                urls = [link.url for link in llms_result.links if not link.optional]
+                logger.info(f"Found llms.txt with {len(urls)} links - fetching pages")
+                pages = await fetch_and_convert_urls(
+                    urls=urls,
+                    client=client,
+                    robots=robots,
+                    options=request,
+                    source_method=SourceMethod.LLMS_TXT,
+                    ethics=ethics,
+                    base_url=base_url,
+                    on_progress=on_progress,
+                )
+                if pages:
+                    logger.info(f"llms.txt crawl returned {len(pages)} pages")
+                    result.pages.extend(pages)
+                    result.source_method = SourceMethod.LLMS_TXT
+                    return result
                 logger.info("llms.txt links yielded no pages, falling through")
         else:
             logger.info("No llms.txt found, falling through")
@@ -172,27 +138,60 @@ async def get_docs(
     step += 1
     logger.info(f"Step {step}: Trying sitemap crawl for {base_url}")
     try:
-        pages = await _try_sitemap(
+        urls = await collect_sitemap_urls(
             base_url=base_url,
             client=client,
             robots=robots,
-            request=request,
+            timeout=request.timeout,
+            max_depth=request.max_depth,
+        )
+        if urls:
+            pages = await fetch_and_convert_urls(
+                urls=urls,
+                client=client,
+                robots=robots,
+                options=request,
+                source_method=SourceMethod.SITEMAP_CRAWL,
+                ethics=ethics,
+                base_url=base_url,
+                on_progress=on_progress,
+            )
+            if pages:
+                logger.info(f"Sitemap crawl returned {len(pages)} pages")
+                result.pages.extend(pages)
+                result.source_method = SourceMethod.SITEMAP_CRAWL
+                return result
+            logger.info("Sitemap crawl returned no pages, falling through")
+        else:
+            logger.info("No sitemap URLs found, falling through")
+    except Exception:
+        logger.exception("Sitemap crawl failed")
+
+    # link crawl
+    step += 1
+    logger.info(f"Step {step}: Trying link crawl for {base_url}")
+    try:
+        pages = await crawl_links(
+            base_url=base_url,
+            client=client,
+            robots=robots,
+            options=request,
             ethics=ethics,
             on_progress=on_progress,
         )
         if pages:
-            logger.info(f"Sitemap crawl returned {len(pages)} pages")
+            logger.info(f"Link crawl returned {len(pages)} pages")
             result.pages.extend(pages)
-            result.source_method = SourceMethod.SITEMAP_CRAWL
-        else:
-            logger.info("Sitemap crawl returned no pages, falling through")
+            result.source_method = SourceMethod.LINK_CRAWL
+            return result
+        logger.info("Link crawl returned no pages, falling through")
     except Exception:
-        logger.exception("Sitemap crawl failed")
+        logger.exception("Link crawl failed")
 
     # single-page fallback
-    if not result.pages:
-        step += 1
-        logger.info(f"Step {step}: Falling back to single-page fetch for {base_url}")
+    step += 1
+    logger.info(f"Step {step}: Falling back to single-page fetch for {base_url}")
+    try:
         pages = await fetch_and_convert_urls(
             urls=[base_url],
             client=client,
@@ -205,5 +204,7 @@ async def get_docs(
         if pages:
             result.pages.extend(pages)
             result.source_method = SourceMethod.SINGLE_PAGE
+    except Exception:
+        logger.exception("Single-page fetch failed")
 
     return result
