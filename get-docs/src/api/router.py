@@ -47,8 +47,9 @@ def _build_ethics_info(result) -> EthicsInfo:
         robots_crawl_delay_seconds=e.robots_crawl_delay_seconds,
         content_signal_ai_input=e.content_signal_ai_input,
         license_spdx_id=e.license_spdx_id,
-        pages_filtered_by_robots=e.pages_filtered_by_robots,
+        pages_filtered_by_robots_txt=e.pages_filtered_by_robots_txt,
         pages_filtered_by_content_signal=e.pages_filtered_by_content_signal,
+        pages_filtered_by_robots_tags=e.pages_filtered_by_robots_tags,
     )
 
 

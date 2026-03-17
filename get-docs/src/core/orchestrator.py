@@ -9,7 +9,7 @@ from src.core.github_fetcher import (
     parse_github_url,
 )
 from src.core.llms_txt_fetcher import LlmsTxtResult, fetch_llms_txt
-from src.core.robots_parser import RobotsParser, fetch_robots_txt
+from src.core.robots_txt_parser import RobotsParser, fetch_robots_txt
 from src.core.sitemap_parser import collect_sitemap_urls
 from src.models.enums import SourceMethod
 from src.models.requests import GetDocsRequest

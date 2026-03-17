@@ -2,7 +2,13 @@ from collections.abc import Awaitable, Callable
 
 import httpx
 
-from src.core.robots_parser import RobotsParser
+from src.config import settings
+from src.core.robots_tags_parser import (
+    RobotsMetaBlocked,
+    is_html_blocked,
+    is_response_blocked,
+)
+from src.core.robots_txt_parser import RobotsParser
 from src.models.enums import FetchMethod, SourceMethod
 from src.models.requests import GetDocsRequest
 from src.models.responses import DocPage, EthicsContext
@@ -59,6 +65,8 @@ async def _try_content_negotiation(
         content_type = resp.headers.get("content-type", "")
         if resp.status_code != 200:
             return None
+        if is_response_blocked(resp, bot_name=settings.BOT_NAME):
+            raise RobotsMetaBlocked(url)
         if "text/markdown" in content_type:
             text = resp.text.strip()
             if text:
@@ -80,6 +88,8 @@ async def _try_md_url(
         content_type = resp.headers.get("content-type", "")
         if resp.status_code != 200:
             return None
+        if is_response_blocked(resp, bot_name=settings.BOT_NAME):
+            raise RobotsMetaBlocked(url)
         if "text/markdown" in content_type or "text/plain" in content_type:
             text = resp.text.strip()
             if text and not text.lstrip().startswith("<!"):
@@ -102,6 +112,10 @@ async def _fetch_html(
             return None
         if "text/html" not in content_type:
             return None
+        if is_response_blocked(resp, bot_name=settings.BOT_NAME):
+            raise RobotsMetaBlocked(url)
+        if is_html_blocked(resp.text):
+            raise RobotsMetaBlocked(url)
         page = html_to_doc_page(url=url, html=resp.text, source_method=source_method)
         return page if page.content else None
     except httpx.HTTPError:
@@ -224,7 +238,7 @@ async def fetch_and_convert_urls(
     filtered, robots_count, signal_count = filter_urls_by_robots(
         urls=unique, robots=robots
     )
-    ethics.pages_filtered_by_robots += robots_count
+    ethics.pages_filtered_by_robots_txt += robots_count
     ethics.pages_filtered_by_content_signal += signal_count
 
     filtered = filtered[: options.max_pages]
@@ -242,12 +256,21 @@ async def fetch_and_convert_urls(
 
     pages: list[DocPage] = []
 
-    probe_page, method = await probe_and_fetch(
-        url=probe_url,
-        client=client,
-        timeout=options.timeout,
-        source_method=source_method,
-    )
+    try:
+        probe_page, method = await probe_and_fetch(
+            url=probe_url,
+            client=client,
+            timeout=options.timeout,
+            source_method=source_method,
+        )
+    except RobotsMetaBlocked:
+        logger.info(f"Blocked by robots tag directive: {probe_url}")
+        ethics.pages_filtered_by_robots_tags += 1
+        probe_page = None
+        method = FetchMethod.HTML  # the safest and simplest fallback
+        # TODO: it's worth considering probe_and_fetch another url
+        # but probably not worth it, rare case anyway
+
     if probe_page:
         pages.append(probe_page)
 
@@ -273,6 +296,10 @@ async def fetch_and_convert_urls(
         )
 
         for url, outcome in outcomes:
+            if isinstance(outcome, RobotsMetaBlocked):
+                logger.info(f"Blocked by robots tag directive: {url}")
+                ethics.pages_filtered_by_robots_tags += 1
+                continue
             if isinstance(outcome, Exception):
                 logger.warning(f"Failed to fetch {url}: {outcome}")
                 continue

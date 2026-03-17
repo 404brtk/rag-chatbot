@@ -20,8 +20,9 @@ class EthicsContext:
     robots_crawl_delay_seconds: float | None = None
     content_signal_ai_input: bool | None = None
     license_spdx_id: str | None = None
-    pages_filtered_by_robots: int = 0
+    pages_filtered_by_robots_txt: int = 0
     pages_filtered_by_content_signal: int = 0
+    pages_filtered_by_robots_tags: int = 0
 
 
 @dataclass
@@ -44,8 +45,9 @@ class EthicsInfo(BaseModel):
     robots_crawl_delay_seconds: float | None = None
     content_signal_ai_input: bool | None = None
     license_spdx_id: str | None = None
-    pages_filtered_by_robots: int = 0
+    pages_filtered_by_robots_txt: int = 0
     pages_filtered_by_content_signal: int = 0
+    pages_filtered_by_robots_tags: int = 0
 
 
 class JobProgress(BaseModel):

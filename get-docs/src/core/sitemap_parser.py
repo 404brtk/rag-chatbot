@@ -2,7 +2,7 @@ from dataclasses import dataclass
 import xml.etree.ElementTree as ET
 import httpx
 
-from src.core.robots_parser import RobotsParser, fetch_robots_txt
+from src.core.robots_txt_parser import RobotsParser, fetch_robots_txt
 from src.utils.http_client import HttpClient
 from src.utils.url_utils import (
     extract_path,

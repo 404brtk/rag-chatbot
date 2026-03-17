@@ -2,7 +2,7 @@ import re
 from dataclasses import dataclass, field
 import httpx
 
-from src.core.robots_parser import RobotsParser, fetch_robots_txt
+from src.core.robots_txt_parser import RobotsParser, fetch_robots_txt
 from src.models.responses import EthicsContext
 from src.utils.http_client import HttpClient
 from src.utils.logger import logger
@@ -136,12 +136,12 @@ async def fetch_llms_txt(
             if not robots.is_allowed(url_path):
                 logger.debug(f"robots.txt blocks {url}")
                 if ethics is not None:
-                    ethics.pages_filtered_by_robots += 1
+                    ethics.pages_filtered_by_robots_txt += 1
                 continue
             if robots.is_ai_input_allowed(url_path) is False:
                 logger.debug(f"AI-input signal blocks {url}")
                 if ethics is not None:
-                    ethics.pages_filtered_by_robots += 1
+                    ethics.pages_filtered_by_robots_txt += 1
                 continue
 
             try:
