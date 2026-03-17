@@ -1,7 +1,7 @@
 import httpx
 import pytest
 
-from src.core.robots_parser import RobotsParser
+from src.core.robots_txt_parser import RobotsParser
 from src.core.sitemap_parser import (
     SitemapEntry,
     SitemapParser,

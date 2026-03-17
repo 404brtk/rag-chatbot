@@ -21,19 +21,26 @@ def mock_response(
     text: str = "",
     content_type: str = "text/html; charset=utf-8",
     json_data: dict | list | None = None,
+    extra_headers: dict[str, str] | None = None,
 ) -> httpx.Response:
     if json_data is not None:
         content = json.dumps(json_data).encode()
+        headers = {"content-type": "application/json"}
+        if extra_headers:
+            headers.update(extra_headers)
         return httpx.Response(
             status_code=status_code,
             content=content,
-            headers={"content-type": "application/json"},
+            headers=headers,
             request=httpx.Request("GET", "https://example.com"),
         )
+    headers = {"content-type": content_type}
+    if extra_headers:
+        headers.update(extra_headers)
     return httpx.Response(
         status_code=status_code,
         text=text,
-        headers={"content-type": content_type},
+        headers=headers,
         request=httpx.Request("GET", "https://example.com"),
     )
 

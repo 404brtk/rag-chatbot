@@ -7,7 +7,7 @@ from src.core.crawler import (
     html_to_doc_page,
     probe_and_fetch,
 )
-from src.core.robots_parser import RobotsParser
+from src.core.robots_txt_parser import RobotsParser
 from src.models.enums import FetchMethod, SourceMethod
 from src.models.requests import GetDocsRequest
 from src.models.responses import EthicsContext
@@ -618,7 +618,7 @@ class TestFetchAndConvertUrls:
 
         assert len(pages) == 1
         assert pages[0].url == "https://example.com/public/page"
-        assert ethics.pages_filtered_by_robots == 1
+        assert ethics.pages_filtered_by_robots_txt == 1
         assert ethics.pages_filtered_by_content_signal == 1
 
     @pytest.mark.asyncio

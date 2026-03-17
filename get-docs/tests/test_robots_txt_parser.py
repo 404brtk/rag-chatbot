@@ -2,7 +2,7 @@ import httpx
 import pytest
 
 from src.models.enums import ContentSignal
-from src.core.robots_parser import RobotsParser, fetch_robots_txt
+from src.core.robots_txt_parser import RobotsParser, fetch_robots_txt
 from tests.conftest import mock_http_client
 
 

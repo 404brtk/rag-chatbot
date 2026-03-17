@@ -1,7 +1,7 @@
 import pytest
 
 from src.core.llms_txt_fetcher import fetch_llms_txt, parse_llms_txt
-from src.core.robots_parser import RobotsParser
+from src.core.robots_txt_parser import RobotsParser
 from src.models.responses import EthicsContext
 from tests.conftest import mock_http_client, mock_response
 
@@ -469,7 +469,7 @@ class TestFetchLlmsTxtEthicsTracking:
         )
 
         assert result is None
-        assert ethics.pages_filtered_by_robots == 2
+        assert ethics.pages_filtered_by_robots_txt == 2
 
     @pytest.mark.asyncio
     async def test_increments_ethics_when_ai_input_disallowed(self, mocker):
@@ -482,7 +482,7 @@ class TestFetchLlmsTxtEthicsTracking:
         )
 
         assert result is None
-        assert ethics.pages_filtered_by_robots == 2
+        assert ethics.pages_filtered_by_robots_txt == 2
 
     @pytest.mark.asyncio
     async def test_partial_disallow_increments_ethics_for_blocked_only(self, mocker):
@@ -503,7 +503,7 @@ class TestFetchLlmsTxtEthicsTracking:
         )
 
         assert result is not None
-        assert ethics.pages_filtered_by_robots == 1
+        assert ethics.pages_filtered_by_robots_txt == 1
 
     @pytest.mark.asyncio
     async def test_no_ethics_still_works(self, mocker):
@@ -536,4 +536,4 @@ class TestFetchLlmsTxtEthicsTracking:
         )
 
         assert result is not None
-        assert ethics.pages_filtered_by_robots == 0
+        assert ethics.pages_filtered_by_robots_txt == 0

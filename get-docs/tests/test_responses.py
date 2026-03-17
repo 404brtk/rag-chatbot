@@ -28,7 +28,7 @@ class TestDocPageResponse:
 class TestEthicsInfo:
     def test_defaults(self):
         info = EthicsInfo()
-        assert info.pages_filtered_by_robots == 0
+        assert info.pages_filtered_by_robots_txt == 0
         assert info.pages_filtered_by_content_signal == 0
         assert info.robots_crawl_delay_seconds is None
         assert info.content_signal_ai_input is None
@@ -38,14 +38,14 @@ class TestEthicsInfo:
         info = EthicsInfo(
             robots_crawl_delay_seconds=2.0,
             license_spdx_id="MIT",
-            pages_filtered_by_robots=3,
+            pages_filtered_by_robots_txt=3,
             content_signal_ai_input=True,
             pages_filtered_by_content_signal=1,
         )
         data = info.model_dump()
         assert data["robots_crawl_delay_seconds"] == 2.0
         assert data["license_spdx_id"] == "MIT"
-        assert data["pages_filtered_by_robots"] == 3
+        assert data["pages_filtered_by_robots_txt"] == 3
         assert data["content_signal_ai_input"] is True
         assert data["pages_filtered_by_content_signal"] == 1
 
@@ -53,9 +53,9 @@ class TestEthicsInfo:
 class TestEthicsContext:
     def test_mutable_counters(self):
         ctx = EthicsContext()
-        ctx.pages_filtered_by_robots += 2
+        ctx.pages_filtered_by_robots_txt += 2
         ctx.pages_filtered_by_content_signal += 1
-        assert ctx.pages_filtered_by_robots == 2
+        assert ctx.pages_filtered_by_robots_txt == 2
         assert ctx.pages_filtered_by_content_signal == 1
 
 
@@ -63,7 +63,7 @@ class TestGetDocsResult:
     def test_has_ethics(self):
         result = GetDocsResult(url="https://example.com")
         assert result.ethics is not None
-        assert result.ethics.pages_filtered_by_robots == 0
+        assert result.ethics.pages_filtered_by_robots_txt == 0
 
 
 class TestCrawlCreateResponse:

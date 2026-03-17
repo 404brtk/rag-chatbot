@@ -3,7 +3,7 @@ import pytest
 from src.core.github_fetcher import GitHubFetchResult
 from src.core.llms_txt_fetcher import LlmsTxtLink, LlmsTxtResult
 from src.core.orchestrator import get_docs
-from src.core.robots_parser import RobotsParser
+from src.core.robots_txt_parser import RobotsParser
 from src.models.enums import SourceMethod
 from src.models.requests import GetDocsRequest
 from src.models.responses import DocPage
@@ -325,7 +325,7 @@ class TestGetDocs:
 
         assert len(result.pages) == 1
         assert result.pages[0].url == "https://docs.example.com/public/guide"
-        assert result.ethics.pages_filtered_by_robots == 1
+        assert result.ethics.pages_filtered_by_robots_txt == 1
 
     @pytest.mark.asyncio
     async def test_llms_txt_links_filtered_by_scope(self, mocker):
@@ -635,7 +635,7 @@ class TestGetDocs:
         result = await get_docs(request=_request(), client=client)
 
         assert len(result.pages) == 0
-        assert result.ethics.pages_filtered_by_robots == 1
+        assert result.ethics.pages_filtered_by_robots_txt == 1
 
     @pytest.mark.asyncio
     async def test_single_page_fallback_blocked_by_content_signal(self, mocker):
