@@ -114,7 +114,7 @@ async def _fetch_html(
             return None
         if is_response_blocked(resp, bot_name=settings.BOT_NAME):
             raise RobotsMetaBlocked(url)
-        if is_html_blocked(resp.text):
+        if is_html_blocked(resp.text, bot_name=settings.BOT_NAME):
             raise RobotsMetaBlocked(url)
         page = html_to_doc_page(url=url, html=resp.text, source_method=source_method)
         return page if page.content else None

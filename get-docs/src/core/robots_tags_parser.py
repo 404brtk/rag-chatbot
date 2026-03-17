@@ -1,15 +1,14 @@
 from bs4 import BeautifulSoup
 import httpx
 
-BLOCKING_DIRECTIVES = frozenset({"noindex", "none", "noarchive", "nosnippet"})
+BLOCKING_DIRECTIVES = frozenset({"noindex", "none"})
 
 
 class RobotsMetaBlocked(Exception):
     pass
 
 
-def parse_robots_directives(value: str, bot_name: str = "*") -> set[str]:
-    bot_name = bot_name.lower()
+def parse_robots_directives(value: str, bot_name: str | None = None) -> set[str]:
     directives: dict[str | None, set[str]] = {}
     context: str | None = None
 
@@ -28,12 +27,12 @@ def parse_robots_directives(value: str, bot_name: str = "*") -> set[str]:
             directives.setdefault(context, set()).add(token.lower())
 
     result = directives.get(None, set())
-    if bot_name != "*":
-        result = result | directives.get(bot_name, set())
+    if bot_name is not None:
+        result = result | directives.get(bot_name.lower(), set())
     return result
 
 
-def is_response_blocked(resp: httpx.Response, bot_name: str = "*") -> bool:
+def is_response_blocked(resp: httpx.Response, bot_name: str | None = None) -> bool:
     values = resp.headers.get_list("x-robots-tag")
     for value in values:
         if parse_robots_directives(value, bot_name) & BLOCKING_DIRECTIVES:
@@ -41,10 +40,13 @@ def is_response_blocked(resp: httpx.Response, bot_name: str = "*") -> bool:
     return False
 
 
-def is_html_blocked(html: str) -> bool:
+def is_html_blocked(html: str, bot_name: str | None = None) -> bool:
+    allowed_names = {"robots"}
+    if bot_name is not None:
+        allowed_names.add(bot_name.lower())
     soup = BeautifulSoup(html, "html.parser")
     for meta in soup.find_all("meta", attrs={"name": True, "content": True}):
-        if meta["name"].lower() != "robots":
+        if meta["name"].lower() not in allowed_names:
             continue
         directives = {d.strip().lower() for d in meta["content"].split(",")}
         if directives & BLOCKING_DIRECTIVES:

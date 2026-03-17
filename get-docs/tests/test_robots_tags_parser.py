@@ -81,16 +81,16 @@ class TestIsResponseBlocked:
         resp = _response([("x-robots-tag", "none")])
         assert is_response_blocked(resp) is True
 
-    def test_noarchive_blocks(self):
-        resp = _response([("x-robots-tag", "noarchive")])
-        assert is_response_blocked(resp) is True
-
-    def test_nosnippet_blocks(self):
-        resp = _response([("x-robots-tag", "nosnippet")])
-        assert is_response_blocked(resp) is True
-
     def test_nofollow_does_not_block(self):
         resp = _response([("x-robots-tag", "nofollow")])
+        assert is_response_blocked(resp) is False
+
+    def test_noarchive_does_not_block(self):
+        resp = _response([("x-robots-tag", "noarchive")])
+        assert is_response_blocked(resp) is False
+
+    def test_nosnippet_does_not_block(self):
+        resp = _response([("x-robots-tag", "nosnippet")])
         assert is_response_blocked(resp) is False
 
     def test_no_header(self):
@@ -126,16 +126,16 @@ class TestIsHtmlBlocked:
         )
         assert is_html_blocked(html) is True
 
-    def test_noarchive_blocks(self):
-        html = '<html><head><meta name="robots" content="noarchive"></head><body></body></html>'
-        assert is_html_blocked(html) is True
-
-    def test_nosnippet_blocks(self):
-        html = '<html><head><meta name="robots" content="nosnippet"></head><body></body></html>'
-        assert is_html_blocked(html) is True
-
     def test_nofollow_does_not_block(self):
         html = '<html><head><meta name="robots" content="nofollow"></head><body></body></html>'
+        assert is_html_blocked(html) is False
+
+    def test_noarchive_does_not_block(self):
+        html = '<html><head><meta name="robots" content="noarchive"></head><body></body></html>'
+        assert is_html_blocked(html) is False
+
+    def test_nosnippet_does_not_block(self):
+        html = '<html><head><meta name="robots" content="nosnippet"></head><body></body></html>'
         assert is_html_blocked(html) is False
 
     def test_no_meta_tag(self):
@@ -154,8 +154,16 @@ class TestIsHtmlBlocked:
         html = '<html><head><meta name="description" content="noindex"></head><body></body></html>'
         assert is_html_blocked(html) is False
 
+    def test_bot_targeted_blocks(self):
+        html = '<html><head><meta name="get-docs" content="noindex"></head><body></body></html>'
+        assert is_html_blocked(html, bot_name="get-docs") is True
 
-class TestCrawlerIntegration:
+    def test_bot_targeted_other_bot_does_not_block(self):
+        html = '<html><head><meta name="otherbot" content="noindex"></head><body></body></html>'
+        assert is_html_blocked(html, bot_name="get-docs") is False
+
+
+class TestPageFetcherIntegration:
     @pytest.mark.asyncio
     async def test_fetch_html_raises_on_x_robots_tag(self, mocker):
         client, inner = mock_http_client(mocker)
