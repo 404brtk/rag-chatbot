@@ -1,6 +1,6 @@
 import pytest
 
-from src.core.llms_txt_fetcher import fetch_llms_txt, parse_llms_txt
+from src.core.llms_txt_parser import fetch_llms_txt, parse_llms_txt
 from src.core.robots_txt_parser import RobotsParser
 from src.models.responses import EthicsContext
 from tests.conftest import mock_http_client, mock_response

@@ -8,7 +8,7 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from src.api.router import router
-from src.core.llms_txt_fetcher import LlmsTxtResult
+from src.core.llms_txt_parser import LlmsTxtResult
 from src.core.robots_txt_parser import RobotsParser
 from src.utils.http_client import ThrottleState
 

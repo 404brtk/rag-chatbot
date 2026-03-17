@@ -1,7 +1,7 @@
 import pytest
 
 from src.core.github_fetcher import GitHubFetchResult
-from src.core.llms_txt_fetcher import LlmsTxtLink, LlmsTxtResult
+from src.core.llms_txt_parser import LlmsTxtLink, LlmsTxtResult
 from src.core.orchestrator import get_docs
 from src.core.robots_txt_parser import RobotsParser
 from src.models.enums import SourceMethod

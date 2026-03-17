@@ -1,5 +1,5 @@
 from src.config import settings
-from src.core.crawler import (
+from src.core.page_fetcher import (
     ProgressCallback,
     fetch_and_convert_urls,
 )
@@ -8,7 +8,7 @@ from src.core.github_fetcher import (
     fetch_github_docs,
     parse_github_url,
 )
-from src.core.llms_txt_fetcher import LlmsTxtResult, fetch_llms_txt
+from src.core.llms_txt_parser import LlmsTxtResult, fetch_llms_txt
 from src.core.robots_txt_parser import RobotsParser, fetch_robots_txt
 from src.core.sitemap_parser import collect_sitemap_urls
 from src.models.enums import SourceMethod

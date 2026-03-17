@@ -1,6 +1,6 @@
 import pytest
 
-from src.core.crawler import (
+from src.core.page_fetcher import (
     fetch_and_convert_urls,
     fetch_page_as_markdown,
     filter_urls_by_robots,

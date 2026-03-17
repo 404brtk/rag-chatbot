@@ -1,7 +1,7 @@
 import httpx
 import pytest
 
-from src.core.crawler import _fetch_html, probe_and_fetch
+from src.core.page_fetcher import _fetch_html, probe_and_fetch
 from src.core.robots_tags_parser import (
     RobotsMetaBlocked,
     is_html_blocked,
