@@ -40,6 +40,19 @@ _LINK_PATTERN = re.compile(
 )
 
 
+_FULL_CONTENT_LINK_RATIO_THRESHOLD = 0.1
+_FULL_CONTENT_MIN_LINES = 40
+
+
+def is_llms_txt_full(result: "LlmsTxtResult") -> bool:
+    lines = result.raw_content.splitlines()
+    meaningful = [line for line in lines if line.strip()]
+    if len(meaningful) < _FULL_CONTENT_MIN_LINES:
+        return False
+    link_count = sum(1 for line in meaningful if _LINK_PATTERN.match(line.strip()))
+    return link_count / len(meaningful) < _FULL_CONTENT_LINK_RATIO_THRESHOLD
+
+
 def parse_llms_txt(
     content: str, source_url: str = "", is_full: bool = False
 ) -> LlmsTxtResult:
@@ -111,7 +124,8 @@ def parse_llms_txt(
 # paths to probe, in priority order (best first)
 _LLMS_TXT_PATHS = (
     ("llms-full.txt", True),  # full md docs content all in one
-    ("llms.txt", False),  # only links with description
+    ("llms.txt", False),  # only links with description (mostly),
+    # heuristic may upgrade to full
 )
 
 
@@ -158,7 +172,13 @@ async def fetch_llms_txt(
                 if not text:
                     continue
 
-                return parse_llms_txt(text, source_url=url, is_full=is_full)
+                result = parse_llms_txt(text, source_url=url, is_full=is_full)
+                if not result.is_full and is_llms_txt_full(result):
+                    logger.info(
+                        f"Content heuristic: {url} detected as full documentation"
+                    )
+                    result.is_full = True
+                return result
 
             except httpx.HTTPError:
                 continue

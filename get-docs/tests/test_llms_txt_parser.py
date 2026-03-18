@@ -1,6 +1,6 @@
 import pytest
 
-from src.core.llms_txt_parser import fetch_llms_txt, parse_llms_txt
+from src.core.llms_txt_parser import fetch_llms_txt, is_llms_txt_full, parse_llms_txt
 from src.core.robots_txt_parser import RobotsParser
 from src.models.responses import EthicsContext
 from tests.conftest import mock_http_client, mock_response
@@ -537,3 +537,173 @@ class TestFetchLlmsTxtEthicsTracking:
 
         assert result is not None
         assert ethics.pages_filtered_by_robots_txt == 0
+
+
+_SVELTEKIT_LLMS_TXT_SAMPLE = """\
+<SYSTEM>This is the developer documentation for SvelteKit.</SYSTEM>
+
+
+# Introduction
+
+## Before we begin
+
+> [!NOTE] If you're new to Svelte or SvelteKit we recommend checking out the [interactive tutorial](/tutorial/kit).
+>
+> If you get stuck, reach out for help in the [Discord chatroom](/chat).
+
+## What is SvelteKit?
+
+SvelteKit is a framework for rapidly developing robust, performant web applications using [Svelte](../svelte). If you're coming from React, SvelteKit is similar to Next. If you're coming from Vue, SvelteKit is similar to Nuxt.
+
+To learn more about the kinds of applications you can build with SvelteKit, see the [documentation regarding project types](project-types).
+
+## What is Svelte?
+
+In short, Svelte is a way of writing user interface components — like a navigation bar, comment section, or contact form — that users see and interact with in their browsers. The Svelte compiler converts your components to JavaScript that can be run to render the HTML for the page and to CSS that styles the page. You don't need to know Svelte to understand the rest of this guide, but it will help. If you'd like to learn more, check out [the Svelte tutorial](/tutorial).
+
+## SvelteKit vs Svelte
+
+Svelte renders UI components. You can compose these components and render an entire page with just Svelte, but you need more than just Svelte to write an entire app.
+
+SvelteKit helps you build web apps while following modern best practices and providing solutions to common development challenges. It offers everything from basic functionalities — like a [router](glossary#Routing) that updates your UI when a link is clicked — to more advanced capabilities. Its extensive list of features includes [build optimizations](https://vitejs.dev/guide/features.html#build-optimizations) to load only the minimal required code; [offline support](service-workers); [preloading](link-options#data-sveltekit-preload-data) pages before user navigation; [configurable rendering](page-options) to handle different parts of your app on the server via [SSR](glossary#SSR), in the browser through [client-side rendering](glossary#CSR), or at build-time with [prerendering](glossary#Prerendering); [image optimization](images); and much more. Building an app with all the modern best practices is fiendishly complicated, but SvelteKit does all the boring stuff for you so that you can get on with the creative part.
+
+It reflects changes to your code in the browser instantly to provide a lightning-fast and feature-rich development experience by leveraging [Vite](https://vitejs.dev/) with a [Svelte plugin](https://github.com/sveltejs/vite-plugin-svelte) to do [Hot Module Replacement (HMR)](https://github.com/sveltejs/vite-plugin-svelte/blob/main/docs/config.md#hot).
+
+# Creating a project
+
+The easiest way to start building a SvelteKit app is to run `npx sv create`:
+
+```sh
+npx sv create my-app
+cd my-app
+npm run dev
+```
+
+The first command will scaffold a new project in the `my-app` directory asking if you'd like to set up some basic tooling such as TypeScript. See [the CLI docs](/docs/cli/overview) for information about these options and [the integrations page](./integrations) for pointers on setting up additional tooling.
+
+There are two basic concepts:
+
+- Each page of your app is a [Svelte](../svelte) component
+- You create pages by adding files to the `src/routes` directory of your project. These will be server-rendered so that a user's first visit to your app is as fast as possible, then a client-side app takes over
+
+Try editing the files to get a feel for how everything works.
+
+## Editor setup
+
+We recommend using [Visual Studio Code (aka VS Code)](https://code.visualstudio.com/download) with [the Svelte extension](https://marketplace.visualstudio.com/items?itemName=svelte.svelte-vscode), but [support also exists for numerous other editors](https://sveltesociety.dev/collection/editor-support-c85c080efc292a34).
+
+# Project types
+
+SvelteKit offers configurable rendering, which allows you to build and deploy your project in several different ways.
+
+## Default rendering
+
+By default, when a user visits a site, SvelteKit will render the first page with [server-side rendering (SSR)](glossary#SSR) and subsequent pages with [client-side rendering (CSR)](glossary#CSR).
+
+## Static site generation
+
+You can use SvelteKit as a [static site generator (SSG)](glossary#SSG) that fully [prerenders](glossary#Prerendering) your site with static rendering using [`adapter-static`](adapter-static).
+
+## Single-page app
+
+[Single-page apps (SPAs)](glossary#SPA) exclusively use [client-side rendering (CSR)](glossary#CSR). You can [build single-page apps (SPAs)](single-page-apps) with SvelteKit.
+
+## See Also
+
+- [Advanced Routing](https://svelte.dev/docs/kit/advanced-routing): Parameter matchers and optional params
+- [Form Actions](https://svelte.dev/docs/kit/form-actions): Server-side form handling
+"""
+
+
+class TestIsLlmsTxtFull:
+    def test_spec_compliant_index_stays_as_index(self):
+        content = """\
+# Project Docs
+
+> Project documentation index
+
+## API
+- [Auth](https://example.com/auth): Authentication guide
+- [Users](https://example.com/users): User management
+- [Billing](https://example.com/billing): Billing API
+
+## Guides
+- [Quickstart](https://example.com/start): Get started fast
+- [Deploy](https://example.com/deploy): Deployment guide
+
+## Optional
+- [Legacy](https://example.com/legacy): Old API docs
+"""
+        result = parse_llms_txt(content)
+        assert is_llms_txt_full(result) is False
+
+    def test_sveltekit_docs_detected_as_full(self):
+        result = parse_llms_txt(_SVELTEKIT_LLMS_TXT_SAMPLE)
+        assert is_llms_txt_full(result) is True
+        assert len(result.links) == 2
+
+    def test_short_file_always_stays_as_index(self):
+        content = "# Small Doc\n" + "Some content line.\n" * 10
+        result = parse_llms_txt(content)
+        assert is_llms_txt_full(result) is False
+
+    def test_borderline_index_with_verbose_descriptions(self):
+        sections = ["## API\n"]
+        for i in range(8):
+            sections.append(
+                f"- [Service {i}](https://example.com/svc-{i}): "
+                f"Handles all {i}-related operations\n"
+            )
+        padding = "This section covers the core services.\n" * 42
+        content = (
+            "# Services Index\n\n> Overview of all services\n\n"
+            + padding
+            + "".join(sections)
+        )
+        result = parse_llms_txt(content)
+        meaningful = [line for line in content.splitlines() if line.strip()]
+        ratio = 8 / len(meaningful)
+        assert ratio > 0.1
+        assert is_llms_txt_full(result) is False
+
+
+class TestFetchDetectsFullContent:
+    @pytest.mark.asyncio
+    async def test_llms_txt_with_full_content_returns_is_full_true(self, mocker):
+        robots = RobotsParser("User-agent: *\nAllow: /")
+
+        def side_effect(url, **kw):
+            if url.endswith("llms-full.txt"):
+                return mock_response(status_code=404)
+            if url.endswith("llms.txt"):
+                return mock_response(
+                    text=_SVELTEKIT_LLMS_TXT_SAMPLE, content_type="text/plain"
+                )
+            return mock_response(status_code=404)
+
+        client, inner = mock_http_client(mocker)
+        inner.get = mocker.AsyncMock(side_effect=side_effect)
+
+        result = await fetch_llms_txt("https://example.com", client, robots=robots)
+
+        assert result is not None
+        assert result.is_full is True
+        assert result.source_url == "https://example.com/llms.txt"
+
+    @pytest.mark.asyncio
+    async def test_llms_full_txt_skips_heuristic(self, mocker):
+        robots = RobotsParser("User-agent: *\nAllow: /")
+        short_content = "# Docs\n> Summary\n"
+
+        def side_effect(url, **kw):
+            if url.endswith("llms-full.txt"):
+                return mock_response(text=short_content, content_type="text/plain")
+            return mock_response(status_code=404)
+
+        client, inner = mock_http_client(mocker)
+        inner.get = mocker.AsyncMock(side_effect=side_effect)
+
+        result = await fetch_llms_txt("https://example.com", client, robots=robots)
+
+        assert result is not None
+        assert result.is_full is True
