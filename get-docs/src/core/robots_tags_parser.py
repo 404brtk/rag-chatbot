@@ -1,7 +1,7 @@
 from bs4 import BeautifulSoup
 import httpx
 
-BLOCKING_DIRECTIVES = frozenset({"noindex", "none"})
+BLOCKING_DIRECTIVES: frozenset[str] = frozenset()
 
 
 class RobotsMetaBlocked(Exception):
@@ -67,3 +67,7 @@ def is_html_blocked(html: str, bot_name: str | None = None) -> bool:
 def check_html_meta(html: str, bot_name: str | None = None) -> tuple[bool, bool]:
     directives = _get_meta_directives(html, bot_name)
     return bool(directives & BLOCKING_DIRECTIVES), "nofollow" in directives
+
+
+def has_nofollow_meta(html: str, bot_name: str | None = None) -> bool:
+    return "nofollow" in _get_meta_directives(html, bot_name)

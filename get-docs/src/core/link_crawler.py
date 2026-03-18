@@ -7,11 +7,7 @@ from src.core.page_fetcher import (
     filter_urls_by_robots,
     html_to_doc_page,
 )
-from src.core.robots_tags_parser import (
-    check_html_meta,
-    has_nofollow_header,
-    is_response_blocked,
-)
+from src.core.robots_tags_parser import has_nofollow_header, has_nofollow_meta
 from src.core.robots_txt_parser import RobotsParser
 from src.models.enums import SourceMethod
 from src.models.requests import GetDocsRequest
@@ -74,6 +70,8 @@ async def crawl_links(
         ethics.pages_filtered_by_robots_txt += robots_count
         ethics.pages_filtered_by_content_signal += signal_count
 
+        logger.info(f"Link crawl depth {depth}: {len(allowed)} URLs to fetch")
+
         next_urls: list[str] = []
 
         for url in allowed:
@@ -92,18 +90,7 @@ async def crawl_links(
             if "text/html" not in resp.headers.get("content-type", ""):
                 continue
 
-            if is_response_blocked(resp, bot_name=bot_name):
-                logger.info(f"Blocked by robots tag directive: {url}")
-                ethics.pages_filtered_by_robots_tags += 1
-                continue
-
             html = resp.text
-
-            blocked, nofollow_meta = check_html_meta(html, bot_name=bot_name)
-            if blocked:
-                logger.info(f"Blocked by robots tag directive: {url}")
-                ethics.pages_filtered_by_robots_tags += 1
-                continue
 
             page = html_to_doc_page(
                 url=url, html=html, source_method=SourceMethod.LINK_CRAWL
@@ -113,7 +100,10 @@ async def crawl_links(
                 if on_progress:
                     await on_progress(len(pages), None)
 
-            if not nofollow_meta and not has_nofollow_header(resp, bot_name=bot_name):
+            nofollow = has_nofollow_meta(
+                html, bot_name=bot_name
+            ) or has_nofollow_header(resp, bot_name=bot_name)
+            if not nofollow:
                 for link in extract_links(html, url):
                     norm = normalize_url(link)
                     if norm not in seen and is_url_within_scope(norm, prefix):
