@@ -1,11 +1,12 @@
 import httpx
 import pytest
 
-from src.core.page_fetcher import _fetch_html, probe_and_fetch
+import src.core.robots_tags_parser as robots_tags_module
+from src.core.page_fetcher import _fetch_html
 from src.core.robots_tags_parser import (
-    RobotsMetaBlocked,
     check_html_meta,
     has_nofollow_header,
+    has_nofollow_meta,
     is_html_blocked,
     is_response_blocked,
     parse_robots_directives,
@@ -75,6 +76,12 @@ class TestParseRobotsDirectives:
 
 
 class TestIsResponseBlocked:
+    @pytest.fixture(autouse=True)
+    def _enable_blocking(self, monkeypatch):
+        monkeypatch.setattr(
+            robots_tags_module, "BLOCKING_DIRECTIVES", frozenset({"noindex", "none"})
+        )
+
     def test_noindex_blocks(self):
         resp = _response([("x-robots-tag", "noindex")])
         assert is_response_blocked(resp) is True
@@ -140,6 +147,12 @@ class TestHasNofollowHeader:
 
 
 class TestIsHtmlBlocked:
+    @pytest.fixture(autouse=True)
+    def _enable_blocking(self, monkeypatch):
+        monkeypatch.setattr(
+            robots_tags_module, "BLOCKING_DIRECTIVES", frozenset({"noindex", "none"})
+        )
+
     def test_noindex_blocks(self):
         html = '<html><head><meta name="robots" content="noindex"></head><body></body></html>'
         assert is_html_blocked(html) is True
@@ -188,6 +201,12 @@ class TestIsHtmlBlocked:
 
 
 class TestCheckHtmlMeta:
+    @pytest.fixture(autouse=True)
+    def _enable_blocking(self, monkeypatch):
+        monkeypatch.setattr(
+            robots_tags_module, "BLOCKING_DIRECTIVES", frozenset({"noindex", "none"})
+        )
+
     def test_noindex_blocked_no_nofollow(self):
         html = '<html><head><meta name="robots" content="noindex"></head><body></body></html>'
         blocked, nofollow = check_html_meta(html)
@@ -225,39 +244,75 @@ class TestCheckHtmlMeta:
         assert nofollow is False
 
 
+class TestHasNofollowMeta:
+    def test_nofollow_detected(self):
+        html = '<html><head><meta name="robots" content="nofollow"></head><body></body></html>'
+        assert has_nofollow_meta(html) is True
+
+    def test_noindex_is_not_nofollow(self):
+        html = '<html><head><meta name="robots" content="noindex"></head><body></body></html>'
+        assert has_nofollow_meta(html) is False
+
+    def test_none_is_not_nofollow(self):
+        html = (
+            '<html><head><meta name="robots" content="none"></head><body></body></html>'
+        )
+        assert has_nofollow_meta(html) is False
+
+    def test_no_meta_tag(self):
+        html = "<html><head><title>Test</title></head><body></body></html>"
+        assert has_nofollow_meta(html) is False
+
+    def test_bot_targeted_nofollow(self):
+        html = '<html><head><meta name="get-docs" content="nofollow"></head><body></body></html>'
+        assert has_nofollow_meta(html, bot_name="get-docs") is True
+
+    def test_other_bot_nofollow_ignored(self):
+        html = '<html><head><meta name="otherbot" content="nofollow"></head><body></body></html>'
+        assert has_nofollow_meta(html, bot_name="get-docs") is False
+
+    def test_mixed_with_nofollow(self):
+        html = '<html><head><meta name="robots" content="noindex, nofollow"></head><body></body></html>'
+        assert has_nofollow_meta(html) is True
+
+    def test_case_insensitive(self):
+        html = '<html><head><meta name="robots" content="NoFollow"></head><body></body></html>'
+        assert has_nofollow_meta(html) is True
+
+
 class TestPageFetcherIntegration:
     @pytest.mark.asyncio
-    async def test_fetch_html_raises_on_x_robots_tag(self, mocker):
+    async def test_fetch_html_ignores_noindex_header(self, mocker):
         client, inner = mock_http_client(mocker)
         inner.get.return_value = mock_response(
             text="<html><head><title>Hi</title></head><body><main>content</main></body></html>",
             extra_headers={"x-robots-tag": "noindex"},
         )
-        with pytest.raises(RobotsMetaBlocked):
-            await _fetch_html(
-                "https://example.com/page", client, 10, SourceMethod.SITEMAP_CRAWL
-            )
+        page = await _fetch_html(
+            "https://example.com/page", client, 10, SourceMethod.SITEMAP_CRAWL
+        )
+        assert page is not None
+        assert page.title == "Hi"
 
     @pytest.mark.asyncio
-    async def test_fetch_html_raises_on_meta_robots(self, mocker):
+    async def test_fetch_html_ignores_noindex_meta(self, mocker):
         client, inner = mock_http_client(mocker)
         html = '<html><head><meta name="robots" content="noindex"><title>Hi</title></head><body><main>content</main></body></html>'
         inner.get.return_value = mock_response(text=html)
-        with pytest.raises(RobotsMetaBlocked):
-            await _fetch_html(
-                "https://example.com/page", client, 10, SourceMethod.SITEMAP_CRAWL
-            )
+        page = await _fetch_html(
+            "https://example.com/page", client, 10, SourceMethod.SITEMAP_CRAWL
+        )
+        assert page is not None
+        assert page.title == "Hi"
 
     @pytest.mark.asyncio
-    async def test_probe_and_fetch_no_fallback_when_blocked(self, mocker):
+    async def test_fetch_html_ignores_none_header(self, mocker):
         client, inner = mock_http_client(mocker)
         inner.get.return_value = mock_response(
-            text="",
-            content_type="text/plain",
-            extra_headers={"x-robots-tag": "noindex"},
+            text="<html><head><title>Hi</title></head><body><main>content</main></body></html>",
+            extra_headers={"x-robots-tag": "none"},
         )
-        with pytest.raises(RobotsMetaBlocked):
-            await probe_and_fetch(
-                "https://example.com/docs/page", client, 10, SourceMethod.SITEMAP_CRAWL
-            )
-        assert inner.get.call_count == 1
+        page = await _fetch_html(
+            "https://example.com/page", client, 10, SourceMethod.SITEMAP_CRAWL
+        )
+        assert page is not None

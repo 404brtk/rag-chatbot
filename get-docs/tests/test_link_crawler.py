@@ -198,35 +198,6 @@ class TestCrawlLinks:
         assert ethics.pages_filtered_by_robots_txt >= 1
 
     @pytest.mark.asyncio
-    async def test_skips_page_blocked_by_x_robots_tag(self, mocker):
-        home = _html_with_links("Home", ["/blocked"], body="Home")
-
-        async def mock_get(url, **kwargs):
-            if url == "https://docs.example.com/":
-                return mock_response(text=home)
-            if url == "https://docs.example.com/blocked":
-                return mock_response(
-                    text=html_page("Blocked", "Content"),
-                    extra_headers={"x-robots-tag": "noindex"},
-                )
-            return mock_response(status_code=404)
-
-        client, inner = mock_http_client(mocker)
-        inner.get = mocker.AsyncMock(side_effect=mock_get)
-
-        ethics = EthicsContext()
-        pages = await crawl_links(
-            base_url="https://docs.example.com/",
-            client=client,
-            robots=RobotsParser(""),
-            options=_request(),
-            ethics=ethics,
-        )
-
-        urls = [p.url for p in pages]
-        assert "https://docs.example.com/blocked" not in urls
-        assert ethics.pages_filtered_by_robots_tags >= 1
-
     @pytest.mark.asyncio
     async def test_does_not_extract_links_when_nofollow_header(self, mocker):
         home = _html_with_links("Home", ["/page"], body="Home content")
