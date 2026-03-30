@@ -1,12 +1,12 @@
-import './App.css'
+import './App.css';
+import { ChatInput } from './components/ChatInput';
 
 function App() {
   return (
-    <>
-      <h1>Hello</h1>
-      <h2>World</h2>
-    </>
-  )
+    <main className="app">
+      <ChatInput placeholder="Ask anything..." />
+    </main>
+  );
 }
 
-export default App
+export default App;
