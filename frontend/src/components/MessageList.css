@@ -1,0 +1,68 @@
+.message-list-container {
+  flex: 1 0 auto;
+  width: 100%;
+  padding: 24px 16px 16px 16px;
+  display: flex;
+  flex-direction: column;
+}
+
+.message-list-inner {
+  max-width: var(--chat-max-width);
+  width: 100%;
+  margin: 0 auto;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.typing-indicator {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 24px;
+  width: 24px;
+}
+
+.typing-shape {
+  width: 14px;
+  height: 14px;
+  background: linear-gradient(
+    135deg,
+    var(--color-text-primary) 0%,
+    var(--color-text-tertiary) 100%
+  );
+  box-shadow: 0 0 12px rgba(255, 255, 255, 0.08);
+  animation: morphShape 1.5s cubic-bezier(0.75, 0, 0.25, 1) infinite;
+  display: inline-block;
+}
+
+@keyframes morphShape {
+  0%,
+  15% {
+    /* Circle */
+    border-radius: 50%;
+    clip-path: polygon(0% 0%, 100% 0%, 100% 100%, 0% 100%);
+    transform: rotate(0deg) scale(1);
+  }
+  30%,
+  45% {
+    /* Square */
+    border-radius: 4px;
+    clip-path: polygon(0% 0%, 100% 0%, 100% 100%, 0% 100%);
+    transform: rotate(90deg) scale(1.05);
+  }
+  60%,
+  75% {
+    /* Triangle*/
+    border-radius: 4px;
+    clip-path: polygon(50% 0%, 50% 0%, 100% 100%, 0% 100%);
+    transform: rotate(180deg) scale(1.25) translateY(-6%);
+  }
+  90%,
+  100% {
+    /* Back to Circle */
+    border-radius: 50%;
+    clip-path: polygon(0% 0%, 100% 0%, 100% 100%, 0% 100%);
+    transform: rotate(360deg) scale(1);
+  }
+}
