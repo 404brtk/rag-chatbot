@@ -51,31 +51,35 @@ export function Citation({ id, sourceName, snippet }: CitationProps) {
   }, [instanceId]);
 
   const handleMouseEnter = () => {
-    window.dispatchEvent(new CustomEvent('citation-open', { detail: instanceId }));
-
     clearTimeout(timeoutRef.current);
 
-    if (triggerRef.current) {
-      const rect = triggerRef.current.getBoundingClientRect();
-      const isTop = rect.top < 250;
-      const safeHalfWidth = POPOVER_WIDTH / 2;
-      let centerX = rect.left + rect.width / 2;
+    if (isHovered) return;
 
-      if (centerX - safeHalfWidth < POPOVER_MARGIN) {
-        centerX = safeHalfWidth + POPOVER_MARGIN;
-      } else if (centerX + safeHalfWidth > window.innerWidth - POPOVER_MARGIN) {
-        centerX = window.innerWidth - safeHalfWidth - POPOVER_MARGIN;
+    timeoutRef.current = window.setTimeout(() => {
+      window.dispatchEvent(new CustomEvent('citation-open', { detail: instanceId }));
+
+      if (triggerRef.current) {
+        const rect = triggerRef.current.getBoundingClientRect();
+        const isTop = rect.top < 250;
+        const safeHalfWidth = POPOVER_WIDTH / 2;
+        let centerX = rect.left + rect.width / 2;
+
+        if (centerX - safeHalfWidth < POPOVER_MARGIN) {
+          centerX = safeHalfWidth + POPOVER_MARGIN;
+        } else if (centerX + safeHalfWidth > window.innerWidth - POPOVER_MARGIN) {
+          centerX = window.innerWidth - safeHalfWidth - POPOVER_MARGIN;
+        }
+
+        setPlacement(isTop ? 'bottom' : 'top');
+        setPopoverStyle({
+          left: `${centerX}px`,
+          top: isTop ? `${rect.bottom + 8}px` : undefined,
+          bottom: !isTop ? `${window.innerHeight - rect.top + 8}px` : undefined,
+        });
       }
 
-      setPlacement(isTop ? 'bottom' : 'top');
-      setPopoverStyle({
-        left: `${centerX}px`,
-        top: isTop ? `${rect.bottom + 8}px` : undefined,
-        bottom: !isTop ? `${window.innerHeight - rect.top + 8}px` : undefined,
-      });
-    }
-
-    setIsHovered(true);
+      setIsHovered(true);
+    }, 200);
   };
 
   const handleMouseLeave = () => {
