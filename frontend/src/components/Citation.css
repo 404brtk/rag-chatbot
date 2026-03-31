@@ -1,0 +1,104 @@
+.citation-wrapper {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  margin: 0 4px;
+}
+
+.citation-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-family: var(--font-mono);
+  font-size: 0.75em;
+  font-weight: 500;
+  color: var(--color-text-secondary);
+  background: var(--color-surface-hover);
+  padding: 0 4px;
+  border-radius: 4px;
+  transform: translateY(-0.25em);
+  cursor: pointer;
+  transition:
+    background-color var(--transition-fast),
+    color var(--transition-fast),
+    transform var(--transition-fast);
+  border: 1px solid var(--color-border);
+}
+
+.citation-wrapper:hover .citation-badge {
+  background: var(--color-surface-active);
+  color: var(--color-text-primary);
+  border-color: var(--color-border-hover);
+}
+
+.citation-popover {
+  position: fixed;
+  width: max-content;
+  max-width: 300px;
+  background: var(--color-surface-elevated);
+  border: 1px solid var(--color-border-focus);
+  border-radius: var(--radius-md);
+  padding: 12px 16px;
+  box-shadow: var(--shadow-lg);
+  z-index: 9999;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  backdrop-filter: blur(8px);
+}
+
+.citation-popover-top {
+  animation: citationRevealTop var(--transition-fast) forwards;
+  transform-origin: bottom center;
+}
+
+.citation-popover-bottom {
+  animation: citationRevealBottom var(--transition-fast) forwards;
+  transform-origin: top center;
+}
+
+.citation-popover-source {
+  font-family: var(--font-mono);
+  font-size: 0.7rem;
+  font-weight: 600;
+  color: var(--color-accent);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.citation-popover-snippet {
+  font-family: var(--font-sans);
+  font-size: 0.8125rem;
+  line-height: 1.5;
+  color: var(--color-text-secondary);
+  font-style: italic;
+  display: -webkit-box;
+  -webkit-line-clamp: 4;
+  line-clamp: 4;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: pre-wrap;
+}
+
+@keyframes citationRevealTop {
+  from {
+    opacity: 0;
+    transform: translateX(-50%) translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(-50%) translateY(0);
+  }
+}
+
+@keyframes citationRevealBottom {
+  from {
+    opacity: 0;
+    transform: translateX(-50%) translateY(-4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(-50%) translateY(0);
+  }
+}
