@@ -17,6 +17,9 @@
   --color-accent: #ececf1;
   --color-accent-hover: #ffffff;
 
+  --color-danger: #ff6b6b;
+  --color-danger-hover: rgba(255, 107, 107, 0.1);
+
   --color-overlay-light: rgba(255, 255, 255, 0.03);
   --color-overlay-hover: rgba(255, 255, 255, 0.08);
 
@@ -30,6 +33,11 @@
   --font-sans: 'Geist', -apple-system, BlinkMacSystemFont, sans-serif;
   --font-mono: 'Geist Mono', ui-monospace, monospace;
   --font-serif: 'Gelasio', serif;
+
+  --font-weight-regular: 400;
+  --font-weight-medium: 500;
+  --font-weight-semibold: 600;
+  --font-weight-bold: 700;
 
   --text-xs: 0.7rem;
   --text-sm: 0.8rem;
