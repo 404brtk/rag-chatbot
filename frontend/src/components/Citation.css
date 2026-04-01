@@ -11,7 +11,7 @@
   justify-content: center;
   font-family: var(--font-mono);
   font-size: var(--text-xs);
-  font-weight: 500;
+  font-weight: var(--font-weight-medium);
   color: var(--color-text-secondary);
   background: var(--color-surface-hover);
   padding: 0 var(--spacing-1);
@@ -60,7 +60,7 @@
 .citation-popover-source {
   font-family: var(--font-mono);
   font-size: var(--text-xs);
-  font-weight: 600;
+  font-weight: var(--font-weight-semibold);
   color: var(--color-accent);
   text-transform: uppercase;
   letter-spacing: 0.05em;
@@ -69,6 +69,7 @@
 .citation-popover-snippet {
   font-family: var(--font-sans);
   font-size: var(--text-sm);
+  font-weight: var(--font-weight-regular);
   line-height: 1.5;
   color: var(--color-text-secondary);
   font-style: italic;

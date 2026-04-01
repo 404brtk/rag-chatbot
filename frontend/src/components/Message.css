@@ -33,6 +33,7 @@
 .message-body {
   font-family: var(--font-sans);
   font-size: var(--text-base);
+  font-weight: var(--font-weight-regular);
   line-height: 1.65;
   color: var(--color-text-primary);
   word-break: break-word;
@@ -54,7 +55,7 @@
   padding: 0;
   font-family: inherit;
   font-size: var(--text-sm);
-  font-weight: 500;
+  font-weight: var(--font-weight-medium);
   color: var(--color-text-tertiary);
   cursor: pointer;
   transition: color var(--transition-fast);
