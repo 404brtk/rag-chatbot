@@ -21,16 +21,16 @@
 
 .chat-input-textarea {
   display: block;
-  width: calc(100% - 14px);
+  width: calc(100% - var(--spacing-3));
   min-height: 28px;
   max-height: 200px;
-  padding: 18px 8px 8px 22px;
+  padding: var(--spacing-4) var(--spacing-2) var(--spacing-2) var(--spacing-5);
   background: transparent;
   border: none;
   outline: none;
   color: var(--color-text-primary);
   font-family: var(--font-sans);
-  font-size: 15px;
+  font-size: var(--text-base);
   line-height: 1.55;
   resize: none;
   overflow-y: hidden;
@@ -80,22 +80,22 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 10px 12px 14px 12px;
+  padding: var(--spacing-2) var(--spacing-3) var(--spacing-3) var(--spacing-3);
 }
 
 .chat-input-toolbar-left,
 .chat-input-toolbar-right {
   display: flex;
   align-items: center;
-  gap: 4px;
+  gap: var(--spacing-1);
 }
 
 .chat-input-icon-btn {
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 36px;
-  height: 36px;
+  width: var(--icon-lg);
+  height: var(--icon-lg);
   border: 1px solid transparent;
   border-radius: var(--radius-full);
   background: transparent;
@@ -115,7 +115,7 @@
 }
 
 .chat-input-icon-btn:active {
-  transform: scale(0.92);
+  transform: scale(var(--scale-down));
 }
 
 .chat-input-icon-btn.attach-btn:hover {
@@ -142,21 +142,21 @@
 
 .chat-input-icon-btn.send-btn.active:hover {
   background: var(--color-accent-hover);
-  transform: scale(1.05);
+  transform: scale(var(--scale-up));
 }
 
 .chat-input-icon-btn.send-btn.active:active {
-  transform: scale(0.92);
+  transform: scale(var(--scale-down));
 }
 
 @media (max-width: 640px) {
   .chat-input-textarea {
-    width: calc(100% - 10px);
-    padding: 14px 6px 6px 18px;
-    font-size: 16px;
+    width: calc(100% - var(--spacing-2));
+    padding: var(--spacing-3) var(--spacing-1) var(--spacing-1) var(--spacing-4);
+    font-size: var(--text-base);
   }
 
   .chat-input-toolbar {
-    padding: 8px 10px 12px 10px;
+    padding: var(--spacing-2) var(--spacing-2) var(--spacing-3) var(--spacing-2);
   }
 }
