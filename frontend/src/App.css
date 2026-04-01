@@ -1,7 +1,76 @@
-.app {
+.app-container {
   display: flex;
-  align-items: center;
+  flex-direction: column;
+  height: 100dvh;
+  width: 100%;
+  overflow-x: hidden;
+  overflow-y: auto;
+  background: var(--color-bg);
+  transition: justify-content var(--transition-normal);
+  scroll-behavior: smooth;
+}
+
+.app-container::-webkit-scrollbar {
+  width: 8px;
+}
+.app-container::-webkit-scrollbar-track {
+  background: transparent;
+}
+.app-container::-webkit-scrollbar-thumb {
+  background: var(--color-surface-elevated);
+  border-radius: var(--radius-full);
+  border: 2px solid var(--color-bg);
+}
+.app-container::-webkit-scrollbar-thumb:hover {
+  background: var(--color-text-tertiary);
+}
+
+.app-container.app-empty {
   justify-content: center;
-  min-height: 100dvh;
-  padding: 16px;
+  align-items: center;
+}
+
+.hero-section {
+  text-align: center;
+  animation: citationReveal var(--transition-slow) ease-out forwards;
+  margin-bottom: 32px;
+  width: 100%;
+  padding: 0 16px;
+}
+
+.hero-greeting {
+  font-size: 2.75rem;
+  font-family: var(--font-serif);
+  color: var(--color-text-primary);
+  font-weight: 500;
+  letter-spacing: -0.01em;
+  margin-bottom: 12px;
+  background: linear-gradient(135deg, #ffffff 0%, #8e8ea0 100%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+}
+
+.hero-subtext {
+  font-size: 1.15rem;
+  color: var(--color-text-secondary);
+  max-width: 400px;
+  margin: 0 auto;
+}
+
+.input-region {
+  flex-shrink: 0;
+  position: sticky;
+  bottom: 0px;
+  padding: 16px 16px 32px 16px;
+  background: linear-gradient(to top, var(--color-bg) 65%, rgba(9, 9, 14, 0.95) 85%, transparent);
+  width: 100%;
+  z-index: 10;
+}
+
+.input-region-centered {
+  max-width: var(--chat-max-width);
+  margin: 0 auto;
+  background: transparent;
+  padding-bottom: 0px;
 }
