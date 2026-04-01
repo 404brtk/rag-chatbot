@@ -1,44 +1,6 @@
 import { useState, useRef, type ChangeEvent, type KeyboardEvent } from 'react';
+import { Icon } from './Icon';
 import './ChatInput.css';
-
-const ICON_SIZE = 20;
-const ICON_DEFAULTS = {
-  width: ICON_SIZE,
-  height: ICON_SIZE,
-  viewBox: '0 0 24 24',
-  fill: 'none',
-  stroke: 'currentColor',
-  strokeWidth: 2,
-  strokeLinecap: 'round' as const,
-  strokeLinejoin: 'round' as const,
-};
-
-function IconPlus() {
-  return (
-    <svg {...ICON_DEFAULTS}>
-      <path d="M5 12h14" />
-      <path d="M12 5v14" />
-    </svg>
-  );
-}
-
-function IconMic() {
-  return (
-    <svg {...ICON_DEFAULTS}>
-      <path d="M12 19v3" />
-      <path d="M19 10v2a7 7 0 0 1-14 0v-2" />
-      <rect x="9" y="2" width="6" height="13" rx="3" />
-    </svg>
-  );
-}
-function IconArrowUp() {
-  return (
-    <svg {...ICON_DEFAULTS}>
-      <path d="m5 12 7-7 7 7" />
-      <path d="M12 19V5" />
-    </svg>
-  );
-}
 
 interface ChatInputProps {
   placeholder?: string;
@@ -119,7 +81,7 @@ export function ChatInput({
               type="button"
               aria-label="Attach file"
             >
-              <IconPlus />
+              <Icon name="plus" size={20} />
             </button>
           </div>
 
@@ -130,7 +92,7 @@ export function ChatInput({
               type="button"
               aria-label="Voice input"
             >
-              <IconMic />
+              <Icon name="mic" size={20} />
             </button>
 
             <button
@@ -141,7 +103,7 @@ export function ChatInput({
               onClick={handleSend}
               disabled={!canSend}
             >
-              <IconArrowUp />
+              <Icon name="arrow-up" size={20} />
             </button>
           </div>
         </div>
