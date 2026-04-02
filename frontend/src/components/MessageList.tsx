@@ -1,5 +1,5 @@
 import { Message } from './Message';
-import type { ChatMessage } from './Message';
+import type { ChatMessage } from '../types';
 import './MessageList.css';
 
 interface MessageListProps {
@@ -16,17 +16,9 @@ export function MessageList({ messages, isTyping }: MessageListProps) {
         ))}
 
         {isTyping && (
-          <Message
-            message={{
-              id: 'typing-indicator',
-              role: 'ai',
-              content: (
-                <div className="typing-indicator" aria-label="AI is thinking...">
-                  <div className="typing-shape" />
-                </div>
-              ),
-            }}
-          />
+          <div className="typing-indicator" aria-label="AI is thinking...">
+            <div className="typing-shape" />
+          </div>
         )}
       </div>
     </div>

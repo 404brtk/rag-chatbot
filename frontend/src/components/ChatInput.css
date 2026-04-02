@@ -41,23 +41,6 @@
   overflow-y: auto;
 }
 
-.chat-input-textarea::-webkit-scrollbar {
-  width: 6px;
-}
-
-.chat-input-textarea::-webkit-scrollbar-track {
-  background: transparent;
-}
-
-.chat-input-textarea::-webkit-scrollbar-thumb {
-  background: var(--color-surface-active);
-  border-radius: var(--radius-full);
-}
-
-.chat-input-textarea::-webkit-scrollbar-thumb:hover {
-  background: var(--color-text-tertiary);
-}
-
 .chat-input-textarea::-webkit-scrollbar-button:vertical:start:decrement {
   display: block;
   height: 22px;
