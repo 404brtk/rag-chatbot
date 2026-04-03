@@ -144,8 +144,7 @@ function App() {
       <main className={`app-container ${isEmpty ? 'app-empty' : ''}`} ref={scrollRef}>
         {isEmpty ? (
           <div className="hero-section">
-            <h1 className="hero-greeting">Hi, User!</h1>
-            <p className="hero-subtext">Ask me anything</p>
+            <h1 className="hero-greeting">What do you want to know?</h1>
           </div>
         ) : (
           <MessageList messages={messages} isTyping={isTyping} />

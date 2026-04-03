@@ -27,7 +27,7 @@
 .hero-section {
   text-align: center;
   animation: citationReveal var(--transition-slow) ease-out forwards;
-  margin-bottom: var(--spacing-8);
+  margin-bottom: var(--spacing-2);
   width: 100%;
   padding: 0 var(--spacing-4);
 }
@@ -38,7 +38,6 @@
   color: var(--color-text-primary);
   font-weight: var(--font-weight-medium);
   letter-spacing: -0.01em;
-  margin-bottom: var(--spacing-3);
   background: linear-gradient(
     135deg,
     var(--color-accent-hover) 0%,
@@ -47,14 +46,6 @@
   -webkit-background-clip: text;
   background-clip: text;
   -webkit-text-fill-color: transparent;
-}
-
-.hero-subtext {
-  font-size: var(--text-lg);
-  font-weight: var(--font-weight-regular);
-  color: var(--color-text-secondary);
-  max-width: 400px;
-  margin: 0 auto;
 }
 
 .input-region {
