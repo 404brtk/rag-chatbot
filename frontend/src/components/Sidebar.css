@@ -147,7 +147,7 @@
 .sidebar-text {
   font-family: var(--font-sans);
   font-size: var(--text-sm);
-  font-weight: var(--font-weight-medium);
+  font-weight: var(--font-weight-semibold);
   opacity: 0;
   visibility: hidden;
   transition:
