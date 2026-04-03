@@ -1,3 +1,5 @@
+export type ChatMode = 'direct' | 'side-by-side';
+
 export interface ChatSession {
   id: string;
   title: string;

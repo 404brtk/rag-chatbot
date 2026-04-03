@@ -1,29 +1,27 @@
 import { useState, useRef, useEffect, useMemo } from 'react';
 import './App.css';
 import { Sidebar } from './components/Sidebar';
+import { TopNav } from './components/TopNav';
 import { ChatInput } from './components/ChatInput';
 import { MessageList } from './components/MessageList';
-import type { ChatMessage, ChatSession } from './types';
+import type { ChatMessage, ChatSession, ChatMode } from './types';
 
 function App() {
   const [activeChatId, setActiveChatId] = useState<string | null>(null);
   const [isTyping, setIsTyping] = useState(false);
+  const [mode, setMode] = useState<ChatMode>(() => {
+    const stored = localStorage.getItem('chat-mode');
+    if (stored) return stored as ChatMode;
+    return 'direct';
+  });
   const [isExpanded, setIsExpanded] = useState<boolean>(() => {
     const stored = localStorage.getItem('sidebar-expanded');
-    if (stored !== null) {
-      return JSON.parse(stored);
-    }
+    if (stored) return JSON.parse(stored);
     return false;
   });
   const [sessions, setSessions] = useState<ChatSession[]>(() => {
     const stored = sessionStorage.getItem('chat-history');
-    if (stored) {
-      try {
-        return JSON.parse(stored);
-      } catch {
-        return [];
-      }
-    }
+    if (stored) return JSON.parse(stored);
     return [];
   });
   const scrollRef = useRef<HTMLElement>(null);
@@ -40,6 +38,10 @@ function App() {
   useEffect(() => {
     localStorage.setItem('sidebar-expanded', JSON.stringify(isExpanded));
   }, [isExpanded]);
+
+  useEffect(() => {
+    localStorage.setItem('chat-mode', mode);
+  }, [mode]);
 
   useEffect(() => {
     if (scrollRef.current) {
@@ -142,16 +144,24 @@ function App() {
         onRenameChat={handleRenameChat}
       />
       <main className={`app-container ${isEmpty ? 'app-empty' : ''}`} ref={scrollRef}>
+        <TopNav mode={mode} onModeChange={setMode} />
         {isEmpty ? (
-          <div className="hero-section">
-            <h1 className="hero-greeting">What do you want to know?</h1>
+          <div className="empty-state-wrapper">
+            <div className="hero-section">
+              <h1 className="hero-greeting">What do you want to know?</h1>
+            </div>
+            <div className="input-region input-region-centered">
+              <ChatInput placeholder="Ask anything..." onSend={handleSend} disabled={isTyping} />
+            </div>
           </div>
         ) : (
-          <MessageList messages={messages} isTyping={isTyping} />
+          <>
+            <MessageList messages={messages} isTyping={isTyping} />
+            <div className="input-region">
+              <ChatInput placeholder="Ask anything..." onSend={handleSend} disabled={isTyping} />
+            </div>
+          </>
         )}
-        <div className={`input-region ${isEmpty ? 'input-region-centered' : ''}`}>
-          <ChatInput placeholder="Ask anything..." onSend={handleSend} disabled={isTyping} />
-        </div>
       </main>
     </div>
   );

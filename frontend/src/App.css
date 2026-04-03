@@ -14,14 +14,34 @@
   width: 100%;
   overflow-x: hidden;
   overflow-y: auto;
-  background: var(--color-bg);
-  transition: justify-content var(--transition-normal);
   scroll-behavior: smooth;
 }
 
 .app-container.app-empty {
-  justify-content: center;
+  justify-content: flex-start;
   align-items: center;
+}
+
+.app-container.app-empty .empty-state-wrapper {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: flex-start;
+  gap: var(--spacing-1);
+  width: 100%;
+  padding-top: 15%;
+}
+
+.app-container.app-empty .hero-section {
+  padding-top: var(--spacing-4);
+  margin-bottom: 0;
+}
+
+.app-container.app-empty .input-region {
+  position: static;
+  background: transparent;
+  padding-bottom: 0;
 }
 
 .hero-section {
@@ -66,6 +86,4 @@
 .input-region-centered {
   max-width: var(--chat-max-width);
   margin: 0 auto;
-  background: transparent;
-  padding-bottom: 0px;
 }
