@@ -5,23 +5,27 @@ import { ChatInput } from './components/ChatInput';
 import { MessageList } from './components/MessageList';
 import type { ChatMessage, ChatSession } from './types';
 
-function getStoredSessions(): ChatSession[] {
-  const stored = sessionStorage.getItem('chat-history');
-  if (stored) {
-    try {
-      return JSON.parse(stored);
-    } catch {
-      return [];
-    }
-  }
-  return [];
-}
-
 function App() {
-  const [sessions, setSessions] = useState<ChatSession[]>(getStoredSessions);
   const [activeChatId, setActiveChatId] = useState<string | null>(null);
   const [isTyping, setIsTyping] = useState(false);
-  const [isExpanded, setIsExpanded] = useState(false);
+  const [isExpanded, setIsExpanded] = useState<boolean>(() => {
+    const stored = localStorage.getItem('sidebar-expanded');
+    if (stored !== null) {
+      return JSON.parse(stored);
+    }
+    return false;
+  });
+  const [sessions, setSessions] = useState<ChatSession[]>(() => {
+    const stored = sessionStorage.getItem('chat-history');
+    if (stored) {
+      try {
+        return JSON.parse(stored);
+      } catch {
+        return [];
+      }
+    }
+    return [];
+  });
   const scrollRef = useRef<HTMLElement>(null);
 
   const messages = useMemo(
@@ -32,6 +36,10 @@ function App() {
   useEffect(() => {
     sessionStorage.setItem('chat-history', JSON.stringify(sessions));
   }, [sessions]);
+
+  useEffect(() => {
+    localStorage.setItem('sidebar-expanded', JSON.stringify(isExpanded));
+  }, [isExpanded]);
 
   useEffect(() => {
     if (scrollRef.current) {
