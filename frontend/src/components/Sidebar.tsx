@@ -55,7 +55,9 @@ function Tooltip({ text, disabled, children }: TooltipProps) {
 
 interface SidebarProps {
   isExpanded: boolean;
+  isCompact?: boolean;
   onToggle: () => void;
+  onDismiss?: () => void;
   onNewChat: () => void;
   history: ChatSession[];
   activeChatId: string | null;
@@ -66,7 +68,9 @@ interface SidebarProps {
 
 export function Sidebar({
   isExpanded,
+  isCompact = false,
   onToggle,
+  onDismiss,
   onNewChat,
   history,
   activeChatId,
@@ -108,147 +112,175 @@ export function Sidebar({
     if (e.key === 'Escape') cancelRename();
   };
 
+  if (isCompact && !isExpanded) {
+    return null;
+  }
+
+  const handleDismiss = () => {
+    if (onDismiss) {
+      onDismiss();
+      return;
+    }
+
+    onToggle();
+  };
+
+  const toggleLabel = isCompact && isExpanded ? 'Close sidebar' : 'Open sidebar';
+
   return (
-    <aside className={`sidebar ${isExpanded ? 'expanded' : 'collapsed'}`}>
-      <div className="sidebar-nav">
-        <Tooltip text="Open sidebar" disabled={isExpanded}>
-          <button
-            className="sidebar-icon-btn toggle-btn"
-            onClick={onToggle}
-            aria-label="Open sidebar"
-          >
-            <Icon name="sidebar" />
-          </button>
-        </Tooltip>
-
-        <Tooltip text="New Chat" disabled={isExpanded}>
-          <button
-            className="sidebar-icon-btn action-btn primary-action-btn"
-            onClick={onNewChat}
-            aria-label="New chat"
-          >
-            <div className="icon-wrapper">
-              <Icon name="plus" />
-            </div>
-            <span className="sidebar-text">New Chat</span>
-          </button>
-        </Tooltip>
-
-        <Tooltip text="History" disabled={isExpanded}>
-          <button className="sidebar-icon-btn action-btn" aria-label="History">
-            <div className="icon-wrapper">
-              <Icon name="history" />
-            </div>
-            <span className="sidebar-text">History</span>
-          </button>
-        </Tooltip>
-      </div>
-
-      {isExpanded && <div className="sidebar-divider" />}
-
-      {isExpanded && (
-        <div className="sidebar-history-container">
-          <div className="history-group">
-            {history.map((session) => (
-              <div
-                key={session.id}
-                className={`history-item-wrapper ${session.id === activeChatId ? 'active' : ''} ${optionsMenu?.id === session.id ? 'hover-locked' : ''}`}
-              >
-                {editingId === session.id ? (
-                  <div className="history-item-edit-mode">
-                    <input
-                      ref={editInputRef}
-                      type="text"
-                      className="history-edit-input"
-                      value={editValue}
-                      onChange={(e) => setEditValue(e.target.value)}
-                      onKeyDown={handleKeyDown}
-                      onBlur={saveRename}
-                    />
-                    <button
-                      className="inline-action-btn"
-                      onMouseDown={(e) => e.preventDefault()}
-                      onClick={saveRename}
-                    >
-                      <Icon name="check" />
-                    </button>
-                  </div>
-                ) : (
-                  <button
-                    className="sidebar-icon-btn history-item-btn"
-                    aria-label={`Conversation: ${session.title}`}
-                    onClick={() => onSelectChat(session.id)}
-                  >
-                    <span className="sidebar-text history-text">{session.title}</span>
-
-                    <div className="history-actions" onClick={(e) => e.stopPropagation()}>
-                      <button
-                        className="inline-action-btn"
-                        onClick={(e) => {
-                          e.preventDefault();
-                          const rect = e.currentTarget.getBoundingClientRect();
-                          if (optionsMenu?.id === session.id) setOptionsMenu(null);
-                          else setOptionsMenu({ id: session.id, rect });
-                        }}
-                      >
-                        <Icon name="more" />
-                      </button>
-                      {optionsMenu?.id === session.id &&
-                        createPortal(
-                          <>
-                            <div
-                              className="options-menu-overlay"
-                              onClick={() => setOptionsMenu(null)}
-                              onContextMenu={(e) => {
-                                e.preventDefault();
-                                setOptionsMenu(null);
-                              }}
-                            />
-                            <div
-                              className="history-options-menu"
-                              style={{
-                                top: optionsMenu.rect.bottom + 4,
-                                left: optionsMenu.rect.right,
-                                transform: 'translateX(-100%)',
-                              }}
-                            >
-                              <button onClick={() => startRename(session.id, session.title)}>
-                                <Icon name="pencil" /> Rename
-                              </button>
-                              <button
-                                className="danger"
-                                onClick={() => {
-                                  onDeleteChat(session.id);
-                                  setOptionsMenu(null);
-                                }}
-                              >
-                                <Icon name="trash" /> Delete
-                              </button>
-                            </div>
-                          </>,
-                          document.body
-                        )}
-                    </div>
-                  </button>
-                )}
-              </div>
-            ))}
-          </div>
-        </div>
+    <>
+      {isCompact && isExpanded && (
+        <button
+          className="sidebar-mobile-backdrop"
+          type="button"
+          aria-label="Close sidebar overlay"
+          onClick={handleDismiss}
+        />
       )}
 
-      {isExpanded && <div className="sidebar-divider" />}
+      <aside
+        className={`sidebar ${isExpanded ? 'expanded' : 'collapsed'}${isCompact ? ' compact' : ''}`}
+      >
+        <div className="sidebar-nav">
+          <Tooltip text="Open sidebar" disabled={isExpanded || isCompact}>
+            <button
+              className="sidebar-icon-btn toggle-btn"
+              onClick={isCompact ? handleDismiss : onToggle}
+              aria-label={toggleLabel}
+            >
+              <Icon name="sidebar" />
+            </button>
+          </Tooltip>
 
-      <div className="sidebar-bottom">
-        <Tooltip text="View Profile" disabled={isExpanded}>
-          <button className="sidebar-icon-btn action-btn user-btn" aria-label="User profile">
-            <div className="icon-wrapper">
-              <Icon name="user" />
+          <Tooltip text="New Chat" disabled={isExpanded || isCompact}>
+            <button
+              className="sidebar-icon-btn action-btn primary-action-btn"
+              onClick={onNewChat}
+              aria-label="New chat"
+            >
+              <div className="icon-wrapper">
+                <Icon name="plus" />
+              </div>
+              <span className="sidebar-text">New Chat</span>
+            </button>
+          </Tooltip>
+
+          <Tooltip text="History" disabled={isExpanded || isCompact}>
+            <button className="sidebar-icon-btn action-btn" aria-label="History">
+              <div className="icon-wrapper">
+                <Icon name="history" />
+              </div>
+              <span className="sidebar-text">History</span>
+            </button>
+          </Tooltip>
+        </div>
+
+        {isExpanded && <div className="sidebar-divider" />}
+
+        {isExpanded && (
+          <div className="sidebar-history-container">
+            <div className="history-group">
+              {history.map((session) => (
+                <div
+                  key={session.id}
+                  className={`history-item-wrapper ${session.id === activeChatId ? 'active' : ''} ${optionsMenu?.id === session.id ? 'hover-locked' : ''}`}
+                >
+                  {editingId === session.id ? (
+                    <div className="history-item-edit-mode">
+                      <input
+                        ref={editInputRef}
+                        type="text"
+                        className="history-edit-input"
+                        value={editValue}
+                        onChange={(e) => setEditValue(e.target.value)}
+                        onKeyDown={handleKeyDown}
+                        onBlur={saveRename}
+                      />
+                      <button
+                        className="inline-action-btn"
+                        onMouseDown={(e) => e.preventDefault()}
+                        onClick={saveRename}
+                      >
+                        <Icon name="check" />
+                      </button>
+                    </div>
+                  ) : (
+                    <button
+                      className="sidebar-icon-btn history-item-btn"
+                      aria-label={`Conversation: ${session.title}`}
+                      onClick={() => onSelectChat(session.id)}
+                    >
+                      <span className="sidebar-text history-text">{session.title}</span>
+
+                      <div className="history-actions" onClick={(e) => e.stopPropagation()}>
+                        <button
+                          className="inline-action-btn"
+                          onClick={(e) => {
+                            e.preventDefault();
+                            const rect = e.currentTarget.getBoundingClientRect();
+                            if (optionsMenu?.id === session.id) setOptionsMenu(null);
+                            else setOptionsMenu({ id: session.id, rect });
+                          }}
+                        >
+                          <Icon name="more" />
+                        </button>
+                        {optionsMenu?.id === session.id &&
+                          createPortal(
+                            <>
+                              <div
+                                className="options-menu-overlay"
+                                onClick={() => setOptionsMenu(null)}
+                                onContextMenu={(e) => {
+                                  e.preventDefault();
+                                  setOptionsMenu(null);
+                                }}
+                              />
+                              <div
+                                className="history-options-menu"
+                                style={{
+                                  top: optionsMenu.rect.bottom + 4,
+                                  left: optionsMenu.rect.right,
+                                  transform: 'translateX(-100%)',
+                                }}
+                              >
+                                <button onClick={() => startRename(session.id, session.title)}>
+                                  <Icon name="pencil" /> Rename
+                                </button>
+                                <button
+                                  className="danger"
+                                  onClick={() => {
+                                    onDeleteChat(session.id);
+                                    setOptionsMenu(null);
+                                  }}
+                                >
+                                  <Icon name="trash" /> Delete
+                                </button>
+                              </div>
+                            </>,
+                            document.body
+                          )}
+                      </div>
+                    </button>
+                  )}
+                </div>
+              ))}
             </div>
-            <span className="sidebar-text">Profile</span>
-          </button>
-        </Tooltip>
-      </div>
-    </aside>
+          </div>
+        )}
+
+        {isExpanded && <div className="sidebar-divider" />}
+
+        <div className="sidebar-bottom">
+          <Tooltip text="View Profile" disabled={isExpanded || isCompact}>
+            <button className="sidebar-icon-btn action-btn user-btn" aria-label="User profile">
+              <div className="icon-wrapper">
+                <Icon name="user" />
+              </div>
+              <span className="sidebar-text">Profile</span>
+            </button>
+          </Tooltip>
+        </div>
+      </aside>
+    </>
   );
 }

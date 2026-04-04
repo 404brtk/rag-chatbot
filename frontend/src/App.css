@@ -11,7 +11,7 @@
   flex-direction: column;
   flex: 1;
   height: 100%;
-  width: 100%;
+  min-width: 0;
   overflow-x: hidden;
   overflow-y: auto;
   scroll-behavior: smooth;
@@ -30,7 +30,7 @@
   justify-content: flex-start;
   gap: var(--spacing-1);
   width: 100%;
-  padding-top: 15%;
+  padding-top: clamp(128px, 20vh, 196px);
 }
 
 .app-container.app-empty .hero-section {
@@ -86,4 +86,15 @@
 .input-region-centered {
   max-width: var(--chat-max-width);
   margin: 0 auto;
+}
+
+@media (max-width: 1024px) {
+  .input-region {
+    padding: var(--spacing-4) var(--spacing-3) calc(var(--spacing-8) + var(--spacing-1))
+      var(--spacing-3);
+  }
+
+  .hero-section {
+    padding: 0 var(--spacing-3);
+  }
 }

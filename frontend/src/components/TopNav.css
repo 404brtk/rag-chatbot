@@ -10,6 +10,58 @@
   width: 100%;
 }
 
+.topnav.compact {
+  justify-content: space-between;
+  padding: var(--spacing-3) var(--spacing-3);
+}
+
+.topnav.compact .topnav-left {
+  gap: var(--spacing-2);
+  min-width: 0;
+}
+
+.topnav.compact .mode-btn {
+  padding: var(--spacing-2) var(--spacing-3);
+  font-size: var(--text-sm);
+}
+
+.topnav.compact .topnav-right {
+  gap: var(--spacing-2);
+}
+
+.sidebar-mobile-toggle {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  border-radius: var(--radius-lg);
+  border: 1px solid var(--color-border);
+  background: var(--color-surface);
+  color: var(--color-text-secondary);
+  cursor: pointer;
+  transition:
+    border-color var(--transition-fast),
+    background var(--transition-fast),
+    color var(--transition-fast),
+    transform var(--transition-fast);
+}
+
+.sidebar-mobile-toggle:hover {
+  border-color: var(--color-border-hover);
+  background: var(--color-surface-hover);
+  color: var(--color-text-primary);
+}
+
+.sidebar-mobile-toggle:active {
+  transform: scale(var(--scale-down));
+}
+
+.sidebar-mobile-toggle.open {
+  color: var(--color-text-primary);
+  background: var(--color-surface-active);
+}
+
 .topnav-left,
 .topnav-right {
   display: flex;
@@ -34,7 +86,7 @@
   font-size: var(--text-base);
   font-weight: var(--font-weight-medium);
   border: 1px solid var(--color-border);
-  border-radius: var(--radius-full);
+  border-radius: var(--radius-lg);
   padding: var(--spacing-2) var(--spacing-4);
   cursor: pointer;
   transition: all var(--transition-fast);
@@ -86,7 +138,7 @@
   font-size: var(--text-sm);
   font-weight: var(--font-weight-semibold);
   color: var(--color-text-tertiary);
-  border-radius: var(--radius-md);
+  border-radius: var(--radius-lg);
   cursor: pointer;
   transition: background var(--transition-fast);
   margin-bottom: 4px;
@@ -108,7 +160,7 @@
 
 .btn-register,
 .btn-login {
-  border-radius: var(--radius-full);
+  border-radius: var(--radius-lg);
   padding: var(--spacing-2) var(--spacing-5);
   font-family: var(--font-sans);
   font-size: var(--text-sm);
@@ -139,4 +191,36 @@
 
 .btn-login:hover {
   background: var(--color-accent-hover);
+}
+
+@media (max-width: 1024px) {
+  .topnav {
+    padding: var(--spacing-3) var(--spacing-3);
+  }
+
+  .topnav .btn-register,
+  .topnav .btn-login {
+    padding: var(--spacing-2) var(--spacing-3);
+  }
+
+  .topnav.compact .topnav-right {
+    gap: var(--spacing-2);
+  }
+}
+
+@media (max-width: 480px) {
+  .topnav.compact .compact-register {
+    display: none;
+  }
+
+  .topnav.compact .mode-btn {
+    max-width: 156px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .topnav.compact .topnav-right .btn-login {
+    min-width: 72px;
+  }
 }

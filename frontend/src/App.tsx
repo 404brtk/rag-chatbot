@@ -6,6 +6,8 @@ import { ChatInput } from './components/ChatInput';
 import { MessageList } from './components/MessageList';
 import type { ChatMessage, ChatSession, ChatMode } from './types';
 
+const COMPACT_LAYOUT_QUERY = '(max-width: 1024px)';
+
 function App() {
   const [activeChatId, setActiveChatId] = useState<string | null>(null);
   const [isTyping, setIsTyping] = useState(false);
@@ -19,6 +21,11 @@ function App() {
     if (stored) return JSON.parse(stored);
     return false;
   });
+  const [isCompactLayout, setIsCompactLayout] = useState<boolean>(() => {
+    if (typeof window === 'undefined') return false;
+    return window.matchMedia(COMPACT_LAYOUT_QUERY).matches;
+  });
+  const [isMobileSidebarOpen, setIsMobileSidebarOpen] = useState(false);
   const [sessions, setSessions] = useState<ChatSession[]>(() => {
     const stored = sessionStorage.getItem('chat-history');
     if (stored) return JSON.parse(stored);
@@ -42,6 +49,42 @@ function App() {
   useEffect(() => {
     localStorage.setItem('chat-mode', mode);
   }, [mode]);
+
+  useEffect(() => {
+    const mediaQuery = window.matchMedia(COMPACT_LAYOUT_QUERY);
+
+    const handleMediaQueryChange = (event: MediaQueryListEvent) => {
+      setIsCompactLayout(event.matches);
+      if (!event.matches) {
+        setIsMobileSidebarOpen(false);
+      }
+    };
+
+    mediaQuery.addEventListener('change', handleMediaQueryChange);
+
+    return () => mediaQuery.removeEventListener('change', handleMediaQueryChange);
+  }, []);
+
+  useEffect(() => {
+    if (!isCompactLayout || !isMobileSidebarOpen) {
+      document.body.style.overflow = '';
+      return;
+    }
+
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        setIsMobileSidebarOpen(false);
+      }
+    };
+
+    document.body.style.overflow = 'hidden';
+    document.addEventListener('keydown', handleKeyDown);
+
+    return () => {
+      document.body.style.overflow = '';
+      document.removeEventListener('keydown', handleKeyDown);
+    };
+  }, [isCompactLayout, isMobileSidebarOpen]);
 
   useEffect(() => {
     if (scrollRef.current) {
@@ -110,12 +153,29 @@ function App() {
     }, 1500);
   };
 
+  const toggleSidebar = () => {
+    if (isCompactLayout) {
+      setIsMobileSidebarOpen((prev) => !prev);
+      return;
+    }
+
+    setIsExpanded((prev) => !prev);
+  };
+
+  const closeMobileSidebar = () => {
+    if (isCompactLayout) {
+      setIsMobileSidebarOpen(false);
+    }
+  };
+
   const handleNewChat = () => {
     setActiveChatId(null);
+    closeMobileSidebar();
   };
 
   const handleSelectChat = (id: string) => {
     setActiveChatId(id);
+    closeMobileSidebar();
   };
 
   const handleDeleteChat = (id: string) => {
@@ -130,12 +190,15 @@ function App() {
   };
 
   const isEmpty = messages.length === 0;
+  const isSidebarExpanded = isCompactLayout ? isMobileSidebarOpen : isExpanded;
 
   return (
     <div className="layout-wrapper">
       <Sidebar
-        isExpanded={isExpanded}
-        onToggle={() => setIsExpanded(!isExpanded)}
+        isExpanded={isSidebarExpanded}
+        isCompact={isCompactLayout}
+        onToggle={toggleSidebar}
+        onDismiss={closeMobileSidebar}
         onNewChat={handleNewChat}
         history={sessions}
         activeChatId={activeChatId}
@@ -144,7 +207,13 @@ function App() {
         onRenameChat={handleRenameChat}
       />
       <main className={`app-container ${isEmpty ? 'app-empty' : ''}`} ref={scrollRef}>
-        <TopNav mode={mode} onModeChange={setMode} />
+        <TopNav
+          mode={mode}
+          onModeChange={setMode}
+          isCompactLayout={isCompactLayout}
+          isSidebarOpen={isMobileSidebarOpen}
+          onToggleSidebar={toggleSidebar}
+        />
         {isEmpty ? (
           <div className="empty-state-wrapper">
             <div className="hero-section">
