@@ -1,16 +1,26 @@
-import { useState, useRef, useEffect, useMemo } from 'react';
+import { useState, useRef, useEffect } from 'react';
 import './App.css';
 import { Sidebar } from './components/Sidebar';
 import { TopNav } from './components/TopNav';
 import { ChatInput } from './components/ChatInput';
 import { MessageList } from './components/MessageList';
-import type { ChatMessage, ChatSession, ChatMode } from './types';
+import { useChatSessions } from './hooks/useChatSessions';
+import type { ChatMode } from './types';
 
 const COMPACT_LAYOUT_QUERY = '(max-width: 1024px)';
 
 function App() {
-  const [activeChatId, setActiveChatId] = useState<string | null>(null);
-  const [isTyping, setIsTyping] = useState(false);
+  const {
+    sessions,
+    activeChatId,
+    messages,
+    isTyping,
+    handleSend,
+    handleNewChat,
+    handleSelectChat,
+    handleDeleteChat,
+    handleRenameChat,
+  } = useChatSessions();
   const [mode, setMode] = useState<ChatMode>(() => {
     const stored = localStorage.getItem('chat-mode');
     if (stored) return stored as ChatMode;
@@ -26,21 +36,7 @@ function App() {
     return window.matchMedia(COMPACT_LAYOUT_QUERY).matches;
   });
   const [isMobileSidebarOpen, setIsMobileSidebarOpen] = useState(false);
-  const [sessions, setSessions] = useState<ChatSession[]>(() => {
-    const stored = sessionStorage.getItem('chat-history');
-    if (stored) return JSON.parse(stored);
-    return [];
-  });
   const scrollRef = useRef<HTMLElement>(null);
-
-  const messages = useMemo(
-    () => sessions.find((s) => s.id === activeChatId)?.messages ?? [],
-    [sessions, activeChatId]
-  );
-
-  useEffect(() => {
-    sessionStorage.setItem('chat-history', JSON.stringify(sessions));
-  }, [sessions]);
 
   useEffect(() => {
     localStorage.setItem('sidebar-expanded', JSON.stringify(isExpanded));
@@ -95,64 +91,6 @@ function App() {
     }
   }, [messages, isTyping]);
 
-  const handleSend = (text: string) => {
-    let currentChatId = activeChatId;
-
-    if (!currentChatId) {
-      const newChat: ChatSession = {
-        id: crypto.randomUUID(),
-        title: text.slice(0, 30),
-        timestamp: Date.now(),
-        messages: [],
-      };
-      currentChatId = newChat.id;
-      setSessions((prev) => [newChat, ...prev]);
-      setActiveChatId(currentChatId);
-    }
-
-    const newUserMsg: ChatMessage = {
-      id: crypto.randomUUID(),
-      role: 'user',
-      content: text,
-    };
-
-    setSessions((prev) =>
-      prev.map((s) =>
-        s.id === currentChatId ? { ...s, messages: [...s.messages, newUserMsg] } : s
-      )
-    );
-    setIsTyping(true);
-
-    setTimeout(() => {
-      setIsTyping(false);
-      const newAiMsg: ChatMessage = {
-        id: crypto.randomUUID(),
-        role: 'ai',
-        content:
-          'Lorem ipsum dolor sit amet, consectetur adipiscing elit. Vivamus euismod suscipit tempus. Etiam sed tortor ligula. Quisque tempor sem rhoncus, sollicitudin augue vitae, lacinia purus. In rutrum faucibus metus porta varius. Mauris pharetra gravida tempus. Cras porttitor orci vitae ligula scelerisque convallis. [1]\n\nLorem ipsum dolor sit amet, consectetur adipiscing elit. Vivamus euismod suscipit tempus. Etiam sed tortor ligula. Quisque tempor sem rhoncus, sollicitudin augue vitae, lacinia purus. In rutrum faucibus metus porta varius. Mauris pharetra gravida tempus. Cras porttitor orci vitae ligula scelerisque convallis. [2]',
-        citations: [
-          {
-            id: 1,
-            sourceName: 'test1.pdf',
-            snippet:
-              'Lorem ipsum dolor sit amet, consectetur adipiscing elit. Vivamus euismod suscipit tempus. Etiam sed tortor ligula. Quisque tempor sem rhoncus, sollicitudin augue vitae, lacinia purus. In rutrum faucibus metus porta varius. Mauris pharetra gravida tempus. Cras porttitor orci vitae ligula scelerisque convallis.',
-          },
-          {
-            id: 2,
-            sourceName: 'test2.md',
-            snippet:
-              'Lorem ipsum dolor sit amet, consectetur adipiscing elit. Vivamus euismod suscipit tempus. Etiam sed tortor ligula. Quisque tempor sem rhoncus, sollicitudin augue vitae, lacinia purus. In rutrum faucibus metus porta varius. Mauris pharetra gravida tempus. Cras porttitor orci vitae ligula scelerisque convallis.',
-          },
-        ],
-      };
-      setSessions((prev) =>
-        prev.map((s) =>
-          s.id === currentChatId ? { ...s, messages: [...s.messages, newAiMsg] } : s
-        )
-      );
-    }, 1500);
-  };
-
   const toggleSidebar = () => {
     if (isCompactLayout) {
       setIsMobileSidebarOpen((prev) => !prev);
@@ -168,25 +106,14 @@ function App() {
     }
   };
 
-  const handleNewChat = () => {
-    setActiveChatId(null);
+  const handleNewChatAndCloseSidebar = () => {
+    handleNewChat();
     closeMobileSidebar();
   };
 
-  const handleSelectChat = (id: string) => {
-    setActiveChatId(id);
+  const handleSelectChatAndCloseSidebar = (id: string) => {
+    handleSelectChat(id);
     closeMobileSidebar();
-  };
-
-  const handleDeleteChat = (id: string) => {
-    setSessions((prev) => prev.filter((s) => s.id !== id));
-    if (activeChatId === id) {
-      setActiveChatId(null);
-    }
-  };
-
-  const handleRenameChat = (id: string, title: string) => {
-    setSessions((prev) => prev.map((s) => (s.id === id ? { ...s, title } : s)));
   };
 
   const isEmpty = messages.length === 0;
@@ -199,10 +126,10 @@ function App() {
         isCompact={isCompactLayout}
         onToggle={toggleSidebar}
         onDismiss={closeMobileSidebar}
-        onNewChat={handleNewChat}
+        onNewChat={handleNewChatAndCloseSidebar}
         history={sessions}
         activeChatId={activeChatId}
-        onSelectChat={handleSelectChat}
+        onSelectChat={handleSelectChatAndCloseSidebar}
         onDeleteChat={handleDeleteChat}
         onRenameChat={handleRenameChat}
       />
