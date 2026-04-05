@@ -1,6 +1,7 @@
-import { useState, useRef, useLayoutEffect } from 'react';
+import { useEffect, useState, useRef, useLayoutEffect } from 'react';
 import './Message.css';
 import { Citation } from './Citation';
+import { Icon } from './Icon';
 import type { ChatMessage } from '../types';
 
 interface MessageProps {
@@ -46,8 +47,40 @@ function renderContent(content: string, citations?: ChatMessage['citations']) {
 export function Message({ message }: MessageProps) {
   const isUser = message.role === 'user';
   const contentRef = useRef<HTMLDivElement>(null);
+  const copyResetTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [isCollapsible, setIsCollapsible] = useState(false);
   const [isExpanded, setIsExpanded] = useState(false);
+  const [isCopied, setIsCopied] = useState(false);
+
+  useEffect(
+    () => () => {
+      if (copyResetTimeoutRef.current) {
+        clearTimeout(copyResetTimeoutRef.current);
+      }
+    },
+    []
+  );
+
+  const handleCopy = async () => {
+    if (!navigator.clipboard) {
+      return;
+    }
+
+    try {
+      await navigator.clipboard.writeText(message.content);
+      setIsCopied(true);
+
+      if (copyResetTimeoutRef.current) {
+        clearTimeout(copyResetTimeoutRef.current);
+      }
+
+      copyResetTimeoutRef.current = setTimeout(() => {
+        setIsCopied(false);
+      }, 1000);
+    } catch (error) {
+      void error;
+    }
+  };
 
   useLayoutEffect(() => {
     if (!isUser) return;
@@ -69,23 +102,37 @@ export function Message({ message }: MessageProps) {
 
   return (
     <div className={`message-wrapper ${isUser ? 'message-user' : 'message-ai'}`}>
-      <div className="message-content">
-        <div className="message-body">
-          <div
-            ref={contentRef}
-            className={`message-body-inner ${isCollapsible && !isExpanded ? 'is-collapsed' : ''}`}
-          >
-            {renderContent(message.content, message.citations)}
-          </div>
-
-          {isCollapsible && (
-            <button
-              className="message-collapse-toggle"
-              onClick={() => setIsExpanded((prev) => !prev)}
+      <div className={`message-stack ${isUser ? 'message-stack-user' : 'message-stack-ai'}`}>
+        <div className="message-content">
+          <div className="message-body">
+            <div
+              ref={contentRef}
+              className={`message-body-inner ${isCollapsible && !isExpanded ? 'is-collapsed' : ''}`}
             >
-              {isExpanded ? 'Show less' : 'Read more'}
-            </button>
-          )}
+              {renderContent(message.content, message.citations)}
+            </div>
+
+            {isCollapsible && (
+              <button
+                className="message-collapse-toggle"
+                onClick={() => setIsExpanded((prev) => !prev)}
+                type="button"
+              >
+                {isExpanded ? 'Show less' : 'Read more'}
+              </button>
+            )}
+          </div>
+        </div>
+
+        <div className="message-actions">
+          <button
+            className={`message-copy-btn${isCopied ? ' copied' : ''}`}
+            type="button"
+            onClick={handleCopy}
+            title={isCopied ? 'Copied' : 'Copy message'}
+          >
+            <Icon name={isCopied ? 'check' : 'copy'} size={14} />
+          </button>
         </div>
       </div>
     </div>
