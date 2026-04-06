@@ -10,7 +10,9 @@ type IconName =
   | 'trash'
   | 'check'
   | 'chevron-down'
-  | 'copy';
+  | 'copy'
+  | 'search'
+  | 'x';
 
 interface IconProps {
   name: IconName;
@@ -116,6 +118,20 @@ export function Icon({ name, size = 24, className }: IconProps) {
         <svg {...props}>
           <rect width="14" height="14" x="8" y="8" rx="2" ry="2" />
           <path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2" />
+        </svg>
+      );
+    case 'search':
+      return (
+        <svg {...props}>
+          <path d="m21 21-4.34-4.34" />
+          <circle cx="11" cy="11" r="8" />
+        </svg>
+      );
+    case 'x':
+      return (
+        <svg {...props}>
+          <path d="M18 6 6 18" />
+          <path d="m6 6 12 12" />
         </svg>
       );
   }

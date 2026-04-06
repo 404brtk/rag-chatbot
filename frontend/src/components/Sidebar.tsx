@@ -1,7 +1,11 @@
-import { useState, useRef, useEffect } from 'react';
+import { useState, useRef } from 'react';
+import { NavLink } from 'react-router';
 import { createPortal } from 'react-dom';
 import { Icon } from './Icon';
+import { SessionOptionsMenu } from './SessionOptionsMenu';
 import './Sidebar.css';
+import { useSessionActions } from '../hooks/useSessionActions';
+import { APP_ROUTES } from '../routes';
 import type { ChatSession } from '../types';
 
 interface TooltipProps {
@@ -17,9 +21,9 @@ function Tooltip({ text, disabled, children }: TooltipProps) {
 
   const show = () => {
     if (disabled) return;
-    const button = triggerRef.current?.querySelector('button');
-    if (button) {
-      const rect = button.getBoundingClientRect();
+    const triggerElement = triggerRef.current?.querySelector<HTMLElement>('button, a');
+    if (triggerElement) {
+      const rect = triggerElement.getBoundingClientRect();
       setPosition({
         top: rect.top + rect.height / 2,
         left: rect.right + 8,
@@ -78,39 +82,18 @@ export function Sidebar({
   onDeleteChat,
   onRenameChat,
 }: SidebarProps) {
-  const [editingId, setEditingId] = useState<string | null>(null);
-  const [editValue, setEditValue] = useState('');
-  const [optionsMenu, setOptionsMenu] = useState<{ id: string; rect: DOMRect } | null>(null);
-
-  const editInputRef = useRef<HTMLInputElement>(null);
-
-  useEffect(() => {
-    if (editingId && editInputRef.current) {
-      editInputRef.current.focus();
-    }
-  }, [editingId]);
-
-  const startRename = (id: string, title: string) => {
-    setEditingId(id);
-    setEditValue(title);
-    setOptionsMenu(null);
-  };
-
-  const saveRename = () => {
-    if (editingId && editValue.trim() !== '') {
-      onRenameChat(editingId, editValue.trim());
-    }
-    setEditingId(null);
-  };
-
-  const cancelRename = () => {
-    setEditingId(null);
-  };
-
-  const handleKeyDown = (e: React.KeyboardEvent) => {
-    if (e.key === 'Enter') saveRename();
-    if (e.key === 'Escape') cancelRename();
-  };
+  const {
+    editingId,
+    editValue,
+    optionsMenu,
+    editInputRef,
+    setEditValue,
+    startRename,
+    saveRename,
+    handleRenameKeyDown,
+    toggleOptionsMenu,
+    closeOptionsMenu,
+  } = useSessionActions(onRenameChat);
 
   if (isCompact && !isExpanded) {
     return null;
@@ -126,6 +109,12 @@ export function Sidebar({
   };
 
   const toggleLabel = isCompact && isExpanded ? 'Close sidebar' : 'Open sidebar';
+
+  const handleHistoryNavClick = () => {
+    if (isCompact && onDismiss) {
+      onDismiss();
+    }
+  };
 
   return (
     <>
@@ -166,12 +155,19 @@ export function Sidebar({
           </Tooltip>
 
           <Tooltip text="History" disabled={isExpanded || isCompact}>
-            <button className="sidebar-icon-btn action-btn" aria-label="History">
+            <NavLink
+              className={({ isActive }) =>
+                `sidebar-icon-btn action-btn sidebar-history-link${isActive ? ' active-route' : ''}`
+              }
+              to={APP_ROUTES.history}
+              onClick={handleHistoryNavClick}
+              aria-label="History"
+            >
               <div className="icon-wrapper">
                 <Icon name="history" />
               </div>
               <span className="sidebar-text">History</span>
-            </button>
+            </NavLink>
           </Tooltip>
         </div>
 
@@ -193,7 +189,7 @@ export function Sidebar({
                         className="history-edit-input"
                         value={editValue}
                         onChange={(e) => setEditValue(e.target.value)}
-                        onKeyDown={handleKeyDown}
+                        onKeyDown={handleRenameKeyDown}
                         onBlur={saveRename}
                       />
                       <button
@@ -218,47 +214,22 @@ export function Sidebar({
                           onClick={(e) => {
                             e.preventDefault();
                             const rect = e.currentTarget.getBoundingClientRect();
-                            if (optionsMenu?.id === session.id) setOptionsMenu(null);
-                            else setOptionsMenu({ id: session.id, rect });
+                            toggleOptionsMenu(session.id, rect);
                           }}
                         >
                           <Icon name="more" />
                         </button>
-                        {optionsMenu?.id === session.id &&
-                          createPortal(
-                            <>
-                              <div
-                                className="options-menu-overlay"
-                                onClick={() => setOptionsMenu(null)}
-                                onContextMenu={(e) => {
-                                  e.preventDefault();
-                                  setOptionsMenu(null);
-                                }}
-                              />
-                              <div
-                                className="history-options-menu"
-                                style={{
-                                  top: optionsMenu.rect.bottom + 4,
-                                  left: optionsMenu.rect.right,
-                                  transform: 'translateX(-100%)',
-                                }}
-                              >
-                                <button onClick={() => startRename(session.id, session.title)}>
-                                  <Icon name="pencil" /> Rename
-                                </button>
-                                <button
-                                  className="danger"
-                                  onClick={() => {
-                                    onDeleteChat(session.id);
-                                    setOptionsMenu(null);
-                                  }}
-                                >
-                                  <Icon name="trash" /> Delete
-                                </button>
-                              </div>
-                            </>,
-                            document.body
-                          )}
+                        {optionsMenu?.id === session.id && (
+                          <SessionOptionsMenu
+                            rect={optionsMenu.rect}
+                            onRename={() => startRename(session.id, session.title)}
+                            onDelete={() => {
+                              onDeleteChat(session.id);
+                              closeOptionsMenu();
+                            }}
+                            onClose={closeOptionsMenu}
+                          />
+                        )}
                       </div>
                     </button>
                   )}

@@ -85,14 +85,10 @@ function App() {
   }, [isCompactLayout, isMobileSidebarOpen]);
 
   useEffect(() => {
-    if (location.pathname !== APP_ROUTES.chat) {
-      return;
-    }
-
     if (scrollRef.current) {
       scrollRef.current.scrollTo({
-        top: scrollRef.current.scrollHeight,
-        behavior: 'smooth',
+        top: location.pathname === APP_ROUTES.chat ? scrollRef.current.scrollHeight : 0,
+        behavior: location.pathname === APP_ROUTES.chat ? 'smooth' : 'auto',
       });
     }
   }, [location.pathname, messages, isTyping]);

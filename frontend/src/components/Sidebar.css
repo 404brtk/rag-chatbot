@@ -139,6 +139,7 @@
   width: 100%;
   text-align: left;
   flex-shrink: 0;
+  text-decoration: none;
 }
 
 .icon-wrapper {
@@ -153,6 +154,12 @@
 .sidebar-icon-btn:hover {
   background: var(--color-surface-hover);
   color: var(--color-text-primary);
+}
+
+.sidebar-history-link.active-route {
+  background: var(--color-surface-hover);
+  color: var(--color-text-primary);
+  border: 1px solid var(--color-border);
 }
 
 .sidebar-icon-btn:focus-visible {
@@ -339,55 +346,4 @@
 
 .history-item-edit-mode .inline-action-btn:hover {
   background: var(--color-surface-active);
-}
-
-.options-menu-overlay {
-  position: fixed;
-  inset: 0;
-  z-index: 190;
-}
-
-.history-options-menu {
-  position: fixed;
-  background: var(--color-surface-elevated);
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-md);
-  box-shadow: var(--shadow-lg);
-  display: flex;
-  flex-direction: column;
-  padding: var(--spacing-1);
-  z-index: 200;
-  min-width: 120px;
-}
-
-.history-options-menu button {
-  background: transparent;
-  border: none;
-  color: var(--color-text-primary);
-  padding: var(--spacing-2) var(--spacing-3);
-  border-radius: var(--radius-sm);
-  cursor: pointer;
-  display: flex;
-  align-items: center;
-  gap: var(--spacing-2);
-  font-size: var(--text-sm);
-  font-weight: var(--font-weight-regular);
-  text-align: left;
-}
-
-.history-options-menu button svg {
-  width: var(--icon-sm);
-  height: var(--icon-sm);
-}
-
-.history-options-menu button:hover {
-  background: var(--color-surface-active);
-}
-
-.history-options-menu button.danger {
-  color: var(--color-danger);
-}
-
-.history-options-menu button.danger:hover {
-  background: var(--color-danger-hover);
 }
