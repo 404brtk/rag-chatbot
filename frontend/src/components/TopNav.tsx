@@ -6,6 +6,7 @@ import { Icon } from './Icon';
 interface TopNavProps {
   mode: ChatMode;
   onModeChange: (mode: ChatMode) => void;
+  showModeSelector?: boolean;
   isCompactLayout?: boolean;
   isSidebarOpen?: boolean;
   onToggleSidebar?: () => void;
@@ -14,6 +15,7 @@ interface TopNavProps {
 export function TopNav({
   mode,
   onModeChange,
+  showModeSelector = true,
   isCompactLayout = false,
   isSidebarOpen = false,
   onToggleSidebar,
@@ -53,35 +55,37 @@ export function TopNav({
           </button>
         )}
 
-        <div className="mode-selector" ref={dropdownRef}>
-          <button
-            className="mode-btn"
-            onClick={toggleDropdown}
-            aria-expanded={isDropdownOpen}
-            type="button"
-          >
-            {mode === 'direct' ? 'Direct' : 'Side by Side'}
-            <span className="mode-btn-icon">
-              <Icon name="chevron-down" size={12} />
-            </span>
-          </button>
-          {isDropdownOpen && (
-            <ul className="mode-dropdown">
-              <li
-                className={`mode-dropdown-item ${mode === 'direct' ? 'selected' : ''}`}
-                onClick={() => handleSelectMode('direct')}
-              >
-                Direct
-              </li>
-              <li
-                className={`mode-dropdown-item ${mode === 'side-by-side' ? 'selected' : ''}`}
-                onClick={() => handleSelectMode('side-by-side')}
-              >
-                Side by Side
-              </li>
-            </ul>
-          )}
-        </div>
+        {showModeSelector && (
+          <div className="mode-selector" ref={dropdownRef}>
+            <button
+              className="mode-btn"
+              onClick={toggleDropdown}
+              aria-expanded={isDropdownOpen}
+              type="button"
+            >
+              {mode === 'direct' ? 'Direct' : 'Side by Side'}
+              <span className="mode-btn-icon">
+                <Icon name="chevron-down" size={12} />
+              </span>
+            </button>
+            {isDropdownOpen && (
+              <ul className="mode-dropdown">
+                <li
+                  className={`mode-dropdown-item ${mode === 'direct' ? 'selected' : ''}`}
+                  onClick={() => handleSelectMode('direct')}
+                >
+                  Direct
+                </li>
+                <li
+                  className={`mode-dropdown-item ${mode === 'side-by-side' ? 'selected' : ''}`}
+                  onClick={() => handleSelectMode('side-by-side')}
+                >
+                  Side by Side
+                </li>
+              </ul>
+            )}
+          </div>
+        )}
       </div>
 
       <div className="topnav-right">

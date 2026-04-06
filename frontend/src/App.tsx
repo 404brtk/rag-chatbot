@@ -1,11 +1,11 @@
 import { useState, useRef, useEffect } from 'react';
+import { Outlet, useLocation, useNavigate } from 'react-router';
 import './App.css';
 import { Sidebar } from './components/Sidebar';
 import { TopNav } from './components/TopNav';
-import { ChatInput } from './components/ChatInput';
-import { MessageList } from './components/MessageList';
 import { useChatSessions } from './hooks/useChatSessions';
-import type { ChatMode } from './types';
+import { APP_ROUTES } from './routes';
+import type { AppRouteContext, ChatMode } from './types';
 
 const COMPACT_LAYOUT_QUERY = '(max-width: 1024px)';
 
@@ -37,6 +37,8 @@ function App() {
   });
   const [isMobileSidebarOpen, setIsMobileSidebarOpen] = useState(false);
   const scrollRef = useRef<HTMLElement>(null);
+  const location = useLocation();
+  const navigate = useNavigate();
 
   useEffect(() => {
     localStorage.setItem('sidebar-expanded', JSON.stringify(isExpanded));
@@ -83,13 +85,17 @@ function App() {
   }, [isCompactLayout, isMobileSidebarOpen]);
 
   useEffect(() => {
+    if (location.pathname !== APP_ROUTES.chat) {
+      return;
+    }
+
     if (scrollRef.current) {
       scrollRef.current.scrollTo({
         top: scrollRef.current.scrollHeight,
         behavior: 'smooth',
       });
     }
-  }, [messages, isTyping]);
+  }, [location.pathname, messages, isTyping]);
 
   const toggleSidebar = () => {
     if (isCompactLayout) {
@@ -109,15 +115,28 @@ function App() {
   const handleNewChatAndCloseSidebar = () => {
     handleNewChat();
     closeMobileSidebar();
+    navigate(APP_ROUTES.chat);
   };
 
   const handleSelectChatAndCloseSidebar = (id: string) => {
     handleSelectChat(id);
     closeMobileSidebar();
+    navigate(APP_ROUTES.chat);
   };
 
-  const isEmpty = messages.length === 0;
+  const isChatRoute = location.pathname === APP_ROUTES.chat;
   const isSidebarExpanded = isCompactLayout ? isMobileSidebarOpen : isExpanded;
+  const outletContext: AppRouteContext = {
+    sessions,
+    activeChatId,
+    messages,
+    isTyping,
+    handleSend,
+    handleNewChat,
+    handleSelectChat,
+    handleDeleteChat,
+    handleRenameChat,
+  };
 
   return (
     <div className="layout-wrapper">
@@ -133,31 +152,16 @@ function App() {
         onDeleteChat={handleDeleteChat}
         onRenameChat={handleRenameChat}
       />
-      <main className={`app-container ${isEmpty ? 'app-empty' : ''}`} ref={scrollRef}>
+      <main className="app-container" ref={scrollRef}>
         <TopNav
           mode={mode}
           onModeChange={setMode}
+          showModeSelector={isChatRoute}
           isCompactLayout={isCompactLayout}
           isSidebarOpen={isMobileSidebarOpen}
           onToggleSidebar={toggleSidebar}
         />
-        {isEmpty ? (
-          <div className="empty-state-wrapper">
-            <div className="hero-section">
-              <h1 className="hero-greeting">What do you want to know?</h1>
-            </div>
-            <div className="input-region input-region-centered">
-              <ChatInput placeholder="Ask anything..." onSend={handleSend} disabled={isTyping} />
-            </div>
-          </div>
-        ) : (
-          <>
-            <MessageList messages={messages} isTyping={isTyping} />
-            <div className="input-region">
-              <ChatInput placeholder="Ask anything..." onSend={handleSend} disabled={isTyping} />
-            </div>
-          </>
-        )}
+        <Outlet context={outletContext} />
       </main>
     </div>
   );
