@@ -5,7 +5,7 @@ import { Sidebar } from './components/Sidebar';
 import { TopNav } from './components/TopNav';
 import { useChatSessions } from './hooks/useChatSessions';
 import { APP_ROUTES } from './routes';
-import type { AppRouteContext, ChatMode } from './types';
+import type { AppRouteContext } from './types';
 
 const COMPACT_LAYOUT_QUERY = '(max-width: 1024px)';
 
@@ -14,18 +14,15 @@ function App() {
     sessions,
     activeChatId,
     messages,
+    mode,
     isTyping,
     handleSend,
+    handleModeChange,
     handleNewChat,
     handleSelectChat,
     handleDeleteChat,
     handleRenameChat,
   } = useChatSessions();
-  const [mode, setMode] = useState<ChatMode>(() => {
-    const stored = localStorage.getItem('chat-mode');
-    if (stored) return stored as ChatMode;
-    return 'direct';
-  });
   const [isExpanded, setIsExpanded] = useState<boolean>(() => {
     const stored = localStorage.getItem('sidebar-expanded');
     if (stored) return JSON.parse(stored);
@@ -43,10 +40,6 @@ function App() {
   useEffect(() => {
     localStorage.setItem('sidebar-expanded', JSON.stringify(isExpanded));
   }, [isExpanded]);
-
-  useEffect(() => {
-    localStorage.setItem('chat-mode', mode);
-  }, [mode]);
 
   useEffect(() => {
     const mediaQuery = window.matchMedia(COMPACT_LAYOUT_QUERY);
@@ -151,7 +144,7 @@ function App() {
       <main className="app-container" ref={scrollRef}>
         <TopNav
           mode={mode}
-          onModeChange={setMode}
+          onModeChange={handleModeChange}
           showModeSelector={isChatRoute}
           isCompactLayout={isCompactLayout}
           isSidebarOpen={isMobileSidebarOpen}

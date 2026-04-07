@@ -1,23 +1,33 @@
-import { useState, useMemo, useEffect } from 'react';
-import type { ChatMessage, ChatSession } from '../types';
+import { useState, useEffect } from 'react';
+import type { ChatMessage, ChatMode, ChatSession } from '../types';
+
+const CHAT_HISTORY_STORAGE_KEY = 'chat-history';
+const CHAT_DRAFT_MODE_STORAGE_KEY = 'chat-draft-mode';
 
 export function useChatSessions() {
   const [sessions, setSessions] = useState<ChatSession[]>(() => {
-    const stored = sessionStorage.getItem('chat-history');
-    if (stored) return JSON.parse(stored);
+    const stored = sessionStorage.getItem(CHAT_HISTORY_STORAGE_KEY);
+    if (stored) return JSON.parse(stored) as ChatSession[];
     return [];
   });
   const [activeChatId, setActiveChatId] = useState<string | null>(null);
+  const [draftMode, setDraftMode] = useState<ChatMode>(() => {
+    const stored = localStorage.getItem(CHAT_DRAFT_MODE_STORAGE_KEY);
+    if (stored) return stored as ChatMode;
+    return 'direct';
+  });
   const [isTyping, setIsTyping] = useState(false);
-
-  const messages = useMemo(
-    () => sessions.find((s) => s.id === activeChatId)?.messages ?? [],
-    [sessions, activeChatId]
-  );
+  const activeSession = sessions.find((session) => session.id === activeChatId) ?? null;
+  const messages = activeSession?.messages ?? [];
+  const mode = activeSession?.mode ?? draftMode;
 
   useEffect(() => {
-    sessionStorage.setItem('chat-history', JSON.stringify(sessions));
+    sessionStorage.setItem(CHAT_HISTORY_STORAGE_KEY, JSON.stringify(sessions));
   }, [sessions]);
+
+  useEffect(() => {
+    localStorage.setItem(CHAT_DRAFT_MODE_STORAGE_KEY, draftMode);
+  }, [draftMode]);
 
   const handleSend = (text: string) => {
     let currentChatId = activeChatId;
@@ -27,6 +37,7 @@ export function useChatSessions() {
         id: crypto.randomUUID(),
         title: text.slice(0, 30),
         timestamp: Date.now(),
+        mode: draftMode,
         messages: [],
       };
       currentChatId = newChat.id;
@@ -82,6 +93,11 @@ export function useChatSessions() {
   };
 
   const handleSelectChat = (id: string) => {
+    const selectedSession = sessions.find((session) => session.id === id);
+    if (selectedSession) {
+      setDraftMode(selectedSession.mode);
+    }
+
     setActiveChatId(id);
   };
 
@@ -96,12 +112,26 @@ export function useChatSessions() {
     setSessions((prev) => prev.map((s) => (s.id === id ? { ...s, title } : s)));
   };
 
+  const handleModeChange = (newMode: ChatMode) => {
+    if (mode === newMode) {
+      return;
+    }
+
+    setDraftMode(newMode);
+
+    if (activeSession) {
+      setActiveChatId(null);
+    }
+  };
+
   return {
     sessions,
     activeChatId,
     messages,
+    mode,
     isTyping,
     handleSend,
+    handleModeChange,
     handleNewChat,
     handleSelectChat,
     handleDeleteChat,

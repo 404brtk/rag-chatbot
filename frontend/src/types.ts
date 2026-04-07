@@ -4,6 +4,7 @@ export interface ChatSession {
   id: string;
   title: string;
   timestamp: number;
+  mode: ChatMode;
   messages: ChatMessage[];
 }
 
