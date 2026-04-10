@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import type { ChatMessage, ChatMode, ChatSession } from '../types';
+import type { ChatMessage, ChatMode, ChatSession, MessageAttachment } from '../types';
 
 const CHAT_HISTORY_STORAGE_KEY = 'chat-history';
 const CHAT_DRAFT_MODE_STORAGE_KEY = 'chat-draft-mode';
@@ -29,13 +29,18 @@ export function useChatSessions() {
     localStorage.setItem(CHAT_DRAFT_MODE_STORAGE_KEY, draftMode);
   }, [draftMode]);
 
-  const handleSend = (text: string) => {
+  const handleSend = (text: string, attachments: MessageAttachment[] = []) => {
+    const normalizedText = text.trim();
+    if (normalizedText === '') {
+      return;
+    }
+
     let currentChatId = activeChatId;
 
     if (!currentChatId) {
       const newChat: ChatSession = {
         id: crypto.randomUUID(),
-        title: text.slice(0, 30),
+        title: normalizedText.slice(0, 30),
         timestamp: Date.now(),
         mode: draftMode,
         messages: [],
@@ -48,7 +53,8 @@ export function useChatSessions() {
     const newUserMsg: ChatMessage = {
       id: crypto.randomUUID(),
       role: 'user',
-      content: text,
+      content: normalizedText,
+      attachments: attachments.length > 0 ? attachments : undefined,
     };
 
     setSessions((prev) =>

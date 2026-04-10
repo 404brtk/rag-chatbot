@@ -103,6 +103,21 @@ export function Message({ message }: MessageProps) {
   return (
     <div className={`message-wrapper ${isUser ? 'message-user' : 'message-ai'}`}>
       <div className={`message-stack ${isUser ? 'message-stack-user' : 'message-stack-ai'}`}>
+        {isUser && message.attachments && message.attachments.length > 0 && (
+          <div className="message-attachment-list" role="list" aria-label="Message attachments">
+            {message.attachments.map((attachment) => (
+              <span className="message-attachment-chip" role="listitem" key={attachment.id}>
+                <span className="message-attachment-icon" aria-hidden>
+                  <Icon name={attachment.kind === 'image' ? 'image' : 'file'} size={12} />
+                </span>
+                <span className="message-attachment-name" title={attachment.name}>
+                  {attachment.name}
+                </span>
+              </span>
+            ))}
+          </div>
+        )}
+
         <div className="message-content">
           <div className="message-body">
             <div

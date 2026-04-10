@@ -1,5 +1,15 @@
 export type ChatMode = 'direct' | 'side-by-side';
 
+export type AttachmentKind = 'document' | 'image';
+
+export interface MessageAttachment {
+  id: string;
+  name: string;
+  size: number;
+  mimeType: string;
+  kind: AttachmentKind;
+}
+
 export interface ChatSession {
   id: string;
   title: string;
@@ -19,6 +29,7 @@ export interface ChatMessage {
   role: 'user' | 'ai';
   content: string;
   citations?: CitationData[];
+  attachments?: MessageAttachment[];
 }
 
 export interface AppRouteContext {
@@ -26,7 +37,7 @@ export interface AppRouteContext {
   activeChatId: string | null;
   messages: ChatMessage[];
   isTyping: boolean;
-  handleSend: (message: string) => void;
+  handleSend: (message: string, attachments?: MessageAttachment[]) => void;
   handleNewChat: () => void;
   handleSelectChat: (id: string) => void;
   handleDeleteChat: (id: string) => void;
