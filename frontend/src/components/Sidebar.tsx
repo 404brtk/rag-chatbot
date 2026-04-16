@@ -1,5 +1,5 @@
 import { useState, useRef } from 'react';
-import { NavLink } from 'react-router';
+import { NavLink, useLocation } from 'react-router';
 import { createPortal } from 'react-dom';
 import { Icon } from './Icon';
 import { SessionOptionsMenu } from './SessionOptionsMenu';
@@ -82,6 +82,7 @@ export function Sidebar({
   onDeleteChat,
   onRenameChat,
 }: SidebarProps) {
+  const location = useLocation();
   const {
     editingId,
     editValue,
@@ -179,7 +180,7 @@ export function Sidebar({
               {history.map((session) => (
                 <div
                   key={session.id}
-                  className={`history-item-wrapper ${session.id === activeChatId ? 'active' : ''} ${optionsMenu?.id === session.id ? 'hover-locked' : ''}`}
+                  className={`history-item-wrapper ${location.pathname === APP_ROUTES.chat && session.id === activeChatId ? 'active' : ''} ${optionsMenu?.id === session.id ? 'hover-locked' : ''}`}
                 >
                   {editingId === session.id ? (
                     <div className="history-item-edit-mode">
