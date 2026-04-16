@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type KeyboardEvent } from 'react';
+import { useCallback, useEffect, useRef, useState, type KeyboardEvent } from 'react';
 
 interface OptionsMenuState {
   id: string;
@@ -19,12 +19,14 @@ export function useSessionActions(onRename: RenameHandler) {
     }
   }, [editingId]);
 
+  const closeOptionsMenu = useCallback(() => {
+    setOptionsMenu(null);
+  }, []);
+
   useEffect(() => {
     if (!optionsMenu) {
       return;
     }
-
-    const closeOptionsMenu = () => setOptionsMenu(null);
 
     window.addEventListener('resize', closeOptionsMenu);
     window.addEventListener('scroll', closeOptionsMenu, true);
@@ -33,12 +35,12 @@ export function useSessionActions(onRename: RenameHandler) {
       window.removeEventListener('resize', closeOptionsMenu);
       window.removeEventListener('scroll', closeOptionsMenu, true);
     };
-  }, [optionsMenu]);
+  }, [optionsMenu, closeOptionsMenu]);
 
   const startRename = (id: string, title: string) => {
     setEditingId(id);
     setEditValue(title);
-    setOptionsMenu(null);
+    closeOptionsMenu();
   };
 
   const saveRename = () => {
@@ -67,10 +69,6 @@ export function useSessionActions(onRename: RenameHandler) {
 
       return { id, rect };
     });
-  };
-
-  const closeOptionsMenu = () => {
-    setOptionsMenu(null);
   };
 
   return {
