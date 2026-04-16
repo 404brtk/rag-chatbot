@@ -1,4 +1,4 @@
-import { useState, useRef } from 'react';
+import { useState, useRef, useEffect } from 'react';
 import { NavLink, useLocation } from 'react-router';
 import { createPortal } from 'react-dom';
 import { Icon } from './Icon';
@@ -96,16 +96,25 @@ export function Sidebar({
     closeOptionsMenu,
   } = useSessionActions(onRenameChat);
 
-  if (isCompact && !isExpanded) {
-    return null;
-  }
+  const dialogRef = useRef<HTMLDialogElement>(null);
+
+  useEffect(() => {
+    if (!isCompact) return;
+    const dialog = dialogRef.current;
+    if (!dialog) return;
+
+    if (isExpanded && !dialog.open) {
+      dialog.showModal();
+    } else if (!isExpanded && dialog.open) {
+      dialog.close();
+    }
+  }, [isCompact, isExpanded]);
 
   const handleDismiss = () => {
     if (onDismiss) {
       onDismiss();
       return;
     }
-
     onToggle();
   };
 
@@ -117,142 +126,152 @@ export function Sidebar({
     }
   };
 
-  return (
-    <>
-      {isCompact && isExpanded && (
-        <button
-          className="sidebar-mobile-backdrop"
-          type="button"
-          aria-label="Close sidebar overlay"
-          onClick={handleDismiss}
-        />
-      )}
+  const handleDialogClick = (e: React.MouseEvent<HTMLDialogElement>) => {
+    if (e.target === e.currentTarget) {
+      handleDismiss();
+    }
+  };
 
-      <aside
-        className={`sidebar ${isExpanded ? 'expanded' : 'collapsed'}${isCompact ? ' compact' : ''}`}
-      >
-        <div className="sidebar-nav">
-          <Tooltip text="Open sidebar" disabled={isExpanded || isCompact}>
-            <button
-              className="sidebar-icon-btn toggle-btn"
-              onClick={isCompact ? handleDismiss : onToggle}
-              aria-label={toggleLabel}
-            >
-              <Icon name="sidebar" />
-            </button>
-          </Tooltip>
+  const sidebarContent = (
+    <aside
+      className={`sidebar ${isExpanded ? 'expanded' : 'collapsed'}${isCompact ? ' compact' : ''}`}
+    >
+      <div className="sidebar-nav">
+        <Tooltip text="Open sidebar" disabled={isExpanded || isCompact}>
+          <button
+            className="sidebar-icon-btn toggle-btn"
+            onClick={isCompact ? handleDismiss : onToggle}
+            aria-label={toggleLabel}
+          >
+            <Icon name="sidebar" />
+          </button>
+        </Tooltip>
 
-          <Tooltip text="New Chat" disabled={isExpanded || isCompact}>
-            <button
-              className="sidebar-icon-btn action-btn primary-action-btn"
-              onClick={onNewChat}
-              aria-label="New chat"
-            >
-              <div className="icon-wrapper">
-                <Icon name="plus" />
-              </div>
-              <span className="sidebar-text">New Chat</span>
-            </button>
-          </Tooltip>
+        <Tooltip text="New Chat" disabled={isExpanded || isCompact}>
+          <button
+            className="sidebar-icon-btn action-btn primary-action-btn"
+            onClick={onNewChat}
+            aria-label="New chat"
+          >
+            <div className="icon-wrapper">
+              <Icon name="plus" />
+            </div>
+            <span className="sidebar-text">New Chat</span>
+          </button>
+        </Tooltip>
 
-          <Tooltip text="History" disabled={isExpanded || isCompact}>
-            <NavLink
-              className={({ isActive }) =>
-                `sidebar-icon-btn action-btn sidebar-history-link${isActive ? ' active-route' : ''}`
-              }
-              to={APP_ROUTES.history}
-              onClick={handleHistoryNavClick}
-              aria-label="History"
-            >
-              <div className="icon-wrapper">
-                <Icon name="history" />
-              </div>
-              <span className="sidebar-text">History</span>
-            </NavLink>
-          </Tooltip>
-        </div>
+        <Tooltip text="History" disabled={isExpanded || isCompact}>
+          <NavLink
+            className={({ isActive }) =>
+              `sidebar-icon-btn action-btn sidebar-history-link${isActive ? ' active-route' : ''}`
+            }
+            to={APP_ROUTES.history}
+            onClick={handleHistoryNavClick}
+            aria-label="History"
+          >
+            <div className="icon-wrapper">
+              <Icon name="history" />
+            </div>
+            <span className="sidebar-text">History</span>
+          </NavLink>
+        </Tooltip>
+      </div>
 
-        {isExpanded && <div className="sidebar-divider" />}
+      {isExpanded && <div className="sidebar-divider" />}
 
-        {isExpanded && (
-          <div className="sidebar-history-container">
-            <div className="history-group">
-              {history.map((session) => (
-                <div
-                  key={session.id}
-                  className={`history-item-wrapper ${location.pathname === APP_ROUTES.chat && session.id === activeChatId ? 'active' : ''} ${optionsMenu?.id === session.id ? 'hover-locked' : ''}`}
-                >
-                  {editingId === session.id ? (
-                    <div className="history-item-edit-mode">
-                      <input
-                        ref={editInputRef}
-                        type="text"
-                        className="history-edit-input"
-                        value={editValue}
-                        onChange={(e) => setEditValue(e.target.value)}
-                        onKeyDown={handleRenameKeyDown}
-                        onBlur={saveRename}
-                      />
+      {isExpanded && (
+        <div className="sidebar-history-container">
+          <div className="history-group">
+            {history.map((session) => (
+              <div
+                key={session.id}
+                className={`history-item-wrapper ${location.pathname === APP_ROUTES.chat && session.id === activeChatId ? 'active' : ''} ${optionsMenu?.id === session.id ? 'hover-locked' : ''}`}
+              >
+                {editingId === session.id ? (
+                  <div className="history-item-edit-mode">
+                    <input
+                      ref={editInputRef}
+                      type="text"
+                      className="history-edit-input"
+                      value={editValue}
+                      onChange={(e) => setEditValue(e.target.value)}
+                      onKeyDown={handleRenameKeyDown}
+                      onBlur={saveRename}
+                    />
+                    <button
+                      className="inline-action-btn"
+                      onMouseDown={(e) => e.preventDefault()}
+                      onClick={saveRename}
+                    >
+                      <Icon name="check" />
+                    </button>
+                  </div>
+                ) : (
+                  <button
+                    className="sidebar-icon-btn history-item-btn"
+                    aria-label={`Conversation: ${session.title}`}
+                    onClick={() => onSelectChat(session.id)}
+                  >
+                    <span className="sidebar-text history-text">{session.title}</span>
+
+                    <div className="history-actions" onClick={(e) => e.stopPropagation()}>
                       <button
                         className="inline-action-btn"
-                        onMouseDown={(e) => e.preventDefault()}
-                        onClick={saveRename}
+                        onClick={(e) => {
+                          e.preventDefault();
+                          const rect = e.currentTarget.getBoundingClientRect();
+                          toggleOptionsMenu(session.id, rect);
+                        }}
                       >
-                        <Icon name="check" />
+                        <Icon name="more" />
                       </button>
-                    </div>
-                  ) : (
-                    <button
-                      className="sidebar-icon-btn history-item-btn"
-                      aria-label={`Conversation: ${session.title}`}
-                      onClick={() => onSelectChat(session.id)}
-                    >
-                      <span className="sidebar-text history-text">{session.title}</span>
-
-                      <div className="history-actions" onClick={(e) => e.stopPropagation()}>
-                        <button
-                          className="inline-action-btn"
-                          onClick={(e) => {
-                            e.preventDefault();
-                            const rect = e.currentTarget.getBoundingClientRect();
-                            toggleOptionsMenu(session.id, rect);
+                      {optionsMenu?.id === session.id && (
+                        <SessionOptionsMenu
+                          rect={optionsMenu.rect}
+                          onRename={() => startRename(session.id, session.title)}
+                          onDelete={() => {
+                            onDeleteChat(session.id);
+                            closeOptionsMenu();
                           }}
-                        >
-                          <Icon name="more" />
-                        </button>
-                        {optionsMenu?.id === session.id && (
-                          <SessionOptionsMenu
-                            rect={optionsMenu.rect}
-                            onRename={() => startRename(session.id, session.title)}
-                            onDelete={() => {
-                              onDeleteChat(session.id);
-                              closeOptionsMenu();
-                            }}
-                            onClose={closeOptionsMenu}
-                          />
-                        )}
-                      </div>
-                    </button>
-                  )}
-                </div>
-              ))}
-            </div>
-          </div>
-        )}
-
-        {isExpanded && <div className="sidebar-divider" />}
-
-        <div className="sidebar-bottom">
-          <Tooltip text="View Profile" disabled={isExpanded || isCompact}>
-            <button className="sidebar-icon-btn action-btn user-btn" aria-label="User profile">
-              <div className="icon-wrapper">
-                <Icon name="user" />
+                          onClose={closeOptionsMenu}
+                        />
+                      )}
+                    </div>
+                  </button>
+                )}
               </div>
-              <span className="sidebar-text">Profile</span>
-            </button>
-          </Tooltip>
+            ))}
+          </div>
         </div>
-      </aside>
-    </>
+      )}
+
+      {isExpanded && <div className="sidebar-divider" />}
+
+      <div className="sidebar-bottom">
+        <Tooltip text="View Profile" disabled={isExpanded || isCompact}>
+          <button className="sidebar-icon-btn action-btn user-btn" aria-label="User profile">
+            <div className="icon-wrapper">
+              <Icon name="user" />
+            </div>
+            <span className="sidebar-text">Profile</span>
+          </button>
+        </Tooltip>
+      </div>
+    </aside>
   );
+
+  if (isCompact) {
+    return (
+      <dialog
+        ref={dialogRef}
+        className="sidebar-dialog"
+        onClose={handleDismiss}
+        onClick={handleDialogClick}
+      >
+        {sidebarContent}
+      </dialog>
+    );
+  }
+
+  return sidebarContent;
 }

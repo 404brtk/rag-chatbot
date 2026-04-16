@@ -57,27 +57,6 @@ function App() {
   }, []);
 
   useEffect(() => {
-    if (!isCompactLayout || !isMobileSidebarOpen) {
-      document.body.style.overflow = '';
-      return;
-    }
-
-    const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') {
-        setIsMobileSidebarOpen(false);
-      }
-    };
-
-    document.body.style.overflow = 'hidden';
-    document.addEventListener('keydown', handleKeyDown);
-
-    return () => {
-      document.body.style.overflow = '';
-      document.removeEventListener('keydown', handleKeyDown);
-    };
-  }, [isCompactLayout, isMobileSidebarOpen]);
-
-  useEffect(() => {
     if (scrollRef.current) {
       scrollRef.current.scrollTo({
         top: location.pathname === APP_ROUTES.chat ? scrollRef.current.scrollHeight : 0,
