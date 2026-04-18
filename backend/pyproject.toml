@@ -10,3 +10,15 @@ dependencies = [
     "djangorestframework>=3.17.1",
     "psycopg[binary]>=3.3.3",
 ]
+
+[tool.pytest.ini_options]
+DJANGO_SETTINGS_MODULE = "config.settings"
+testpaths = ["api/tests"]
+python_files = ["tests.py", "test_*.py", "*_tests.py"]
+
+[dependency-groups]
+dev = [
+    "pytest>=9.0.3",
+    "pytest-django>=4.12.0",
+    "ruff>=0.15.11",
+]
