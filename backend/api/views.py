@@ -1,6 +1,11 @@
-from rest_framework import mixins, viewsets
+from rest_framework import generics, mixins, permissions, viewsets
 from .models import Conversation, Message
-from .serializers import ConversationSerializer, MessageSerializer
+from .serializers import ConversationSerializer, MessageSerializer, RegisterSerializer
+
+
+class RegisterView(generics.CreateAPIView):
+    serializer_class = RegisterSerializer
+    permission_classes = [permissions.AllowAny]
 
 
 class ConversationViewSet(viewsets.ModelViewSet):
