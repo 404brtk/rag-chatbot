@@ -11,7 +11,7 @@ urlpatterns = [
     path("register/", RegisterView.as_view(), name="register"),
     path("", include(router.urls)),
     path(
-        "conversations/<int:conversation_pk>/messages/",
+        "conversations/<uuid:conversation_pk>/messages/",
         message_list,
         name="conversation-messages",
     ),

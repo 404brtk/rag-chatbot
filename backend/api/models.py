@@ -1,12 +1,20 @@
+import uuid
 from django.db import models
 from django.contrib.auth.models import AbstractUser
 
 
+class UUIDModel(models.Model):
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+
+    class Meta:
+        abstract = True
+
+
 class User(AbstractUser):
-    pass
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
 
 
-class Conversation(models.Model):
+class Conversation(UUIDModel):
     user = models.ForeignKey(
         User, on_delete=models.CASCADE, related_name="conversations"
     )
@@ -17,7 +25,7 @@ class Conversation(models.Model):
         return self.title or f"Chat {self.id}"
 
 
-class Message(models.Model):
+class Message(UUIDModel):
     class Role(models.TextChoices):
         USER = "user", "User"
         AI = "ai", "AI"
