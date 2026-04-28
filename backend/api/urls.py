@@ -4,9 +4,15 @@ from .views import ConversationViewSet, MessageViewSet, RegisterView
 
 router = DefaultRouter()
 router.register(r"conversations", ConversationViewSet, basename="conversation")
-router.register(r"messages", MessageViewSet, basename="message")
+
+message_list = MessageViewSet.as_view({"get": "list", "post": "create"})
 
 urlpatterns = [
     path("register/", RegisterView.as_view(), name="register"),
     path("", include(router.urls)),
+    path(
+        "conversations/<int:conversation_pk>/messages/",
+        message_list,
+        name="conversation-messages",
+    ),
 ]
