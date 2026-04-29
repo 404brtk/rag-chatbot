@@ -5,8 +5,28 @@ on:
     branches: [main]
 
 jobs:
-  test:
+  ci:
     runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:18-alpine
+        env:
+          POSTGRES_DB: test_db
+          POSTGRES_USER: test_user
+          POSTGRES_PASSWORD: test_password
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U test_user -d test_db"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    env:
+      DATABASE_URL: postgres://test_user:test_password@localhost:5432/test_db
+      SECRET_KEY: django-insecure-ci-only-not-a-real-secret-key
+      DEBUG: "True"
 
     steps:
       - uses: actions/checkout@v6
@@ -26,4 +46,3 @@ jobs:
 
       - name: run tests
         run: uv run pytest -v --tb=short
-
