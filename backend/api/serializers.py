@@ -29,12 +29,21 @@ class RegisterSerializer(serializers.ModelSerializer):
 class MessageSerializer(serializers.ModelSerializer):
     class Meta:
         model = Message
-        fields = ["id", "role", "content", "created_at"]
-        read_only_fields = ["id", "created_at"]
+        fields = [
+            "id",
+            "role",
+            "content",
+            "provider",
+            "model",
+            "usage",
+            "meta",
+            "created_at",
+        ]
+        read_only_fields = ["id", "provider", "model", "usage", "meta", "created_at"]
 
 
 class ConversationSerializer(serializers.ModelSerializer):
     class Meta:
         model = Conversation
-        fields = ["id", "title", "created_at"]
-        read_only_fields = ["id", "created_at"]
+        fields = ["id", "title", "status", "created_at", "last_message_at"]
+        read_only_fields = ["id", "status", "created_at", "last_message_at"]
