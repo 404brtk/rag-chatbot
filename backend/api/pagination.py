@@ -1,9 +1,9 @@
 from rest_framework.pagination import CursorPagination
 
 
-class CreatedAtCursorPagination(CursorPagination):
-    ordering = "-created_at"
+class ConversationCursorPagination(CursorPagination):
+    ordering = "-last_message_at"
 
 
-class MessageCursorPagination(CreatedAtCursorPagination):
+class MessageCursorPagination(CursorPagination):
     ordering = "created_at"
