@@ -1,6 +1,7 @@
 import uuid
 from django.db import models
 from django.contrib.auth.models import AbstractUser, BaseUserManager
+from django.utils import timezone
 
 
 class UUIDModel(models.Model):
@@ -47,11 +48,28 @@ class User(AbstractUser):
 
 
 class Conversation(UUIDModel):
+    class Status(models.TextChoices):
+        ACTIVE = "active", "Active"
+        ARCHIVED = "archived", "Archived"
+
     user = models.ForeignKey(
         User, on_delete=models.CASCADE, related_name="conversations"
     )
     title = models.CharField(max_length=255, blank=True)
+    status = models.CharField(
+        max_length=16,
+        choices=Status.choices,
+        default=Status.ACTIVE,
+        db_index=True,
+    )
     created_at = models.DateTimeField(auto_now_add=True)
+    last_message_at = models.DateTimeField(default=timezone.now, db_index=True)
+    meta = models.JSONField(default=dict, blank=True)
+
+    class Meta:
+        indexes = [
+            models.Index(fields=["user", "status", "-last_message_at"]),
+        ]
 
     def __str__(self):
         return self.title or f"Chat {self.id}"
@@ -62,12 +80,31 @@ class Message(UUIDModel):
         USER = "user", "User"
         AI = "ai", "AI"
 
+    class Provider(models.TextChoices):
+        OPENAI = "openai", "OpenAI"
+        SYSTEM = "system", "System"
+
     conversation = models.ForeignKey(
         Conversation, on_delete=models.CASCADE, related_name="messages"
     )
-    role = models.CharField(max_length=10, choices=Role.choices)
+    role = models.CharField(max_length=10, choices=Role.choices, db_index=True)
     content = models.TextField()
+    provider = models.CharField(
+        max_length=16,
+        choices=Provider.choices,
+        null=True,
+        blank=True,
+    )
+    model = models.CharField(max_length=128, blank=True, default="")
+    usage = models.JSONField(default=dict, blank=True)
+    meta = models.JSONField(default=dict, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["created_at"]
+        indexes = [
+            models.Index(fields=["conversation", "created_at"]),
+        ]
 
     def __str__(self):
         return f"{self.role}: {self.content[:50]}"
