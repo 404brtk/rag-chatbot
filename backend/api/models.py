@@ -95,8 +95,8 @@ class Message(UUIDModel):
         null=True,
         blank=True,
     )
-    model = models.CharField(max_length=128, blank=True, default="")
-    usage = models.JSONField(default=dict, blank=True)
+    model = models.CharField(max_length=128, null=True, blank=True)
+    usage = models.JSONField(null=True, blank=True)
     meta = models.JSONField(default=dict, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
 
