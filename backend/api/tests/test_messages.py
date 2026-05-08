@@ -67,9 +67,10 @@ def conversation_b(user_b):
 
 @pytest.mark.django_db
 class TestMessageCreation:
+    @patch("api.services.OpenAI")
     @patch("api.services.ProviderGateway.generate")
     def test_create_message_in_own_conversation(
-        self, mock_generate, auth_client_a, conversation_a
+        self, mock_generate, mock_openai, auth_client_a, conversation_a
     ):
         mock_generate.return_value = GenerationResult(
             text="Mocked AI response",
@@ -131,18 +132,20 @@ class TestMessageCreation:
         response = auth_client_a.post(url, {"content": "Hello"})
         assert response.status_code == status.HTTP_404_NOT_FOUND
 
+    @patch("api.services.OpenAI")
     @patch("api.services.ProviderGateway.generate")
     def test_ai_temporary_error_returns_503(
-        self, mock_generate, auth_client_a, conversation_a
+        self, mock_generate, mock_openai, auth_client_a, conversation_a
     ):
         mock_generate.side_effect = TemporaryProviderError("rate limited")
         url = messages_url(conversation_a.id)
         response = auth_client_a.post(url, {"content": "Hello"})
         assert response.status_code == status.HTTP_503_SERVICE_UNAVAILABLE
 
+    @patch("api.services.OpenAI")
     @patch("api.services.ProviderGateway.generate")
     def test_ai_permanent_error_returns_502(
-        self, mock_generate, auth_client_a, conversation_a
+        self, mock_generate, mock_openai, auth_client_a, conversation_a
     ):
         mock_generate.side_effect = PermanentProviderError("bad request")
         url = messages_url(conversation_a.id)

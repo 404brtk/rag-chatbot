@@ -330,6 +330,7 @@ class TestProviderGateway:
             )
 
 
+@patch("api.services.OpenAI")
 class TestDjangoChatServiceGenerateReply:
     def setup_method(self):
         self.mock_repo = MagicMock()
@@ -337,7 +338,7 @@ class TestDjangoChatServiceGenerateReply:
     @pytest.mark.parametrize("user_text", ["", "   \t\n  "])
     @patch("api.services.ProviderGateway.generate")
     def test_raises_invalid_input_on_empty_or_whitespace_text(
-        self, mock_generate, user_text
+        self, mock_generate, mock_openai, user_text
     ):
         service = DjangoChatService(repository=self.mock_repo)
         with pytest.raises(InvalidInputError, match="cannot be empty"):
@@ -353,7 +354,7 @@ class TestDjangoChatServiceGenerateReply:
         [TemporaryProviderError, PermanentProviderError],
     )
     @patch("api.services.ProviderGateway.generate")
-    def test_propagates_provider_errors(self, mock_generate, error_class):
+    def test_propagates_provider_errors(self, mock_generate, mock_openai, error_class):
         mock_generate.side_effect = error_class("service error")
         self.mock_repo.list_messages.return_value = []
 
@@ -366,7 +367,7 @@ class TestDjangoChatServiceGenerateReply:
             )
 
     @patch("api.services.ProviderGateway.generate")
-    def test_strips_whitespace_from_user_text(self, mock_generate):
+    def test_strips_whitespace_from_user_text(self, mock_generate, mock_openai):
         mock_generate.return_value = GenerationResult(
             text="Hi!",
             provider="openai",
@@ -393,7 +394,7 @@ class TestDjangoChatServiceGenerateReply:
         assert call_kwargs["user_content"] == "Hello"
 
     @patch("api.services.ProviderGateway.generate")
-    def test_passes_history_and_new_message_to_window(self, mock_generate):
+    def test_passes_history_and_new_message_to_window(self, mock_generate, mock_openai):
         mock_generate.return_value = GenerationResult(
             text="Hi!",
             provider="openai",
@@ -424,7 +425,7 @@ class TestDjangoChatServiceGenerateReply:
         assert "New question" in user_messages[0].content
 
     @patch("api.services.ProviderGateway.generate")
-    def test_appends_message_pair_to_repository(self, mock_generate):
+    def test_appends_message_pair_to_repository(self, mock_generate, mock_openai):
         mock_generate.return_value = GenerationResult(
             text="Response text",
             provider="openai",
