@@ -187,7 +187,7 @@ class ProviderGateway:
                 model=config.model,
                 messages=[{"role": "system", "content": config.system_prompt}]
                 + [{"role": m.role, "content": m.content} for m in messages],
-                max_tokens=config.max_output_tokens,
+                max_completion_tokens=config.max_output_tokens,
                 temperature=config.temperature,
             )
         except (
