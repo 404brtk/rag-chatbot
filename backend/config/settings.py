@@ -147,3 +147,5 @@ SIMPLE_JWT = {
     "UPDATE_LAST_LOGIN": False,
     "AUTH_HEADER_TYPES": ("Bearer",),
 }
+
+OPENAI_API_KEY = env("OPENAI_API_KEY", default="")
