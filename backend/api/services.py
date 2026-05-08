@@ -199,8 +199,6 @@ class ProviderGateway:
             raise TemporaryProviderError(str(e)) from e
         except openai.BadRequestError as e:
             raise PermanentProviderError(str(e)) from e
-        except Exception as e:
-            raise PermanentProviderError(str(e)) from e
 
         usage_dict = response.usage.model_dump() if response.usage else {}
 
