@@ -1,5 +1,8 @@
+from datetime import timedelta
+
 import pytest
 from django.contrib.auth import get_user_model
+from django.utils import timezone
 from rest_framework import status
 from rest_framework.test import APIClient
 
@@ -69,14 +72,17 @@ class TestConversationCRUD:
         assert "Alice's chat" in titles
         assert "Bob's chat" not in titles
 
-    def test_list_conversations_ordered_newest_first(self, auth_client_a, user_a):
-        Conversation.objects.create(user=user_a, title="First")
-        Conversation.objects.create(user=user_a, title="Second")
+    def test_list_conversations_ordered_by_activity(self, auth_client_a, user_a):
+        now = timezone.now()
+        Conversation.objects.create(user=user_a, title="First", last_message_at=now)
+        Conversation.objects.create(
+            user=user_a, title="Second", last_message_at=now - timedelta(hours=1)
+        )
 
         response = auth_client_a.get(CONVERSATIONS_URL)
         results = response.data["results"]
-        assert results[0]["title"] == "Second"
-        assert results[1]["title"] == "First"
+        assert results[0]["title"] == "First"
+        assert results[1]["title"] == "Second"
 
     def test_patch_conversation_title(self, auth_client_a, user_a):
         conv = Conversation.objects.create(user=user_a, title="Old title")

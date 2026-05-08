@@ -1,4 +1,5 @@
 import uuid
+from unittest.mock import patch
 
 import pytest
 from django.contrib.auth import get_user_model
@@ -6,6 +7,12 @@ from rest_framework import status
 from rest_framework.test import APIClient
 
 from api.models import Conversation, Message
+from api.repositories import StoredMessage
+from api.services import (
+    GenerationResult,
+    PermanentProviderError,
+    TemporaryProviderError,
+)
 
 User = get_user_model()
 
@@ -60,25 +67,59 @@ def conversation_b(user_b):
 
 @pytest.mark.django_db
 class TestMessageCreation:
-    def test_create_message_in_own_conversation(self, auth_client_a, conversation_a):
-        url = messages_url(conversation_a.id)
-        response = auth_client_a.post(url, {"role": "user", "content": "Hello"})
-        assert response.status_code == status.HTTP_201_CREATED
-        assert response.data["role"] == "user"
-        assert response.data["content"] == "Hello"
-        assert "created_at" in response.data
+    @patch("api.services.ProviderGateway.generate")
+    def test_create_message_in_own_conversation(
+        self, mock_generate, auth_client_a, conversation_a
+    ):
+        mock_generate.return_value = GenerationResult(
+            text="Mocked AI response",
+            provider="openai",
+            model="gpt-5.5",
+            input_tokens=10,
+            output_tokens=20,
+            usage={"prompt_tokens": 10, "completion_tokens": 20},
+            model_input=[StoredMessage(role="user", content="Hello")],
+        )
 
-    def test_create_ai_message(self, auth_client_a, conversation_a):
         url = messages_url(conversation_a.id)
-        response = auth_client_a.post(url, {"role": "ai", "content": "Hi there!"})
+        response = auth_client_a.post(url, {"content": "Hello"})
         assert response.status_code == status.HTTP_201_CREATED
+
         assert response.data["role"] == "ai"
+        assert response.data["content"] == "Mocked AI response"
+        assert response.data["provider"] == "openai"
+        assert "usage" in response.data
+
+        assert Message.objects.filter(conversation=conversation_a).count() == 2
+
+        user_msg = Message.objects.filter(
+            conversation=conversation_a, role="user"
+        ).first()
+        assert user_msg.content == "Hello"
+
+        ai_msg = Message.objects.filter(conversation=conversation_a, role="ai").first()
+        assert ai_msg.content == "Mocked AI response"
+        assert response.data["id"] == str(ai_msg.id)
+
+    def test_create_message_empty_content_returns_400(
+        self, auth_client_a, conversation_a
+    ):
+        url = messages_url(conversation_a.id)
+        response = auth_client_a.post(url, {"content": ""})
+        assert response.status_code == status.HTTP_400_BAD_REQUEST
+
+    def test_create_message_missing_content_returns_400(
+        self, auth_client_a, conversation_a
+    ):
+        url = messages_url(conversation_a.id)
+        response = auth_client_a.post(url, {})
+        assert response.status_code == status.HTTP_400_BAD_REQUEST
 
     def test_cannot_create_message_in_other_users_conversation(
         self, auth_client_a, conversation_b
     ):
         url = messages_url(conversation_b.id)
-        response = auth_client_a.post(url, {"role": "user", "content": "Sneaky"})
+        response = auth_client_a.post(url, {"content": "Sneaky"})
         assert response.status_code == status.HTTP_404_NOT_FOUND
         assert Message.objects.count() == 0
 
@@ -87,8 +128,26 @@ class TestMessageCreation:
     ):
         fake_id = uuid.uuid4()
         url = messages_url(fake_id)
-        response = auth_client_a.post(url, {"role": "user", "content": "Hello"})
+        response = auth_client_a.post(url, {"content": "Hello"})
         assert response.status_code == status.HTTP_404_NOT_FOUND
+
+    @patch("api.services.ProviderGateway.generate")
+    def test_ai_temporary_error_returns_503(
+        self, mock_generate, auth_client_a, conversation_a
+    ):
+        mock_generate.side_effect = TemporaryProviderError("rate limited")
+        url = messages_url(conversation_a.id)
+        response = auth_client_a.post(url, {"content": "Hello"})
+        assert response.status_code == status.HTTP_503_SERVICE_UNAVAILABLE
+
+    @patch("api.services.ProviderGateway.generate")
+    def test_ai_permanent_error_returns_502(
+        self, mock_generate, auth_client_a, conversation_a
+    ):
+        mock_generate.side_effect = PermanentProviderError("bad request")
+        url = messages_url(conversation_a.id)
+        response = auth_client_a.post(url, {"content": "Hello"})
+        assert response.status_code == status.HTTP_502_BAD_GATEWAY
 
 
 @pytest.mark.django_db
@@ -123,30 +182,37 @@ class TestMessageListing:
         )
         url = messages_url(conversation_b.id)
         response = auth_client_a.get(url)
+        assert response.status_code == status.HTTP_404_NOT_FOUND
+
+    def test_empty_conversation_returns_empty_results(
+        self, auth_client_a, conversation_a
+    ):
+        url = messages_url(conversation_a.id)
+        response = auth_client_a.get(url)
+        assert response.status_code == status.HTTP_200_OK
         assert response.data["results"] == []
 
 
 @pytest.mark.django_db
 class TestMessageHTTPMethods:
-    def test_update_message_not_allowed(self, auth_client_a, conversation_a):
-        msg = Message.objects.create(
-            conversation=conversation_a, role="user", content="original"
-        )
-        url = f"{messages_url(conversation_a.id)}{msg.id}/"
+    def test_update_own_message_not_allowed(self, auth_client_a, user_a):
+        conv = Conversation.objects.create(user=user_a, title="Chat")
+        msg = Message.objects.create(conversation=conv, role="user", content="original")
+        url = f"{messages_url(conv.id)}{msg.id}/"
         response = auth_client_a.patch(url, {"content": "tampered"})
-        assert response.status_code in (
-            status.HTTP_404_NOT_FOUND,
-            status.HTTP_405_METHOD_NOT_ALLOWED,
-        )
+        assert response.status_code == status.HTTP_404_NOT_FOUND
 
-    def test_delete_message_not_allowed(self, auth_client_a, conversation_a):
-        msg = Message.objects.create(
-            conversation=conversation_a, role="user", content="keep me"
-        )
-        url = f"{messages_url(conversation_a.id)}{msg.id}/"
+    def test_delete_own_message_not_allowed(self, auth_client_a, user_a):
+        conv = Conversation.objects.create(user=user_a, title="Chat")
+        msg = Message.objects.create(conversation=conv, role="user", content="keep me")
+        url = f"{messages_url(conv.id)}{msg.id}/"
         response = auth_client_a.delete(url)
-        assert response.status_code in (
-            status.HTTP_404_NOT_FOUND,
-            status.HTTP_405_METHOD_NOT_ALLOWED,
-        )
+        assert response.status_code == status.HTTP_404_NOT_FOUND
         assert Message.objects.filter(pk=msg.pk).exists()
+
+    def test_access_other_users_message_returns_404(self, auth_client_a, user_b):
+        conv = Conversation.objects.create(user=user_b, title="Private")
+        msg = Message.objects.create(conversation=conv, role="user", content="secret")
+        url = f"{messages_url(conv.id)}{msg.id}/"
+        response = auth_client_a.patch(url, {"content": "hacked"})
+        assert response.status_code == status.HTTP_404_NOT_FOUND

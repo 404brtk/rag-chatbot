@@ -1,5 +1,9 @@
+import uuid
+
 import pytest
 from django.contrib.auth import get_user_model
+from django.core.exceptions import ValidationError
+from django.db import IntegrityError
 
 from api.models import Conversation, Message
 
@@ -18,7 +22,7 @@ class TestUserManager:
         assert user.is_staff is False
         assert user.is_superuser is False
 
-    def test_create_user_normalizes_full_email_to_lowercase(self):
+    def test_create_user_normalizes_email_to_lowercase(self):
         user = User.objects.create_user(
             email="Test@EXAMPLE.COM", password="Str0ngP@ss!"
         )
@@ -66,15 +70,11 @@ class TestUserManager:
         assert found.email == "test@example.com"
 
     def test_duplicate_email_raises_integrity_error(self):
-        from django.db import IntegrityError
-
         User.objects.create_user(email="dupe@example.com", password="Str0ngP@ss!")
         with pytest.raises(IntegrityError):
             User.objects.create_user(email="dupe@example.com", password="Str0ngP@ss!")
 
     def test_user_id_is_uuid(self):
-        import uuid
-
         user = User.objects.create_user(
             email="uuid@example.com", password="Str0ngP@ss!"
         )
@@ -99,6 +99,11 @@ class TestConversationModel:
         user.delete()
         assert Conversation.objects.count() == 0
 
+    def test_conversation_defaults_to_active_status(self):
+        user = User.objects.create_user(email="u@example.com", password="Str0ngP@ss!")
+        conv = Conversation.objects.create(user=user)
+        assert conv.status == Conversation.Status.ACTIVE
+
 
 @pytest.mark.django_db
 class TestMessageModel:
@@ -112,10 +117,16 @@ class TestMessageModel:
         assert Message.objects.count() == 0
 
     def test_role_choices_enforced(self):
-        from django.core.exceptions import ValidationError
-
         user = User.objects.create_user(email="u@example.com", password="Str0ngP@ss!")
         conv = Conversation.objects.create(user=user)
         msg = Message(conversation=conv, role="invalid", content="test")
         with pytest.raises(ValidationError):
             msg.full_clean()
+
+    def test_message_str_truncates_long_content(self):
+        user = User.objects.create_user(email="u@example.com", password="Str0ngP@ss!")
+        conv = Conversation.objects.create(user=user)
+        msg = Message.objects.create(
+            conversation=conv, role=Message.Role.USER, content="x" * 100
+        )
+        assert str(msg) == f"user: {'x' * 50}"
