@@ -4,9 +4,8 @@ from unittest.mock import patch
 import pytest
 from django.contrib.auth import get_user_model
 from rest_framework import status
-from rest_framework.test import APIClient
 
-from api.models import Conversation, Message
+from api.models import Conversation, Message, UserApiKey
 from api.repositories import StoredMessage
 from api.services import (
     GenerationResult,
@@ -16,43 +15,9 @@ from api.services import (
 
 User = get_user_model()
 
-TOKEN_URL = "/api/token/"
-
-VALID_PASSWORD = "4Ah?,*d]GAx2"
-
 
 def messages_url(conversation_pk):
     return f"/api/conversations/{conversation_pk}/messages/"
-
-
-@pytest.fixture
-def user_a():
-    return User.objects.create_user(email="alice@example.com", password=VALID_PASSWORD)
-
-
-@pytest.fixture
-def user_b():
-    return User.objects.create_user(email="bob@example.com", password=VALID_PASSWORD)
-
-
-@pytest.fixture
-def auth_client_a(user_a):
-    client = APIClient()
-    tokens = client.post(
-        TOKEN_URL, {"email": "alice@example.com", "password": VALID_PASSWORD}
-    )
-    client.credentials(HTTP_AUTHORIZATION=f"Bearer {tokens.data['access']}")
-    return client
-
-
-@pytest.fixture
-def auth_client_b(user_b):
-    client = APIClient()
-    tokens = client.post(
-        TOKEN_URL, {"email": "bob@example.com", "password": VALID_PASSWORD}
-    )
-    client.credentials(HTTP_AUTHORIZATION=f"Bearer {tokens.data['access']}")
-    return client
 
 
 @pytest.fixture
@@ -70,8 +35,11 @@ class TestMessageCreation:
     @patch("api.services.OpenAI")
     @patch("api.services.ProviderGateway.generate")
     def test_create_message_in_own_conversation(
-        self, mock_generate, mock_openai, auth_client_a, conversation_a
+        self, mock_generate, mock_openai, auth_client_a, conversation_a, user_a
     ):
+        UserApiKey.objects.create(
+            user=user_a, provider="openai", encrypted_key="sk-test"
+        )
         mock_generate.return_value = GenerationResult(
             text="Mocked AI response",
             provider="openai",
@@ -135,8 +103,11 @@ class TestMessageCreation:
     @patch("api.services.OpenAI")
     @patch("api.services.ProviderGateway.generate")
     def test_ai_temporary_error_returns_503(
-        self, mock_generate, mock_openai, auth_client_a, conversation_a
+        self, mock_generate, mock_openai, auth_client_a, conversation_a, user_a
     ):
+        UserApiKey.objects.create(
+            user=user_a, provider="openai", encrypted_key="sk-test"
+        )
         mock_generate.side_effect = TemporaryProviderError("rate limited")
         url = messages_url(conversation_a.id)
         response = auth_client_a.post(url, {"content": "Hello"})
@@ -145,12 +116,21 @@ class TestMessageCreation:
     @patch("api.services.OpenAI")
     @patch("api.services.ProviderGateway.generate")
     def test_ai_permanent_error_returns_502(
-        self, mock_generate, mock_openai, auth_client_a, conversation_a
+        self, mock_generate, mock_openai, auth_client_a, conversation_a, user_a
     ):
+        UserApiKey.objects.create(
+            user=user_a, provider="openai", encrypted_key="sk-test"
+        )
         mock_generate.side_effect = PermanentProviderError("bad request")
         url = messages_url(conversation_a.id)
         response = auth_client_a.post(url, {"content": "Hello"})
         assert response.status_code == status.HTTP_502_BAD_GATEWAY
+
+    def test_missing_api_key_returns_403(self, auth_client_a, conversation_a):
+        url = messages_url(conversation_a.id)
+        response = auth_client_a.post(url, {"content": "Hello"})
+        assert response.status_code == status.HTTP_403_FORBIDDEN
+        assert "No API key configured" in response.data["error"]
 
 
 @pytest.mark.django_db

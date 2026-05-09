@@ -4,46 +4,12 @@ import pytest
 from django.contrib.auth import get_user_model
 from django.utils import timezone
 from rest_framework import status
-from rest_framework.test import APIClient
 
 from api.models import Conversation
 
 User = get_user_model()
 
 CONVERSATIONS_URL = "/api/conversations/"
-TOKEN_URL = "/api/token/"
-
-VALID_PASSWORD = "4Ah?,*d]GAx2"
-
-
-@pytest.fixture
-def user_a():
-    return User.objects.create_user(email="alice@example.com", password=VALID_PASSWORD)
-
-
-@pytest.fixture
-def user_b():
-    return User.objects.create_user(email="bob@example.com", password=VALID_PASSWORD)
-
-
-@pytest.fixture
-def auth_client_a(user_a):
-    client = APIClient()
-    tokens = client.post(
-        TOKEN_URL, {"email": "alice@example.com", "password": VALID_PASSWORD}
-    )
-    client.credentials(HTTP_AUTHORIZATION=f"Bearer {tokens.data['access']}")
-    return client
-
-
-@pytest.fixture
-def auth_client_b(user_b):
-    client = APIClient()
-    tokens = client.post(
-        TOKEN_URL, {"email": "bob@example.com", "password": VALID_PASSWORD}
-    )
-    client.credentials(HTTP_AUTHORIZATION=f"Bearer {tokens.data['access']}")
-    return client
 
 
 @pytest.mark.django_db

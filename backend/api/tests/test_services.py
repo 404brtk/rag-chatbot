@@ -5,6 +5,7 @@ from unittest.mock import MagicMock, patch
 import openai
 import pytest
 
+from api.models import UserApiKey
 from api.repositories import StoredMessage
 from api.services import (
     DjangoChatService,
@@ -12,6 +13,7 @@ from api.services import (
     HistoryWindow,
     InvalidInputError,
     LLMConfig,
+    MissingApiKeyError,
     PermanentProviderError,
     ProviderGateway,
     TemporaryProviderError,
@@ -268,8 +270,9 @@ class TestProviderGateway:
         }
         mock_client.chat.completions.create.return_value = mock_response
 
-        gateway = ProviderGateway(openai_client=mock_client)
+        gateway = ProviderGateway()
         result = gateway.generate(
+            api_key="sk-test",
             config=DEFAULT_CONFIG,
             messages=[StoredMessage(role="user", content="Hi")],
         )
@@ -279,11 +282,12 @@ class TestProviderGateway:
         mock_client.chat.completions.create.assert_called_once()
 
     def test_raises_permanent_error_for_unsupported_provider(self):
-        gateway = ProviderGateway(openai_client=MagicMock())
+        gateway = ProviderGateway()
         config = replace(DEFAULT_CONFIG, provider="unsupported")
 
         with pytest.raises(PermanentProviderError, match="Unsupported provider"):
             gateway.generate(
+                api_key="sk-test",
                 config=config,
                 messages=[StoredMessage(role="user", content="Hi")],
             )
@@ -316,33 +320,44 @@ class TestProviderGateway:
                 TemporaryProviderError,
                 {"message": "internal error", "response": MagicMock(), "body": None},
             ),
+            (
+                openai.AuthenticationError,
+                PermanentProviderError,
+                {"message": "invalid key", "response": MagicMock(), "body": None},
+            ),
         ],
     )
-    def test_maps_openai_errors(self, error_class, expected_exception, kwargs):
+    @patch("api.services.OpenAI")
+    def test_maps_openai_errors(
+        self, mock_openai_cls, error_class, expected_exception, kwargs
+    ):
         mock_client = MagicMock()
+        mock_openai_cls.return_value = mock_client
         mock_client.chat.completions.create.side_effect = error_class(**kwargs)
 
-        gateway = ProviderGateway(openai_client=mock_client)
+        gateway = ProviderGateway()
         with pytest.raises(expected_exception):
             gateway.generate(
+                api_key="sk-test",
                 config=DEFAULT_CONFIG,
                 messages=[StoredMessage(role="user", content="Hi")],
             )
 
 
-@patch("api.services.OpenAI")
 class TestDjangoChatServiceGenerateReply:
     def setup_method(self):
         self.mock_repo = MagicMock()
+        self.mock_user = MagicMock()
 
     @pytest.mark.parametrize("user_text", ["", "   \t\n  "])
     @patch("api.services.ProviderGateway.generate")
     def test_raises_invalid_input_on_empty_or_whitespace_text(
-        self, mock_generate, mock_openai, user_text
+        self, mock_generate, user_text
     ):
         service = DjangoChatService(repository=self.mock_repo)
         with pytest.raises(InvalidInputError, match="cannot be empty"):
             service.generate_reply(
+                user=self.mock_user,
                 session_id="test-session",
                 user_text=user_text,
                 config=DEFAULT_CONFIG,
@@ -354,20 +369,23 @@ class TestDjangoChatServiceGenerateReply:
         [TemporaryProviderError, PermanentProviderError],
     )
     @patch("api.services.ProviderGateway.generate")
-    def test_propagates_provider_errors(self, mock_generate, mock_openai, error_class):
+    @patch.object(DjangoChatService, "_resolve_api_key", return_value="sk-test")
+    def test_propagates_provider_errors(self, mock_resolve, mock_generate, error_class):
         mock_generate.side_effect = error_class("service error")
         self.mock_repo.list_messages.return_value = []
 
         service = DjangoChatService(repository=self.mock_repo)
         with pytest.raises(error_class):
             service.generate_reply(
+                user=self.mock_user,
                 session_id="test-session",
                 user_text="Hello",
                 config=DEFAULT_CONFIG,
             )
 
     @patch("api.services.ProviderGateway.generate")
-    def test_strips_whitespace_from_user_text(self, mock_generate, mock_openai):
+    @patch.object(DjangoChatService, "_resolve_api_key", return_value="sk-test")
+    def test_strips_whitespace_from_user_text(self, mock_resolve, mock_generate):
         mock_generate.return_value = GenerationResult(
             text="Hi!",
             provider="openai",
@@ -385,6 +403,7 @@ class TestDjangoChatServiceGenerateReply:
 
         service = DjangoChatService(repository=self.mock_repo)
         service.generate_reply(
+            user=self.mock_user,
             session_id="test-session",
             user_text="  Hello  ",
             config=DEFAULT_CONFIG,
@@ -394,7 +413,10 @@ class TestDjangoChatServiceGenerateReply:
         assert call_kwargs["user_content"] == "Hello"
 
     @patch("api.services.ProviderGateway.generate")
-    def test_passes_history_and_new_message_to_window(self, mock_generate, mock_openai):
+    @patch.object(DjangoChatService, "_resolve_api_key", return_value="sk-test")
+    def test_passes_history_and_new_message_to_window(
+        self, mock_resolve, mock_generate
+    ):
         mock_generate.return_value = GenerationResult(
             text="Hi!",
             provider="openai",
@@ -413,6 +435,7 @@ class TestDjangoChatServiceGenerateReply:
 
         service = DjangoChatService(repository=self.mock_repo)
         service.generate_reply(
+            user=self.mock_user,
             session_id="test-session",
             user_text="New question",
             config=DEFAULT_CONFIG,
@@ -425,7 +448,8 @@ class TestDjangoChatServiceGenerateReply:
         assert "New question" in user_messages[0].content
 
     @patch("api.services.ProviderGateway.generate")
-    def test_appends_message_pair_to_repository(self, mock_generate, mock_openai):
+    @patch.object(DjangoChatService, "_resolve_api_key", return_value="sk-test")
+    def test_appends_message_pair_to_repository(self, mock_resolve, mock_generate):
         mock_generate.return_value = GenerationResult(
             text="Response text",
             provider="openai",
@@ -447,6 +471,7 @@ class TestDjangoChatServiceGenerateReply:
 
         service = DjangoChatService(repository=self.mock_repo)
         result = service.generate_reply(
+            user=self.mock_user,
             session_id="test-session",
             user_text="Hello",
             config=DEFAULT_CONFIG,
@@ -455,3 +480,10 @@ class TestDjangoChatServiceGenerateReply:
         assert result.user_message_id == "user-uuid"
         assert result.assistant_message_id == "assistant-uuid"
         self.mock_repo.append_message_pair.assert_called_once()
+
+    @patch("api.services.UserApiKey.objects.get")
+    def test_raises_missing_api_key_error_when_no_key_set(self, mock_get):
+        mock_get.side_effect = UserApiKey.DoesNotExist
+        service = DjangoChatService(repository=self.mock_repo)
+        with pytest.raises(MissingApiKeyError, match="No API key configured"):
+            service._resolve_api_key(self.mock_user, "openai")

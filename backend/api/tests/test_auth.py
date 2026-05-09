@@ -3,26 +3,18 @@ from django.contrib.auth import get_user_model
 from rest_framework import status
 from rest_framework.test import APIClient
 
+from .conftest import TOKEN_URL, VALID_PASSWORD
+
 User = get_user_model()
 
 REGISTER_URL = "/api/register/"
-TOKEN_URL = "/api/token/"
 TOKEN_REFRESH_URL = "/api/token/refresh/"
 TOKEN_BLACKLIST_URL = "/api/token/blacklist/"
-
-VALID_PASSWORD = "4Ah?,*d]GAx2"
 
 
 @pytest.fixture
 def api_client():
     return APIClient()
-
-
-@pytest.fixture
-def registered_user():
-    return User.objects.create_user(
-        email="existing@example.com", password=VALID_PASSWORD
-    )
 
 
 @pytest.mark.django_db
@@ -65,11 +57,11 @@ class TestRegistration:
         )
         assert response.status_code == status.HTTP_400_BAD_REQUEST
 
-    def test_register_duplicate_email_rejected(self, api_client, registered_user):
+    def test_register_duplicate_email_rejected(self, api_client, user_a):
         response = api_client.post(
             REGISTER_URL,
             {
-                "email": "existing@example.com",
+                "email": "alice@example.com",
                 "password": VALID_PASSWORD,
                 "password_confirm": VALID_PASSWORD,
             },
@@ -101,11 +93,11 @@ class TestRegistration:
 
 @pytest.mark.django_db
 class TestJWTLogin:
-    def test_login_with_email_returns_tokens(self, api_client, registered_user):
+    def test_login_with_email_returns_tokens(self, api_client, user_a):
         response = api_client.post(
             TOKEN_URL,
             {
-                "email": "existing@example.com",
+                "email": "alice@example.com",
                 "password": VALID_PASSWORD,
             },
         )
@@ -113,21 +105,21 @@ class TestJWTLogin:
         assert "access" in response.data
         assert "refresh" in response.data
 
-    def test_login_email_is_case_insensitive(self, api_client, registered_user):
+    def test_login_email_is_case_insensitive(self, api_client, user_a):
         response = api_client.post(
             TOKEN_URL,
             {
-                "email": "EXISTING@EXAMPLE.COM",
+                "email": "ALICE@EXAMPLE.COM",
                 "password": VALID_PASSWORD,
             },
         )
         assert response.status_code == status.HTTP_200_OK
 
-    def test_login_wrong_password_rejected(self, api_client, registered_user):
+    def test_login_wrong_password_rejected(self, api_client, user_a):
         response = api_client.post(
             TOKEN_URL,
             {
-                "email": "existing@example.com",
+                "email": "alice@example.com",
                 "password": "WrongPassword!123",
             },
         )
@@ -146,11 +138,11 @@ class TestJWTLogin:
 
 @pytest.mark.django_db
 class TestJWTTokenRefresh:
-    def test_refresh_returns_new_access_token(self, api_client, registered_user):
+    def test_refresh_returns_new_access_token(self, api_client, user_a):
         login = api_client.post(
             TOKEN_URL,
             {
-                "email": "existing@example.com",
+                "email": "alice@example.com",
                 "password": VALID_PASSWORD,
             },
         )
@@ -166,13 +158,11 @@ class TestJWTTokenRefresh:
 
 @pytest.mark.django_db
 class TestJWTTokenBlacklist:
-    def test_blacklisted_refresh_token_cannot_be_reused(
-        self, api_client, registered_user
-    ):
+    def test_blacklisted_refresh_token_cannot_be_reused(self, api_client, user_a):
         login = api_client.post(
             TOKEN_URL,
             {
-                "email": "existing@example.com",
+                "email": "alice@example.com",
                 "password": VALID_PASSWORD,
             },
         )
@@ -192,11 +182,11 @@ class TestAuthenticatedAccess:
         response = api_client.get("/api/conversations/")
         assert response.status_code == status.HTTP_401_UNAUTHORIZED
 
-    def test_authenticated_request_succeeds(self, api_client, registered_user):
+    def test_authenticated_request_succeeds(self, api_client, user_a):
         login = api_client.post(
             TOKEN_URL,
             {
-                "email": "existing@example.com",
+                "email": "alice@example.com",
                 "password": VALID_PASSWORD,
             },
         )
