@@ -4,9 +4,9 @@ from typing import Any, Literal
 
 import openai
 import tiktoken
-from django.conf import settings
 from openai import OpenAI
 
+from .models import UserApiKey
 from .repositories import DjangoMessageRepository, StoredMessage
 
 logger = logging.getLogger(__name__)
@@ -41,6 +41,10 @@ class ChatServiceError(Exception):
 
 
 class InvalidInputError(ChatServiceError):
+    pass
+
+
+class MissingApiKeyError(ChatServiceError):
     pass
 
 
@@ -169,21 +173,16 @@ class HistoryWindow:
 
 
 class ProviderGateway:
-    def __init__(
-        self,
-        *,
-        openai_client: OpenAI,
-    ) -> None:
-        self.openai_client = openai_client
-
     def _generate_openai(
         self,
         *,
+        api_key: str,
         config: LLMConfig,
         messages: list[StoredMessage],
     ) -> GenerationResult:
+        client = OpenAI(api_key=api_key, timeout=30.0, max_retries=2)
         try:
-            response = self.openai_client.chat.completions.create(
+            response = client.chat.completions.create(
                 model=config.model,
                 messages=[{"role": "system", "content": config.system_prompt}]
                 + [{"role": m.role, "content": m.content} for m in messages],
@@ -197,6 +196,8 @@ class ProviderGateway:
             openai.InternalServerError,
         ) as e:
             raise TemporaryProviderError(str(e)) from e
+        except openai.AuthenticationError as e:
+            raise PermanentProviderError(f"Invalid API key: {e}") from e
         except openai.BadRequestError as e:
             raise PermanentProviderError(str(e)) from e
 
@@ -215,33 +216,38 @@ class ProviderGateway:
     def generate(
         self,
         *,
+        api_key: str,
         config: LLMConfig,
         messages: list[StoredMessage],
     ) -> GenerationResult:
         if config.provider == "openai":
-            return self._generate_openai(config=config, messages=messages)
+            return self._generate_openai(
+                api_key=api_key, config=config, messages=messages
+            )
         raise PermanentProviderError(f"Unsupported provider: {config.provider}")
 
 
 class DjangoChatService:
     def __init__(self, repository: DjangoMessageRepository | None = None) -> None:
         self.repository = repository or DjangoMessageRepository()
-
-        self.openai_client = OpenAI(
-            api_key=getattr(settings, "OPENAI_API_KEY", ""),
-            timeout=30.0,
-            max_retries=2,
-        )
-
         self.counter = TokenCounter()
         self.window = HistoryWindow()
-        self.gateway = ProviderGateway(
-            openai_client=self.openai_client,
-        )
+        self.gateway = ProviderGateway()
+
+    def _resolve_api_key(self, user, provider: str) -> str:
+        try:
+            key_record = UserApiKey.objects.get(user=user, provider=provider)
+        except UserApiKey.DoesNotExist:
+            raise MissingApiKeyError(
+                f"No API key configured for provider '{provider}'. "
+                "Please add one in your settings."
+            )
+        return key_record.encrypted_key
 
     def generate_reply(
         self,
         *,
+        user,
         session_id: str,
         user_text: str,
         config: LLMConfig,
@@ -249,6 +255,8 @@ class DjangoChatService:
         clean_user_text = (user_text or "").strip()
         if not clean_user_text:
             raise InvalidInputError("user_text cannot be empty")
+
+        api_key = self._resolve_api_key(user, config.provider)
 
         history = self.repository.list_messages(
             session_id=session_id, limit=config.history_limit
@@ -267,7 +275,9 @@ class DjangoChatService:
         )
 
         try:
-            result = self.gateway.generate(config=config, messages=trimmed)
+            result = self.gateway.generate(
+                api_key=api_key, config=config, messages=trimmed
+            )
         except ChatServiceError:
             logger.exception(
                 "LLM generation failed",
@@ -302,13 +312,3 @@ class DjangoChatService:
             user_message_id=str(user_msg.id),
             assistant_message_id=str(assistant_msg.id),
         )
-
-
-_default_service: DjangoChatService | None = None
-
-
-def get_chat_service() -> DjangoChatService:
-    global _default_service
-    if _default_service is None:
-        _default_service = DjangoChatService()
-    return _default_service

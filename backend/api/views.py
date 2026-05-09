@@ -4,13 +4,19 @@ from rest_framework.response import Response
 
 from .models import Conversation, Message
 from .pagination import MessageCursorPagination
-from .serializers import ConversationSerializer, MessageSerializer, RegisterSerializer
+from .serializers import (
+    ConversationSerializer,
+    MessageSerializer,
+    RegisterSerializer,
+    UserApiKeySerializer,
+)
 from .services import (
+    DjangoChatService,
     InvalidInputError,
+    MissingApiKeyError,
     TemporaryProviderError,
     PermanentProviderError,
     LLMConfig,
-    get_chat_service,
 )
 
 
@@ -57,9 +63,12 @@ class MessageViewSet(
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
+        provider = request.data.get("provider", "openai")
+        model_name = request.data.get("model", "gpt-5.4-mini")
+
         config = LLMConfig(
-            provider="openai",
-            model="gpt-5.4-mini",
+            provider=provider,
+            model=model_name,
             system_prompt=(
                 "You are an expert Senior Developer and AI Coding Assistant. "
                 "Always format your responses using Markdown. "
@@ -70,13 +79,19 @@ class MessageViewSet(
             ),
         )
 
-        service = get_chat_service()
+        service = DjangoChatService()
 
         try:
             result = service.generate_reply(
+                user=request.user,
                 session_id=str(conversation.id),
                 user_text=user_text,
                 config=config,
+            )
+        except MissingApiKeyError as e:
+            return Response(
+                {"error": str(e)},
+                status=status.HTTP_403_FORBIDDEN,
             )
         except InvalidInputError as e:
             return Response(
@@ -107,3 +122,15 @@ class MessageViewSet(
             },
             status=status.HTTP_201_CREATED,
         )
+
+
+class UserApiKeyViewSet(viewsets.ModelViewSet):
+    serializer_class = UserApiKeySerializer
+    pagination_class = None
+    http_method_names = ["get", "post", "patch", "delete", "head", "options"]
+
+    def get_queryset(self):
+        return self.request.user.api_keys.all()
+
+    def perform_create(self, serializer):
+        serializer.save(user=self.request.user)
