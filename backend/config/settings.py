@@ -148,4 +148,4 @@ SIMPLE_JWT = {
     "AUTH_HEADER_TYPES": ("Bearer",),
 }
 
-OPENAI_API_KEY = env("OPENAI_API_KEY", default="")
+FERNET_KEYS = env.list("FERNET_KEYS", default=[])
