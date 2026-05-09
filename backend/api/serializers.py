@@ -1,7 +1,7 @@
 from django.contrib.auth import get_user_model
 from django.contrib.auth.password_validation import validate_password
 from rest_framework import serializers
-from .models import Conversation, Message
+from .models import Conversation, Message, UserApiKey
 
 User = get_user_model()
 
@@ -47,3 +47,25 @@ class ConversationSerializer(serializers.ModelSerializer):
         model = Conversation
         fields = ["id", "title", "status", "created_at", "last_message_at"]
         read_only_fields = ["id", "status", "created_at", "last_message_at"]
+
+
+class UserApiKeySerializer(serializers.ModelSerializer):
+    api_key = serializers.CharField(write_only=True, source="encrypted_key")
+    masked_key = serializers.CharField(read_only=True)
+
+    class Meta:
+        model = UserApiKey
+        fields = ["id", "provider", "api_key", "masked_key", "created_at", "updated_at"]
+        read_only_fields = ["id", "masked_key", "created_at", "updated_at"]
+
+    def validate(self, attrs):
+        user = self.context["request"].user
+        provider = attrs.get("provider", getattr(self.instance, "provider", None))
+        qs = UserApiKey.objects.filter(user=user, provider=provider)
+        if self.instance:
+            qs = qs.exclude(pk=self.instance.pk)
+        if qs.exists():
+            raise serializers.ValidationError(
+                {"provider": f"You already have a key for '{provider}'."}
+            )
+        return attrs

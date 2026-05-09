@@ -3,6 +3,14 @@ from django.db import models
 from django.contrib.auth.models import AbstractUser, BaseUserManager
 from django.utils import timezone
 
+from .fields import EncryptedTextField
+
+
+class LLMProvider(models.TextChoices):
+    OPENAI = "openai", "OpenAI"
+    ANTHROPIC = "anthropic", "Anthropic"
+    GOOGLE = "google", "Google"
+
 
 class UUIDModel(models.Model):
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
@@ -47,6 +55,27 @@ class User(AbstractUser):
     objects = UserManager()
 
 
+class UserApiKey(UUIDModel):
+    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name="api_keys")
+    provider = models.CharField(max_length=32, choices=LLMProvider.choices)
+    encrypted_key = EncryptedTextField()
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        unique_together = [("user", "provider")]
+
+    def __str__(self):
+        return f"{self.user.email} - {self.get_provider_display()}"
+
+    @property
+    def masked_key(self):
+        key = self.encrypted_key
+        if not key or len(key) < 8:
+            return "****"
+        return f"{key[:3]}...{key[-4:]}"
+
+
 class Conversation(UUIDModel):
     class Status(models.TextChoices):
         ACTIVE = "active", "Active"
@@ -80,10 +109,6 @@ class Message(UUIDModel):
         USER = "user", "User"
         AI = "ai", "AI"
 
-    class Provider(models.TextChoices):
-        OPENAI = "openai", "OpenAI"
-        SYSTEM = "system", "System"
-
     conversation = models.ForeignKey(
         Conversation, on_delete=models.CASCADE, related_name="messages"
     )
@@ -91,7 +116,7 @@ class Message(UUIDModel):
     content = models.TextField()
     provider = models.CharField(
         max_length=16,
-        choices=Provider.choices,
+        choices=LLMProvider.choices,
         null=True,
         blank=True,
     )
