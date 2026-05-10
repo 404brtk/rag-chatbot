@@ -3,7 +3,7 @@ from django.shortcuts import get_object_or_404
 from rest_framework.response import Response
 
 from .models import Conversation, Message
-from .pagination import MessageCursorPagination
+from .pagination import ConversationCursorPagination, MessageCursorPagination
 from .serializers import (
     ConversationSerializer,
     MessageSerializer,
@@ -27,6 +27,7 @@ class RegisterView(generics.CreateAPIView):
 
 class ConversationViewSet(viewsets.ModelViewSet):
     serializer_class = ConversationSerializer
+    pagination_class = ConversationCursorPagination
     http_method_names = ["get", "post", "patch", "delete", "head", "options"]
 
     def get_queryset(self):
@@ -126,7 +127,6 @@ class MessageViewSet(
 
 class UserApiKeyViewSet(viewsets.ModelViewSet):
     serializer_class = UserApiKeySerializer
-    pagination_class = None
     http_method_names = ["get", "post", "patch", "delete", "head", "options"]
 
     def get_queryset(self):
