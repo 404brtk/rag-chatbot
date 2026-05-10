@@ -2,6 +2,7 @@ import uuid
 from django.db import models
 from django.contrib.auth.models import AbstractUser, BaseUserManager
 from django.utils import timezone
+from pgvector.django import HnswIndex, VectorField
 
 from .fields import EncryptedTextField
 
@@ -133,3 +134,42 @@ class Message(UUIDModel):
 
     def __str__(self):
         return f"{self.role}: {self.content[:50]}"
+
+
+class Document(UUIDModel):
+    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name="documents")
+    filename = models.CharField(max_length=255)
+    content_type = models.CharField(max_length=100)
+    raw_text = models.TextField()
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    def __str__(self):
+        return self.filename
+
+
+EMBEDDING_DIMENSIONS = 384
+
+
+class DocumentChunk(UUIDModel):
+    document = models.ForeignKey(
+        Document, on_delete=models.CASCADE, related_name="chunks"
+    )
+    content = models.TextField()
+    chunk_index = models.PositiveIntegerField()
+    embedding = VectorField(dimensions=EMBEDDING_DIMENSIONS)
+
+    class Meta:
+        ordering = ["chunk_index"]
+        indexes = [
+            models.Index(fields=["document", "chunk_index"]),
+            HnswIndex(
+                name="chunk_embedding_idx",
+                fields=["embedding"],
+                m=16,  # TODO: adjust
+                ef_construction=64,  # TODO: adjust
+                opclasses=["vector_cosine_ops"],
+            ),
+        ]
+
+    def __str__(self):
+        return f"{self.document.filename} chunk {self.chunk_index}"

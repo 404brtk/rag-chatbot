@@ -1,6 +1,6 @@
 from django.contrib import admin
 from django.contrib.auth.admin import UserAdmin
-from .models import User, Conversation, Message, UserApiKey
+from .models import User, Conversation, Document, DocumentChunk, Message, UserApiKey
 
 
 @admin.register(User)
@@ -41,3 +41,27 @@ class MessageAdmin(admin.ModelAdmin):
     search_fields = ("content",)
     list_select_related = ("conversation",)
     ordering = ("-created_at",)
+
+
+@admin.register(Document)
+class DocumentAdmin(admin.ModelAdmin):
+    list_display = ("filename", "user", "content_type", "created_at")
+    list_filter = ("content_type",)
+    search_fields = ("filename", "user__email")
+    list_select_related = ("user",)
+    ordering = ("-created_at",)
+    exclude = ("raw_text",)
+
+
+@admin.register(DocumentChunk)
+class DocumentChunkAdmin(admin.ModelAdmin):
+    list_display = ("document", "chunk_index", "content_preview")
+    search_fields = ("content",)
+    list_select_related = ("document",)
+    ordering = ("document", "chunk_index")
+    exclude = ("embedding",)
+
+    def content_preview(self, obj):
+        return obj.content[:100]
+
+    content_preview.short_description = "Content"

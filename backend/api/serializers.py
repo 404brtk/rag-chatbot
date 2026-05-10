@@ -1,7 +1,7 @@
 from django.contrib.auth import get_user_model
 from django.contrib.auth.password_validation import validate_password
 from rest_framework import serializers
-from .models import Conversation, Message, UserApiKey
+from .models import Conversation, Document, Message, UserApiKey
 
 User = get_user_model()
 
@@ -69,3 +69,10 @@ class UserApiKeySerializer(serializers.ModelSerializer):
                 {"provider": f"You already have a key for '{provider}'."}
             )
         return attrs
+
+
+class DocumentSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Document
+        fields = ["id", "filename", "content_type", "created_at"]
+        read_only = True
