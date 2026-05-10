@@ -11,6 +11,7 @@ dependencies = [
     "djangorestframework>=3.17.1",
     "djangorestframework-simplejwt>=5.5.1",
     "openai>=2.34.0",
+    "pgvector>=0.4.2",
     "psycopg[binary]>=3.3.3",
     "tiktoken>=0.12.0",
 ]
