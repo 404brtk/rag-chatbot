@@ -48,6 +48,7 @@ INSTALLED_APPS = [
     "django.contrib.sessions",
     "django.contrib.messages",
     "django.contrib.staticfiles",
+    "django.contrib.postgres",
     "rest_framework",
     "rest_framework_simplejwt",
     "rest_framework_simplejwt.token_blacklist",
@@ -148,3 +149,10 @@ SIMPLE_JWT = {
 }
 
 FERNET_KEYS = env.list("FERNET_KEYS", default=[])
+
+FILE_UPLOAD_MAX_SIZE = env.int("FILE_UPLOAD_MAX_SIZE", default=10 * 1024 * 1024)
+
+EMBEDDING_MODEL = "sentence-transformers/all-MiniLM-L6-v2"
+
+RAG_TOP_K = env.int("RAG_TOP_K", default=5)
+RAG_SIMILARITY_THRESHOLD = env.float("RAG_SIMILARITY_THRESHOLD", default=0.3)
