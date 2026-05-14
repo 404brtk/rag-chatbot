@@ -75,4 +75,4 @@ class DocumentSerializer(serializers.ModelSerializer):
     class Meta:
         model = Document
         fields = ["id", "filename", "content_type", "created_at"]
-        read_only = True
+        read_only_fields = ["id", "filename", "content_type", "created_at"]
