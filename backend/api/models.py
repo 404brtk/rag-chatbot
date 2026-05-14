@@ -4,6 +4,7 @@ from django.contrib.auth.models import AbstractUser, BaseUserManager
 from django.utils import timezone
 from pgvector.django import HnswIndex, VectorField
 
+from django.conf import settings
 from .fields import EncryptedTextField
 
 
@@ -141,13 +142,11 @@ class Document(UUIDModel):
     filename = models.CharField(max_length=255)
     content_type = models.CharField(max_length=100)
     raw_text = models.TextField()
+    meta = models.JSONField(default=dict, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
 
     def __str__(self):
         return self.filename
-
-
-EMBEDDING_DIMENSIONS = 384
 
 
 class DocumentChunk(UUIDModel):
@@ -156,7 +155,7 @@ class DocumentChunk(UUIDModel):
     )
     content = models.TextField()
     chunk_index = models.PositiveIntegerField()
-    embedding = VectorField(dimensions=EMBEDDING_DIMENSIONS)
+    embedding = VectorField(dimensions=settings.EMBEDDING_DIMENSIONS)
 
     class Meta:
         ordering = ["chunk_index"]
