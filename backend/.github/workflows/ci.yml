@@ -5,7 +5,23 @@ on:
     branches: [main]
 
 jobs:
-  ci:
+  lint:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: install uv
+        uses: astral-sh/setup-uv@v8.1.0
+        with:
+          python-version: "3.14"
+
+      - name: lint and format check
+        run: |
+          uvx ruff check .
+          uvx ruff format --check .
+
+  test:
     runs-on: ubuntu-latest
 
     services:
@@ -36,13 +52,9 @@ jobs:
         with:
           python-version: "3.14"
           enable-cache: true
+
       - name: install dependencies
         run: uv sync --frozen
-
-      - name: lint and format check
-        run: |
-          uv run ruff check .
-          uv run ruff format --check .
 
       - name: run tests
         run: uv run pytest -v --tb=short
