@@ -1,9 +1,15 @@
+import sys
 import threading
 from unittest.mock import MagicMock, patch
 
 import pytest
 
 from api.embeddings import EmbeddingService
+
+
+@pytest.fixture(autouse=True)
+def _mock_sentence_transformers_module(monkeypatch):
+    monkeypatch.setitem(sys.modules, "sentence_transformers", MagicMock())
 
 
 @pytest.fixture(autouse=True)

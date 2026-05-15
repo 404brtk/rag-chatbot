@@ -54,7 +54,7 @@ jobs:
           enable-cache: true
 
       - name: install dependencies
-        run: uv sync --frozen
+        run: uv sync --frozen --no-group embeddings
 
       - name: run tests
         run: uv run pytest -v --tb=short

@@ -16,9 +16,11 @@ dependencies = [
     "psycopg[binary]>=3.3.3",
     "pymupdf4llm>=1.27.2.3",
     "pyyaml>=6.0.3",
-    "sentence-transformers>=5.4.1",
     "tiktoken>=0.12.0",
 ]
+
+[tool.uv]
+default-groups = ["dev", "embeddings"]
 
 [tool.pytest.ini_options]
 DJANGO_SETTINGS_MODULE = "config.settings"
@@ -31,4 +33,7 @@ dev = [
     "pytest>=9.0.3",
     "pytest-django>=4.12.0",
     "ruff>=0.15.11",
+]
+embeddings = [
+    "sentence-transformers>=5.4.1",
 ]
