@@ -6,6 +6,7 @@ import openai
 import tiktoken
 from openai import OpenAI
 
+from .document_service import DocumentService
 from .models import UserApiKey
 from .repositories import DjangoMessageRepository, StoredMessage
 
@@ -227,12 +228,13 @@ class ProviderGateway:
         raise PermanentProviderError(f"Unsupported provider: {config.provider}")
 
 
-class DjangoChatService:
+class ChatService:
     def __init__(self, repository: DjangoMessageRepository | None = None) -> None:
         self.repository = repository or DjangoMessageRepository()
         self.counter = TokenCounter()
         self.window = HistoryWindow()
         self.gateway = ProviderGateway()
+        self.document_service = DocumentService()
 
     def _resolve_api_key(self, user, provider: str) -> str:
         try:
@@ -244,6 +246,16 @@ class DjangoChatService:
             )
         return key_record.encrypted_key
 
+    @staticmethod
+    def _format_rag_context(search_results) -> str:
+        chunks = []
+        for i, result in enumerate(search_results, 1):
+            chunks.append(
+                f"[{i}] (source: {result.document_filename}, chunk {result.chunk_index})\n"
+                f"{result.chunk_content}"
+            )
+        return "\n\n".join(chunks)
+
     def generate_reply(
         self,
         *,
@@ -251,10 +263,36 @@ class DjangoChatService:
         session_id: str,
         user_text: str,
         config: LLMConfig,
+        document_ids: list[str] | None = None,
     ) -> GenerationResult:
         clean_user_text = (user_text or "").strip()
         if not clean_user_text:
             raise InvalidInputError("user_text cannot be empty")
+
+        user_message = clean_user_text
+
+        context_chunks = None
+
+        if document_ids is not None:
+            search_results = self.document_service.search(
+                user=user,
+                query=clean_user_text,
+                document_ids=document_ids or None,
+            )
+            if search_results:
+                context_block = self._format_rag_context(search_results)
+                user_message = f"<CONTEXT>\n{context_block}\n</CONTEXT>\n\n<QUESTION>\n{clean_user_text}\n</QUESTION>"
+                context_chunks = [
+                    {
+                        "index": i,
+                        "content": r.chunk_content,
+                        "document_id": r.document_id,
+                        "document_filename": r.document_filename,
+                        "chunk_index": r.chunk_index,
+                        "distance": r.distance,
+                    }
+                    for i, r in enumerate(search_results, 1)
+                ]
 
         api_key = self._resolve_api_key(user, config.provider)
 
@@ -263,7 +301,7 @@ class DjangoChatService:
         )
         candidate_messages = [
             *history,
-            StoredMessage(role="user", content=clean_user_text),
+            StoredMessage(role="user", content=user_message),
         ]
 
         trimmed = self.window.fit_to_token_limit(
@@ -289,17 +327,22 @@ class DjangoChatService:
             )
             raise
 
+        user_meta = {
+            "raw_question": clean_user_text,
+            "provider_selected": config.provider,
+            "model_selected": config.model,
+        }
+        if context_chunks:
+            user_meta["context_chunks"] = context_chunks
+
         user_msg, assistant_msg = self.repository.append_message_pair(
             session_id=session_id,
-            user_content=clean_user_text,
+            user_content=user_message,
             assistant_content=result.text,
             provider=result.provider,
             model=result.model,
             usage=result.usage,
-            user_meta={
-                "provider_selected": config.provider,
-                "model_selected": config.model,
-            },
+            user_meta=user_meta,
             assistant_meta={
                 "input_tokens": result.input_tokens,
                 "output_tokens": result.output_tokens,

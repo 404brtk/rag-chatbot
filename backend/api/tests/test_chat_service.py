@@ -7,8 +7,8 @@ import pytest
 
 from api.models import UserApiKey
 from api.repositories import StoredMessage
-from api.services import (
-    DjangoChatService,
+from api.chat_service import (
+    ChatService,
     GenerationResult,
     HistoryWindow,
     InvalidInputError,
@@ -19,6 +19,7 @@ from api.services import (
     TemporaryProviderError,
     TokenCounter,
 )
+from api.document_service import SearchResult
 
 
 def _msg(role, content, created_at=None, meta=None):
@@ -256,7 +257,7 @@ class TestHistoryWindowFitToTokenLimit:
 
 
 class TestProviderGateway:
-    @patch("api.services.OpenAI")
+    @patch("api.chat_service.OpenAI")
     def test_routes_to_openai_for_openai_provider(self, mock_openai_cls):
         mock_client = MagicMock()
         mock_openai_cls.return_value = mock_client
@@ -327,7 +328,7 @@ class TestProviderGateway:
             ),
         ],
     )
-    @patch("api.services.OpenAI")
+    @patch("api.chat_service.OpenAI")
     def test_maps_openai_errors(
         self, mock_openai_cls, error_class, expected_exception, kwargs
     ):
@@ -344,17 +345,46 @@ class TestProviderGateway:
             )
 
 
-class TestDjangoChatServiceGenerateReply:
+class TestFormatRagContext:
+    def test_formats_single_chunk_with_label_and_source(self):
+        results = [
+            SearchResult(
+                chunk_content="Chunk content here.",
+                document_id="abc",
+                document_filename="test.txt",
+                chunk_index=0,
+                distance=0.1,
+            )
+        ]
+        result = ChatService._format_rag_context(results)
+        assert result == "[1] (source: test.txt, chunk 0)\nChunk content here."
+
+    def test_joins_multiple_chunks_with_double_newline(self):
+        results = [
+            SearchResult("Chunk A", "d1", "a.txt", 0, 0.1),
+            SearchResult("Chunk B", "d2", "b.txt", 3, 0.2),
+        ]
+        result = ChatService._format_rag_context(results)
+        assert result == (
+            "[1] (source: a.txt, chunk 0)\nChunk A\n\n"
+            "[2] (source: b.txt, chunk 3)\nChunk B"
+        )
+
+    def test_returns_empty_string_for_empty_list(self):
+        assert ChatService._format_rag_context([]) == ""
+
+
+class TestChatServiceGenerateReply:
     def setup_method(self):
         self.mock_repo = MagicMock()
         self.mock_user = MagicMock()
 
     @pytest.mark.parametrize("user_text", ["", "   \t\n  "])
-    @patch("api.services.ProviderGateway.generate")
+    @patch("api.chat_service.ProviderGateway.generate")
     def test_raises_invalid_input_on_empty_or_whitespace_text(
         self, mock_generate, user_text
     ):
-        service = DjangoChatService(repository=self.mock_repo)
+        service = ChatService(repository=self.mock_repo)
         with pytest.raises(InvalidInputError, match="cannot be empty"):
             service.generate_reply(
                 user=self.mock_user,
@@ -368,13 +398,13 @@ class TestDjangoChatServiceGenerateReply:
         "error_class",
         [TemporaryProviderError, PermanentProviderError],
     )
-    @patch("api.services.ProviderGateway.generate")
-    @patch.object(DjangoChatService, "_resolve_api_key", return_value="sk-test")
+    @patch("api.chat_service.ProviderGateway.generate")
+    @patch.object(ChatService, "_resolve_api_key", return_value="sk-test")
     def test_propagates_provider_errors(self, mock_resolve, mock_generate, error_class):
         mock_generate.side_effect = error_class("service error")
         self.mock_repo.list_messages.return_value = []
 
-        service = DjangoChatService(repository=self.mock_repo)
+        service = ChatService(repository=self.mock_repo)
         with pytest.raises(error_class):
             service.generate_reply(
                 user=self.mock_user,
@@ -383,8 +413,8 @@ class TestDjangoChatServiceGenerateReply:
                 config=DEFAULT_CONFIG,
             )
 
-    @patch("api.services.ProviderGateway.generate")
-    @patch.object(DjangoChatService, "_resolve_api_key", return_value="sk-test")
+    @patch("api.chat_service.ProviderGateway.generate")
+    @patch.object(ChatService, "_resolve_api_key", return_value="sk-test")
     def test_strips_whitespace_from_user_text(self, mock_resolve, mock_generate):
         mock_generate.return_value = GenerationResult(
             text="Hi!",
@@ -401,7 +431,7 @@ class TestDjangoChatServiceGenerateReply:
             MagicMock(id="assistant-id"),
         )
 
-        service = DjangoChatService(repository=self.mock_repo)
+        service = ChatService(repository=self.mock_repo)
         service.generate_reply(
             user=self.mock_user,
             session_id="test-session",
@@ -412,8 +442,8 @@ class TestDjangoChatServiceGenerateReply:
         call_kwargs = self.mock_repo.append_message_pair.call_args[1]
         assert call_kwargs["user_content"] == "Hello"
 
-    @patch("api.services.ProviderGateway.generate")
-    @patch.object(DjangoChatService, "_resolve_api_key", return_value="sk-test")
+    @patch("api.chat_service.ProviderGateway.generate")
+    @patch.object(ChatService, "_resolve_api_key", return_value="sk-test")
     def test_passes_history_and_new_message_to_window(
         self, mock_resolve, mock_generate
     ):
@@ -433,7 +463,7 @@ class TestDjangoChatServiceGenerateReply:
             MagicMock(id="assistant-id"),
         )
 
-        service = DjangoChatService(repository=self.mock_repo)
+        service = ChatService(repository=self.mock_repo)
         service.generate_reply(
             user=self.mock_user,
             session_id="test-session",
@@ -447,8 +477,8 @@ class TestDjangoChatServiceGenerateReply:
         assert len(user_messages) == 1
         assert "New question" in user_messages[0].content
 
-    @patch("api.services.ProviderGateway.generate")
-    @patch.object(DjangoChatService, "_resolve_api_key", return_value="sk-test")
+    @patch("api.chat_service.ProviderGateway.generate")
+    @patch.object(ChatService, "_resolve_api_key", return_value="sk-test")
     def test_appends_message_pair_to_repository(self, mock_resolve, mock_generate):
         mock_generate.return_value = GenerationResult(
             text="Response text",
@@ -469,7 +499,7 @@ class TestDjangoChatServiceGenerateReply:
             mock_assistant,
         )
 
-        service = DjangoChatService(repository=self.mock_repo)
+        service = ChatService(repository=self.mock_repo)
         result = service.generate_reply(
             user=self.mock_user,
             session_id="test-session",
@@ -481,9 +511,168 @@ class TestDjangoChatServiceGenerateReply:
         assert result.assistant_message_id == "assistant-uuid"
         self.mock_repo.append_message_pair.assert_called_once()
 
-    @patch("api.services.UserApiKey.objects.get")
+    @patch("api.chat_service.ProviderGateway.generate")
+    @patch.object(ChatService, "_resolve_api_key", return_value="sk-test")
+    @patch("api.chat_service.DocumentService")
+    def test_injects_context_tags_when_search_has_results(
+        self, mock_doc_svc_cls, mock_resolve, mock_generate
+    ):
+        mock_doc_svc_cls.return_value.search.return_value = [
+            SearchResult("Relevant info.", "doc-1", "docs.md", 0, 0.1)
+        ]
+        mock_generate.return_value = GenerationResult(
+            text="Answer.",
+            provider="openai",
+            model="gpt-5.5",
+            input_tokens=10,
+            output_tokens=5,
+            usage={},
+            model_input=[],
+        )
+        self.mock_repo.list_messages.return_value = []
+        self.mock_repo.append_message_pair.return_value = (
+            MagicMock(id="u-id"),
+            MagicMock(id="a-id"),
+        )
+
+        service = ChatService(repository=self.mock_repo)
+        service.generate_reply(
+            user=self.mock_user,
+            session_id="test-session",
+            user_text="Hello",
+            config=DEFAULT_CONFIG,
+            document_ids=[],
+        )
+
+        call_kwargs = self.mock_repo.append_message_pair.call_args[1]
+        user_content = call_kwargs["user_content"]
+        assert "<CONTEXT>" in user_content
+        assert "[1] (source: docs.md, chunk 0)" in user_content
+        assert "Relevant info." in user_content
+        assert "</CONTEXT>" in user_content
+        assert "<QUESTION>" in user_content
+        assert "Hello" in user_content
+        assert "</QUESTION>" in user_content
+
+    @patch("api.chat_service.ProviderGateway.generate")
+    @patch.object(ChatService, "_resolve_api_key", return_value="sk-test")
+    @patch("api.chat_service.DocumentService")
+    def test_includes_context_chunks_and_raw_question_in_user_meta(
+        self, mock_doc_svc_cls, mock_resolve, mock_generate
+    ):
+        mock_doc_svc_cls.return_value.search.return_value = [
+            SearchResult("Info A", "d1", "a.txt", 0, 0.1),
+            SearchResult("Info B", "d2", "b.txt", 3, 0.2),
+        ]
+        mock_generate.return_value = GenerationResult(
+            text="Answer.",
+            provider="openai",
+            model="gpt-5.5",
+            input_tokens=10,
+            output_tokens=5,
+            usage={},
+            model_input=[],
+        )
+        self.mock_repo.list_messages.return_value = []
+        self.mock_repo.append_message_pair.return_value = (
+            MagicMock(id="u-id"),
+            MagicMock(id="a-id"),
+        )
+
+        service = ChatService(repository=self.mock_repo)
+        service.generate_reply(
+            user=self.mock_user,
+            session_id="test-session",
+            user_text="  Question  ",
+            config=DEFAULT_CONFIG,
+            document_ids=["doc-1"],
+        )
+
+        user_meta = self.mock_repo.append_message_pair.call_args[1]["user_meta"]
+        assert user_meta["raw_question"] == "Question"
+        assert len(user_meta["context_chunks"]) == 2
+        assert user_meta["context_chunks"][0]["index"] == 1
+        assert user_meta["context_chunks"][0]["content"] == "Info A"
+        assert user_meta["context_chunks"][0]["document_filename"] == "a.txt"
+        assert user_meta["context_chunks"][0]["document_id"] == "d1"
+        assert user_meta["context_chunks"][0]["chunk_index"] == 0
+        assert user_meta["context_chunks"][0]["distance"] == 0.1
+        assert user_meta["context_chunks"][1]["index"] == 2
+        assert user_meta["context_chunks"][1]["content"] == "Info B"
+
+    @patch("api.chat_service.ProviderGateway.generate")
+    @patch.object(ChatService, "_resolve_api_key", return_value="sk-test")
+    @patch("api.chat_service.DocumentService")
+    def test_does_not_inject_context_when_document_ids_is_none(
+        self, mock_doc_svc_cls, mock_resolve, mock_generate
+    ):
+        mock_generate.return_value = GenerationResult(
+            text="Answer.",
+            provider="openai",
+            model="gpt-5.5",
+            input_tokens=10,
+            output_tokens=5,
+            usage={},
+            model_input=[],
+        )
+        self.mock_repo.list_messages.return_value = []
+        self.mock_repo.append_message_pair.return_value = (
+            MagicMock(id="u-id"),
+            MagicMock(id="a-id"),
+        )
+
+        service = ChatService(repository=self.mock_repo)
+        service.generate_reply(
+            user=self.mock_user,
+            session_id="test-session",
+            user_text="Hello",
+            config=DEFAULT_CONFIG,
+        )
+
+        call_kwargs = self.mock_repo.append_message_pair.call_args[1]
+        assert call_kwargs["user_content"] == "Hello"
+        assert "context_chunks" not in call_kwargs["user_meta"]
+        assert call_kwargs["user_meta"]["raw_question"] == "Hello"
+        mock_doc_svc_cls.return_value.search.assert_not_called()
+
+    @patch("api.chat_service.ProviderGateway.generate")
+    @patch.object(ChatService, "_resolve_api_key", return_value="sk-test")
+    @patch("api.chat_service.DocumentService")
+    def test_skips_context_injection_when_search_returns_no_results(
+        self, mock_doc_svc_cls, mock_resolve, mock_generate
+    ):
+        mock_doc_svc_cls.return_value.search.return_value = []
+        mock_generate.return_value = GenerationResult(
+            text="Answer.",
+            provider="openai",
+            model="gpt-5.5",
+            input_tokens=10,
+            output_tokens=5,
+            usage={},
+            model_input=[],
+        )
+        self.mock_repo.list_messages.return_value = []
+        self.mock_repo.append_message_pair.return_value = (
+            MagicMock(id="u-id"),
+            MagicMock(id="a-id"),
+        )
+
+        service = ChatService(repository=self.mock_repo)
+        service.generate_reply(
+            user=self.mock_user,
+            session_id="test-session",
+            user_text="Hello",
+            config=DEFAULT_CONFIG,
+            document_ids=[],
+        )
+
+        call_kwargs = self.mock_repo.append_message_pair.call_args[1]
+        assert call_kwargs["user_content"] == "Hello"
+        assert "context_chunks" not in call_kwargs["user_meta"]
+
+    @patch("api.chat_service.UserApiKey.objects.get")
     def test_raises_missing_api_key_error_when_no_key_set(self, mock_get):
         mock_get.side_effect = UserApiKey.DoesNotExist
-        service = DjangoChatService(repository=self.mock_repo)
+        service = ChatService(repository=self.mock_repo)
         with pytest.raises(MissingApiKeyError, match="No API key configured"):
             service._resolve_api_key(self.mock_user, "openai")
