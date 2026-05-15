@@ -1,4 +1,8 @@
+import logging
+
+from django.db import connection
 from rest_framework import generics, mixins, permissions, viewsets, status
+from rest_framework.views import APIView
 from rest_framework.response import Response
 from django.shortcuts import get_object_or_404
 
@@ -24,6 +28,23 @@ from .chat_service import (
     TemporaryProviderError,
     PermanentProviderError,
 )
+
+
+class HealthView(APIView):
+    permission_classes = [permissions.AllowAny]
+
+    def get(self, request):
+        try:
+            with connection.cursor() as cursor:
+                cursor.execute("SELECT 1")
+        except Exception:
+            logger = logging.getLogger(__name__)
+            logger.exception("Health check failed")
+            return Response(
+                {"status": "unhealthy"},
+                status=status.HTTP_503_SERVICE_UNAVAILABLE,
+            )
+        return Response({"status": "ok", "database": "connected"})
 
 
 class RegisterView(generics.CreateAPIView):
