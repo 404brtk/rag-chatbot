@@ -7,3 +7,7 @@ class ConversationCursorPagination(CursorPagination):
 
 class MessageCursorPagination(CursorPagination):
     ordering = "created_at"
+
+
+class DocumentCursorPagination(CursorPagination):
+    ordering = "-created_at"
