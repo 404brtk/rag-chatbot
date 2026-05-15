@@ -1,22 +1,28 @@
 from rest_framework import generics, mixins, permissions, viewsets, status
-from django.shortcuts import get_object_or_404
 from rest_framework.response import Response
+from django.shortcuts import get_object_or_404
 
-from .models import Conversation, Message
-from .pagination import ConversationCursorPagination, MessageCursorPagination
+from .document_service import DocumentService
+from .models import Conversation
+from .pagination import (
+    ConversationCursorPagination,
+    MessageCursorPagination,
+    DocumentCursorPagination,
+)
 from .serializers import (
     ConversationSerializer,
     MessageSerializer,
+    DocumentSerializer,
     RegisterSerializer,
     UserApiKeySerializer,
 )
-from .services import (
-    DjangoChatService,
+from .chat_service import (
+    LLMConfig,
+    ChatService,
     InvalidInputError,
     MissingApiKeyError,
     TemporaryProviderError,
     PermanentProviderError,
-    LLMConfig,
 )
 
 
@@ -31,7 +37,7 @@ class ConversationViewSet(viewsets.ModelViewSet):
     http_method_names = ["get", "post", "patch", "delete", "head", "options"]
 
     def get_queryset(self):
-        return Conversation.objects.filter(user=self.request.user)
+        return self.request.user.conversations.all()
 
     def perform_create(self, serializer):
         serializer.save(user=self.request.user)
@@ -51,8 +57,8 @@ class MessageViewSet(
         )
 
     def get_queryset(self):
-        self.get_conversation()
-        return Message.objects.filter(conversation_id=self.kwargs["conversation_pk"])
+        conversation = self.get_conversation()
+        return conversation.messages.all()
 
     def create(self, request, *args, **kwargs):
         conversation = self.get_conversation()
@@ -66,12 +72,25 @@ class MessageViewSet(
 
         provider = request.data.get("provider", "openai")
         model_name = request.data.get("model", "gpt-5.4-mini")
+        document_ids = request.data.get("document_ids")
+
+        if document_ids is not None:
+            if not isinstance(document_ids, list):
+                return Response(
+                    {"document_ids": ["Must be a list of document UUIDs."]},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
 
         config = LLMConfig(
             provider=provider,
             model=model_name,
             system_prompt=(
                 "You are an expert Senior Developer and AI Coding Assistant. "
+                "You will be provided with reference documents in the user's message. "
+                "Use them to answer when relevant; ignore them if they are not relevant. "
+                "When you draw on information from the provided documents, cite the "
+                "relevant chunks using the [1], [2], etc. notation matching their labels. "
+                "Use citations to attribute knowledge, not as verbatim quotes. "
                 "Always format your responses using Markdown. "
                 "Whenever you write code, wrap it in a markdown code block with the correct language tag. "
                 "Be brutally concise, direct, and avoid unnecessary apologies, fluff, or 'As an AI' disclaimers. "
@@ -80,7 +99,7 @@ class MessageViewSet(
             ),
         )
 
-        service = DjangoChatService()
+        service = ChatService()
 
         try:
             result = service.generate_reply(
@@ -88,6 +107,7 @@ class MessageViewSet(
                 session_id=str(conversation.id),
                 user_text=user_text,
                 config=config,
+                document_ids=document_ids,
             )
         except MissingApiKeyError as e:
             return Response(
@@ -134,3 +154,76 @@ class UserApiKeyViewSet(viewsets.ModelViewSet):
 
     def perform_create(self, serializer):
         serializer.save(user=self.request.user)
+
+
+class DocumentViewSet(
+    mixins.CreateModelMixin,
+    mixins.ListModelMixin,
+    mixins.RetrieveModelMixin,
+    mixins.DestroyModelMixin,
+    viewsets.GenericViewSet,
+):
+    serializer_class = DocumentSerializer
+    pagination_class = DocumentCursorPagination
+
+    def get_queryset(self):
+        return self.request.user.documents.all()
+
+    def _handle_file_upload(self, request):
+        file = request.FILES.get("file")
+        if not file:
+            return Response(
+                {"file": ["This field is required."]},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        service = DocumentService()
+        try:
+            document = service.process_upload(user=request.user, file=file)
+        except ValueError as e:
+            return Response(
+                {"error": str(e)},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        serializer = self.get_serializer(document)
+        return Response(serializer.data, status=status.HTTP_201_CREATED)
+
+    def _handle_text_paste(self, request):
+        content = request.data.get("content")
+        if not content or not str(content).strip():
+            return Response(
+                {"content": ["This field is required."]},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        content_type = request.data.get("content_type", "text/plain")
+        if content_type not in ("text/plain", "text/markdown"):
+            return Response(
+                {"content_type": ["Must be text/plain or text/markdown."]},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        filename = request.data.get("filename", "pasted-text.txt")
+
+        service = DocumentService()
+        try:
+            document = service.process_text(
+                user=request.user,
+                raw_text=str(content),
+                content_type=content_type,
+                filename=filename,
+            )
+        except ValueError as e:
+            return Response(
+                {"error": str(e)},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        serializer = self.get_serializer(document)
+        return Response(serializer.data, status=status.HTTP_201_CREATED)
+
+    def create(self, request, *args, **kwargs):
+        if "file" in request.FILES:
+            return self._handle_file_upload(request)
+        return self._handle_text_paste(request)
