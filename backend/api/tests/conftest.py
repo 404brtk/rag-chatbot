@@ -3,6 +3,8 @@ from cryptography.fernet import Fernet
 from django.contrib.auth import get_user_model
 from rest_framework.test import APIClient
 
+from api.models import UserApiKey
+
 User = get_user_model()
 
 VALID_PASSWORD = "4Ah?,*d]GAx2"
@@ -42,3 +44,10 @@ def auth_client_b(user_b):
     )
     client.credentials(HTTP_AUTHORIZATION=f"Bearer {tokens.data['access']}")
     return client
+
+
+@pytest.fixture
+def api_key(user_a):
+    return UserApiKey.objects.create(
+        user=user_a, provider="openai", encrypted_key="sk-test"
+    )

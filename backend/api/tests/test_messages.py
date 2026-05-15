@@ -5,7 +5,7 @@ import pytest
 from django.contrib.auth import get_user_model
 from rest_framework import status
 
-from api.models import Conversation, Message, UserApiKey
+from api.models import Conversation, Message
 from api.repositories import StoredMessage
 from api.chat_service import (
     GenerationResult,
@@ -35,11 +35,8 @@ class TestMessageCreation:
     @patch("api.chat_service.OpenAI")
     @patch("api.chat_service.ProviderGateway.generate")
     def test_create_message_in_own_conversation(
-        self, mock_generate, mock_openai, auth_client_a, conversation_a, user_a
+        self, mock_generate, mock_openai, auth_client_a, conversation_a, api_key
     ):
-        UserApiKey.objects.create(
-            user=user_a, provider="openai", encrypted_key="sk-test"
-        )
         mock_generate.return_value = GenerationResult(
             text="Mocked AI response",
             provider="openai",
@@ -103,11 +100,8 @@ class TestMessageCreation:
     @patch("api.chat_service.OpenAI")
     @patch("api.chat_service.ProviderGateway.generate")
     def test_ai_temporary_error_returns_503(
-        self, mock_generate, mock_openai, auth_client_a, conversation_a, user_a
+        self, mock_generate, mock_openai, auth_client_a, conversation_a, api_key
     ):
-        UserApiKey.objects.create(
-            user=user_a, provider="openai", encrypted_key="sk-test"
-        )
         mock_generate.side_effect = TemporaryProviderError("rate limited")
         url = messages_url(conversation_a.id)
         response = auth_client_a.post(url, {"content": "Hello"})
@@ -116,11 +110,8 @@ class TestMessageCreation:
     @patch("api.chat_service.OpenAI")
     @patch("api.chat_service.ProviderGateway.generate")
     def test_ai_permanent_error_returns_502(
-        self, mock_generate, mock_openai, auth_client_a, conversation_a, user_a
+        self, mock_generate, mock_openai, auth_client_a, conversation_a, api_key
     ):
-        UserApiKey.objects.create(
-            user=user_a, provider="openai", encrypted_key="sk-test"
-        )
         mock_generate.side_effect = PermanentProviderError("bad request")
         url = messages_url(conversation_a.id)
         response = auth_client_a.post(url, {"content": "Hello"})
