@@ -123,6 +123,96 @@ class TestMessageCreation:
         assert response.status_code == status.HTTP_403_FORBIDDEN
         assert "No API key configured" in response.data["error"]
 
+    @patch("api.chat_service.OpenAI")
+    @patch("api.chat_service.ProviderGateway.generate")
+    def test_auto_title_from_short_message(
+        self, mock_generate, mock_openai, auth_client_a, user_a, api_key
+    ):
+        mock_generate.return_value = GenerationResult(
+            text="Mocked AI response",
+            provider="openai",
+            model="gpt-5.5",
+            input_tokens=10,
+            output_tokens=20,
+            usage={"prompt_tokens": 10, "completion_tokens": 20},
+            model_input=[StoredMessage(role="user", content="Hello")],
+        )
+
+        conv = Conversation.objects.create(user=user_a)
+
+        url = messages_url(conv.id)
+        response = auth_client_a.post(url, {"content": "Hello"})
+        assert response.status_code == status.HTTP_201_CREATED
+
+        conv.refresh_from_db()
+        assert conv.title == "Hello"
+
+    @patch("api.chat_service.OpenAI")
+    @patch("api.chat_service.ProviderGateway.generate")
+    def test_auto_title_truncates_long_message(
+        self, mock_generate, mock_openai, auth_client_a, user_a, api_key
+    ):
+        mock_generate.return_value = GenerationResult(
+            text="Mocked AI response",
+            provider="openai",
+            model="gpt-5.5",
+            input_tokens=10,
+            output_tokens=20,
+            usage={"prompt_tokens": 10, "completion_tokens": 20},
+            model_input=[StoredMessage(role="user", content="Long text")],
+        )
+
+        conv = Conversation.objects.create(user=user_a)
+
+        long_msg = "How do I implement a binary search tree in Python with proper type annotations"
+        url = messages_url(conv.id)
+        response = auth_client_a.post(url, {"content": long_msg})
+        assert response.status_code == status.HTTP_201_CREATED
+
+        conv.refresh_from_db()
+        assert len(conv.title) <= 53
+        assert conv.title.endswith("...")
+        assert not conv.title.endswith(" ...")
+        assert long_msg.startswith(conv.title.rstrip("."))
+
+    @patch("api.chat_service.OpenAI")
+    @patch("api.chat_service.ProviderGateway.generate")
+    def test_auto_title_preserves_existing_title(
+        self, mock_generate, mock_openai, auth_client_a, conversation_a, api_key
+    ):
+        mock_generate.return_value = GenerationResult(
+            text="Mocked AI response",
+            provider="openai",
+            model="gpt-5.5",
+            input_tokens=10,
+            output_tokens=20,
+            usage={"prompt_tokens": 10, "completion_tokens": 20},
+            model_input=[StoredMessage(role="user", content="Hello")],
+        )
+
+        url = messages_url(conversation_a.id)
+        response = auth_client_a.post(url, {"content": "Some new message"})
+        assert response.status_code == status.HTTP_201_CREATED
+
+        conversation_a.refresh_from_db()
+        assert conversation_a.title == "Alice's chat"
+
+    @patch("api.chat_service.OpenAI")
+    @patch("api.chat_service.ProviderGateway.generate")
+    def test_auto_title_not_set_on_provider_error(
+        self, mock_generate, mock_openai, auth_client_a, user_a, api_key
+    ):
+        mock_generate.side_effect = TemporaryProviderError("rate limited")
+
+        conv = Conversation.objects.create(user=user_a)
+
+        url = messages_url(conv.id)
+        response = auth_client_a.post(url, {"content": "Hello"})
+        assert response.status_code == status.HTTP_503_SERVICE_UNAVAILABLE
+
+        conv.refresh_from_db()
+        assert conv.title == ""
+
 
 @pytest.mark.django_db
 class TestMessageListing:

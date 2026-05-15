@@ -132,6 +132,17 @@ class MessageViewSet(
                 status=status.HTTP_502_BAD_GATEWAY,
             )
 
+        if not conversation.title:
+            stripped = user_text.strip()
+            if len(stripped) <= 50:
+                conversation.title = stripped
+            else:
+                truncated = stripped[:50]
+                if " " in truncated:
+                    truncated = truncated.rsplit(" ", 1)[0]
+                conversation.title = truncated + "..."
+            conversation.save(update_fields=["title"])
+
         return Response(
             {
                 "id": result.assistant_message_id,
