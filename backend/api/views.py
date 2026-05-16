@@ -1,11 +1,18 @@
+import asyncio
+import json
 import logging
 
-from asgiref.sync import async_to_sync
+from asgiref.sync import async_to_sync, sync_to_async
 from django.db import connection
-from rest_framework import generics, mixins, permissions, viewsets, status
+from django.http import StreamingHttpResponse
+from django.shortcuts import get_object_or_404, aget_object_or_404
+from django.utils.decorators import method_decorator
+from django.views import View
+from django.views.decorators.csrf import csrf_exempt
+from rest_framework import exceptions, generics, mixins, permissions, viewsets, status
 from rest_framework.views import APIView
 from rest_framework.response import Response
-from django.shortcuts import get_object_or_404
+from rest_framework_simplejwt.authentication import JWTAuthentication
 
 from .document_service import DocumentService
 from .models import Conversation
@@ -29,6 +36,27 @@ from .chat_service import (
     TemporaryProviderError,
     PermanentProviderError,
 )
+
+DEFAULT_SYSTEM_PROMPT = (
+    "You are an expert Senior Developer and AI Coding Assistant. "
+    "You will be provided with reference documents in the user's message. "
+    "Use them to answer when relevant; ignore them if they are not relevant. "
+    "When you draw on information from the provided documents, cite the "
+    "relevant chunks using the [1], [2], etc. notation matching their labels. "
+    "Use citations to attribute knowledge, not as verbatim quotes. "
+    "Always format your responses using Markdown. "
+    "Whenever you write code, wrap it in a markdown code block with the correct language tag. "
+    "Be brutally concise, direct, and avoid unnecessary apologies, fluff, or 'As an AI' disclaimers. "
+    "If you do not know the answer, explicitly state 'I do not know'. "
+    "Do not hallucinate."
+)
+
+
+def _sse_error(message: str, code: str | None = None) -> list[str]:
+    payload = {"type": "error", "message": message}
+    if code:
+        payload["code"] = code
+    return [f"data: {json.dumps(payload)}\n\n"]
 
 
 class HealthView(APIView):
@@ -92,8 +120,6 @@ class MessageViewSet(
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
-        provider = request.data.get("provider", "openai")
-        model_name = request.data.get("model", "gpt-5.4-mini")
         document_ids = request.data.get("document_ids")
 
         if document_ids is not None:
@@ -104,23 +130,10 @@ class MessageViewSet(
                 )
 
         config = LLMConfig(
-            provider=provider,
-            model=model_name,
-            system_prompt=(
-                "You are an expert Senior Developer and AI Coding Assistant. "
-                "You will be provided with reference documents in the user's message. "
-                "Use them to answer when relevant; ignore them if they are not relevant. "
-                "When you draw on information from the provided documents, cite the "
-                "relevant chunks using the [1], [2], etc. notation matching their labels. "
-                "Use citations to attribute knowledge, not as verbatim quotes. "
-                "Always format your responses using Markdown. "
-                "Whenever you write code, wrap it in a markdown code block with the correct language tag. "
-                "Be brutally concise, direct, and avoid unnecessary apologies, fluff, or 'As an AI' disclaimers. "
-                "If you do not know the answer, explicitly state 'I do not know'. "
-                "Do not hallucinate."
-            ),
+            provider=request.data.get("provider", "openai"),
+            model=request.data.get("model", "gpt-5.4-mini"),
+            system_prompt=DEFAULT_SYSTEM_PROMPT,
         )
-
         service = ChatService()
 
         try:
@@ -155,14 +168,7 @@ class MessageViewSet(
             )
 
         if not conversation.title:
-            stripped = user_text.strip()
-            if len(stripped) <= 50:
-                conversation.title = stripped
-            else:
-                truncated = stripped[:50]
-                if " " in truncated:
-                    truncated = truncated.rsplit(" ", 1)[0]
-                conversation.title = truncated + "..."
+            conversation.title = ChatService._compute_title(user_text)
             conversation.save(update_fields=["title"])
 
         return Response(
@@ -176,6 +182,96 @@ class MessageViewSet(
             },
             status=status.HTTP_201_CREATED,
         )
+
+
+@method_decorator(csrf_exempt, name="dispatch")
+class MessageStreamView(View):
+    async def post(self, request, conversation_pk):
+        auth = JWTAuthentication()
+        try:
+            auth_result = await sync_to_async(auth.authenticate)(request)
+            if auth_result is None:
+                return StreamingHttpResponse(
+                    _sse_error("Authentication required", "auth_required"),
+                    content_type="text/event-stream",
+                    status=401,
+                )
+            request.user = auth_result[0]
+        except exceptions.AuthenticationFailed as e:
+            return StreamingHttpResponse(
+                _sse_error(str(e), "auth_failed"),
+                content_type="text/event-stream",
+                status=401,
+            )
+
+        conversation = await aget_object_or_404(
+            Conversation, pk=conversation_pk, user=request.user
+        )
+
+        try:
+            body = json.loads(request.body)
+        except json.JSONDecodeError:
+            return StreamingHttpResponse(
+                _sse_error("Invalid JSON body", "invalid_json"),
+                content_type="text/event-stream",
+                status=400,
+            )
+
+        user_text = body.get("content")
+        if not user_text:
+            return StreamingHttpResponse(
+                _sse_error("content is required", "missing_content"),
+                content_type="text/event-stream",
+                status=400,
+            )
+
+        document_ids = body.get("document_ids")
+        if document_ids is not None and not isinstance(document_ids, list):
+            return StreamingHttpResponse(
+                _sse_error("document_ids must be a list", "invalid_document_ids"),
+                content_type="text/event-stream",
+                status=400,
+            )
+
+        config = LLMConfig(
+            provider=body.get("provider", "openai"),
+            model=body.get("model", "gpt-5.4-mini"),
+            system_prompt=DEFAULT_SYSTEM_PROMPT,
+        )
+        service = ChatService()
+
+        async def event_generator():
+            try:
+                async for event in service.generate_reply_stream(
+                    user=request.user,
+                    session_id=str(conversation.id),
+                    user_text=user_text,
+                    config=config,
+                    document_ids=document_ids,
+                ):
+                    payload = {"type": event.type}
+                    if event.type == "token":
+                        payload["content"] = event.content
+                    elif event.type == "done":
+                        payload["message_id"] = event.message_id
+                        payload["title"] = event.title
+                        payload["usage"] = event.usage
+                        payload["provider"] = event.provider
+                        payload["model"] = event.model
+                    elif event.type == "error":
+                        payload["message"] = event.error_message
+                        if event.error_code:
+                            payload["code"] = event.error_code
+                    yield f"data: {json.dumps(payload)}\n\n"
+            except asyncio.CancelledError:
+                raise
+
+        response = StreamingHttpResponse(
+            event_generator(),
+            content_type="text/event-stream",
+            headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+        )
+        return response
 
 
 class UserApiKeyViewSet(viewsets.ModelViewSet):

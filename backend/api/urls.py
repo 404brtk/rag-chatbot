@@ -4,6 +4,7 @@ from .views import (
     HealthView,
     ConversationViewSet,
     MessageViewSet,
+    MessageStreamView,
     DocumentViewSet,
     RegisterView,
     UserApiKeyViewSet,
@@ -24,5 +25,10 @@ urlpatterns = [
         "conversations/<uuid:conversation_pk>/messages/",
         message_list,
         name="conversation-messages",
+    ),
+    path(
+        "conversations/<uuid:conversation_pk>/messages/stream/",
+        MessageStreamView.as_view(),
+        name="conversation-messages-stream",
     ),
 ]
