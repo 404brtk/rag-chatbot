@@ -31,7 +31,7 @@ class EmbeddingService:
             model_name = settings.EMBEDDING_MODEL
             logger.info(f"Loading embedding model: {model_name}")
             self._model = SentenceTransformer(model_name)
-            self._dimensions = self._model.get_sentence_embedding_dimension()
+            self._dimensions = self._model.get_embedding_dimension()
             logger.info(f"Embedding model loaded (dimensions={self._dimensions})")
 
             if self._dimensions != settings.EMBEDDING_DIMENSIONS:
