@@ -5,7 +5,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import openai
 import pytest
 
-from api.models import UserApiKey
+from api.models import Conversation, UserApiKey
 from api.repositories import StoredMessage
 from api.chat_service import (
     ChatService,
@@ -15,7 +15,9 @@ from api.chat_service import (
     LLMConfig,
     MissingApiKeyError,
     PermanentProviderError,
+    ProviderChunk,
     ProviderGateway,
+    StreamEvent,
     TemporaryProviderError,
     TokenCounter,
 )
@@ -344,6 +346,75 @@ class TestProviderGateway:
                 messages=[StoredMessage(role="user", content="Hi")],
             )
 
+    @patch("api.chat_service.AsyncOpenAI")
+    async def test_stream_yields_tokens_and_usage(self, mock_openai_cls):
+        mock_client = MagicMock()
+        mock_openai_cls.return_value = mock_client
+
+        chunk_a = MagicMock(usage=None, choices=[MagicMock()])
+        chunk_a.choices[0].delta.content = "Hello"
+        chunk_b = MagicMock(usage=None, choices=[MagicMock()])
+        chunk_b.choices[0].delta.content = " world"
+        usage_chunk = MagicMock(choices=[], usage=MagicMock())
+        usage_chunk.usage.model_dump.return_value = {
+            "prompt_tokens": 10,
+            "completion_tokens": 3,
+        }
+
+        async def fake_stream():
+            for c in [chunk_a, chunk_b, usage_chunk]:
+                yield c
+
+        mock_client.chat.completions.create = AsyncMock(return_value=fake_stream())
+
+        gateway = ProviderGateway()
+        chunks = [
+            c
+            async for c in gateway.generate_stream(
+                api_key="sk-test",
+                config=DEFAULT_CONFIG,
+                messages=[StoredMessage(role="user", content="Hi")],
+            )
+        ]
+
+        text_chunks = [c for c in chunks if c.text]
+        usage_chunks = [c for c in chunks if c.usage]
+        assert len(text_chunks) == 2
+        assert text_chunks[0] == ProviderChunk(text="Hello")
+        assert text_chunks[1] == ProviderChunk(text=" world")
+        assert len(usage_chunks) == 1
+        assert usage_chunks[0].usage["prompt_tokens"] == 10
+
+    @patch("api.chat_service.AsyncOpenAI")
+    async def test_stream_maps_openai_errors(self, mock_openai_cls):
+        mock_client = MagicMock()
+        mock_openai_cls.return_value = mock_client
+        mock_client.chat.completions.create = AsyncMock(
+            side_effect=openai.RateLimitError(
+                message="rate limited", response=MagicMock(), body=None
+            )
+        )
+
+        gateway = ProviderGateway()
+        with pytest.raises(TemporaryProviderError):
+            async for _ in gateway.generate_stream(
+                api_key="sk-test",
+                config=DEFAULT_CONFIG,
+                messages=[StoredMessage(role="user", content="Hi")],
+            ):
+                pass
+
+    async def test_stream_raises_for_unsupported_provider(self):
+        gateway = ProviderGateway()
+        config = replace(DEFAULT_CONFIG, provider="unsupported")
+        with pytest.raises(PermanentProviderError, match="Unsupported provider"):
+            async for _ in gateway.generate_stream(
+                api_key="sk-test",
+                config=config,
+                messages=[StoredMessage(role="user", content="Hi")],
+            ):
+                pass
+
 
 class TestFormatRagContext:
     def test_formats_single_chunk_with_label_and_source(self):
@@ -372,6 +443,29 @@ class TestFormatRagContext:
 
     def test_returns_empty_string_for_empty_list(self):
         assert ChatService._format_rag_context([]) == ""
+
+
+class TestComputeTitle:
+    def test_short_text_returned_as_is(self):
+        assert ChatService._compute_title("Hello world") == "Hello world"
+
+    def test_exactly_50_chars_returned_as_is(self):
+        text = "a" * 50
+        assert ChatService._compute_title(text) == text
+
+    def test_long_text_truncates_at_word_boundary(self):
+        text = "This is a long sentence that exceeds fifty characters by a lot"
+        result = ChatService._compute_title(text)
+        assert result.endswith("...")
+        assert len(result) <= 53
+        assert not result.rstrip(".").endswith(" ")
+
+    def test_long_text_without_spaces_truncates_at_50(self):
+        text = "a" * 60
+        assert ChatService._compute_title(text) == "a" * 50 + "..."
+
+    def test_strips_whitespace(self):
+        assert ChatService._compute_title("  Hello  ") == "Hello"
 
 
 class TestChatServiceGenerateReply:
@@ -684,3 +778,297 @@ class TestChatServiceGenerateReply:
         service = ChatService(repository=self.mock_repo)
         with pytest.raises(MissingApiKeyError, match="No API key configured"):
             await service._resolve_api_key(self.mock_user, "openai")
+
+
+class TestChatServiceGenerateReplyStream:
+    def setup_method(self):
+        self.mock_repo = MagicMock()
+        self.mock_repo.list_messages = AsyncMock(return_value=[])
+        self.mock_repo.append_message = AsyncMock(
+            side_effect=lambda **kwargs: MagicMock(id=f"msg-{kwargs['role']}")
+        )
+        self.mock_user = MagicMock()
+
+    async def _collect_events(self, service, **kwargs):
+        return [e async for e in service.generate_reply_stream(**kwargs)]
+
+    @pytest.mark.django_db(transaction=True)
+    @patch("api.chat_service.ProviderGateway.generate_stream")
+    @patch.object(ChatService, "_resolve_api_key", return_value="sk-test")
+    async def test_yields_tokens_and_done_event(
+        self, mock_resolve, mock_stream, user_a
+    ):
+        async def gen():
+            yield ProviderChunk(text="Hello")
+            yield ProviderChunk(text=" world")
+
+        mock_stream.return_value = gen()
+        conversation = await Conversation.objects.acreate(
+            user=user_a, title="Existing title"
+        )
+
+        service = ChatService(repository=self.mock_repo)
+        events = await self._collect_events(
+            service,
+            user=user_a,
+            session_id=str(conversation.id),
+            user_text="Hello",
+            config=DEFAULT_CONFIG,
+        )
+
+        assert len(events) == 3
+        assert events[0] == StreamEvent(type="token", content="Hello")
+        assert events[1] == StreamEvent(type="token", content=" world")
+        assert events[2].type == "done"
+        assert events[2].message_id is not None
+        assert events[2].title is None
+        assert events[2].provider == "openai"
+        assert events[2].model == "gpt-5.5"
+
+    @pytest.mark.django_db(transaction=True)
+    @patch("api.chat_service.ProviderGateway.generate_stream")
+    @patch.object(ChatService, "_resolve_api_key", return_value="sk-test")
+    async def test_appends_user_and_assistant_messages(
+        self, mock_resolve, mock_stream, user_a
+    ):
+        async def gen():
+            yield ProviderChunk(text="Response")
+
+        mock_stream.return_value = gen()
+        conversation = await Conversation.objects.acreate(user=user_a, title="Existing")
+
+        service = ChatService(repository=self.mock_repo)
+        await self._collect_events(
+            service,
+            user=user_a,
+            session_id=str(conversation.id),
+            user_text="Hello",
+            config=DEFAULT_CONFIG,
+        )
+
+        assert self.mock_repo.append_message.call_count == 2
+        user_call = self.mock_repo.append_message.call_args_list[0][1]
+        assert user_call["role"] == "user"
+        assert user_call["content"] == "Hello"
+        assert user_call["provider"] is None
+        assert user_call["meta"]["raw_question"] == "Hello"
+
+        assistant_call = self.mock_repo.append_message.call_args_list[1][1]
+        assert assistant_call["role"] == "assistant"
+        assert assistant_call["content"] == "Response"
+        assert assistant_call["provider"] == "openai"
+        assert assistant_call["model"] == "gpt-5.5"
+
+    @pytest.mark.django_db(transaction=True)
+    @patch("api.chat_service.ProviderGateway.generate_stream")
+    @patch.object(ChatService, "_resolve_api_key", return_value="sk-test")
+    async def test_uses_provider_usage_over_estimate(
+        self, mock_resolve, mock_stream, user_a
+    ):
+        provider_usage = {
+            "prompt_tokens": 42,
+            "completion_tokens": 10,
+            "total_tokens": 52,
+        }
+
+        async def gen():
+            yield ProviderChunk(text="Response")
+            yield ProviderChunk(usage=provider_usage)
+
+        mock_stream.return_value = gen()
+        conversation = await Conversation.objects.acreate(user=user_a, title="Existing")
+
+        service = ChatService(repository=self.mock_repo)
+        events = await self._collect_events(
+            service,
+            user=user_a,
+            session_id=str(conversation.id),
+            user_text="Hello",
+            config=DEFAULT_CONFIG,
+        )
+
+        assert events[-1].usage == provider_usage
+        assistant_call = self.mock_repo.append_message.call_args_list[1][1]
+        assert assistant_call["usage"] == provider_usage
+
+    @pytest.mark.django_db(transaction=True)
+    @patch("api.chat_service.ProviderGateway.generate_stream")
+    @patch.object(ChatService, "_resolve_api_key", return_value="sk-test")
+    async def test_falls_back_to_estimated_usage(
+        self, mock_resolve, mock_stream, user_a
+    ):
+        async def gen():
+            yield ProviderChunk(text="Response")
+
+        mock_stream.return_value = gen()
+        conversation = await Conversation.objects.acreate(user=user_a, title="Existing")
+
+        service = ChatService(repository=self.mock_repo)
+        events = await self._collect_events(
+            service,
+            user=user_a,
+            session_id=str(conversation.id),
+            user_text="Hello",
+            config=DEFAULT_CONFIG,
+        )
+
+        usage = events[-1].usage
+        assert usage["prompt_tokens"] > 0
+        assert usage["completion_tokens"] > 0
+        assert "total_tokens" not in usage
+
+    @pytest.mark.django_db(transaction=True)
+    @patch("api.chat_service.ProviderGateway.generate_stream")
+    @patch.object(ChatService, "_resolve_api_key", return_value="sk-test")
+    async def test_sets_title_on_untitled_session(
+        self, mock_resolve, mock_stream, user_a
+    ):
+        async def gen():
+            yield ProviderChunk(text="Answer")
+
+        mock_stream.return_value = gen()
+        conversation = await Conversation.objects.acreate(user=user_a)
+
+        service = ChatService(repository=self.mock_repo)
+        events = await self._collect_events(
+            service,
+            user=user_a,
+            session_id=str(conversation.id),
+            user_text="Hello world this is a test",
+            config=DEFAULT_CONFIG,
+        )
+
+        assert events[-1].title == "Hello world this is a test"
+        await conversation.arefresh_from_db()
+        assert conversation.title == "Hello world this is a test"
+
+    @pytest.mark.django_db(transaction=True)
+    @patch("api.chat_service.ProviderGateway.generate_stream")
+    @patch.object(ChatService, "_resolve_api_key", return_value="sk-test")
+    async def test_preserves_existing_title(self, mock_resolve, mock_stream, user_a):
+        async def gen():
+            yield ProviderChunk(text="Answer")
+
+        mock_stream.return_value = gen()
+        conversation = await Conversation.objects.acreate(user=user_a, title="Original")
+
+        service = ChatService(repository=self.mock_repo)
+        events = await self._collect_events(
+            service,
+            user=user_a,
+            session_id=str(conversation.id),
+            user_text="New question",
+            config=DEFAULT_CONFIG,
+        )
+
+        assert events[-1].title is None
+        await conversation.arefresh_from_db()
+        assert conversation.title == "Original"
+
+    @pytest.mark.django_db(transaction=True)
+    @patch("api.chat_service.ProviderGateway.generate_stream")
+    @patch.object(ChatService, "_resolve_api_key", return_value="sk-test")
+    async def test_updates_last_message_at(self, mock_resolve, mock_stream, user_a):
+        async def gen():
+            yield ProviderChunk(text="Answer")
+
+        mock_stream.return_value = gen()
+        conversation = await Conversation.objects.acreate(user=user_a, title="Existing")
+        original_ts = conversation.last_message_at
+
+        service = ChatService(repository=self.mock_repo)
+        await self._collect_events(
+            service,
+            user=user_a,
+            session_id=str(conversation.id),
+            user_text="Hello",
+            config=DEFAULT_CONFIG,
+        )
+
+        await conversation.arefresh_from_db()
+        assert conversation.last_message_at > original_ts
+
+    @patch.object(
+        ChatService, "_resolve_api_key", side_effect=MissingApiKeyError("No key")
+    )
+    async def test_error_event_on_missing_api_key(self, mock_resolve):
+        service = ChatService(repository=self.mock_repo)
+        events = await self._collect_events(
+            service,
+            user=self.mock_user,
+            session_id="test-session",
+            user_text="Hello",
+            config=DEFAULT_CONFIG,
+        )
+
+        assert len(events) == 1
+        assert events[0].type == "error"
+        assert events[0].error_code == "missing_api_key"
+
+    async def test_error_event_on_empty_input(self):
+        service = ChatService(repository=self.mock_repo)
+        events = await self._collect_events(
+            service,
+            user=self.mock_user,
+            session_id="test-session",
+            user_text="",
+            config=DEFAULT_CONFIG,
+        )
+
+        assert len(events) == 1
+        assert events[0].type == "error"
+        assert events[0].error_code == "invalid_input"
+
+    @pytest.mark.django_db(transaction=True)
+    @patch("api.chat_service.ProviderGateway.generate_stream")
+    @patch.object(ChatService, "_resolve_api_key", return_value="sk-test")
+    async def test_error_event_on_provider_failure(
+        self, mock_resolve, mock_stream, user_a
+    ):
+        async def gen():
+            yield ProviderChunk(text="Hel")
+            raise TemporaryProviderError("rate limited")
+
+        mock_stream.return_value = gen()
+        conversation = await Conversation.objects.acreate(user=user_a)
+
+        service = ChatService(repository=self.mock_repo)
+        events = await self._collect_events(
+            service,
+            user=user_a,
+            session_id=str(conversation.id),
+            user_text="Hello",
+            config=DEFAULT_CONFIG,
+        )
+
+        assert len(events) == 2
+        assert events[0] == StreamEvent(type="token", content="Hel")
+        assert events[1].type == "error"
+        assert events[1].error_code == "provider_temporary"
+
+    @pytest.mark.django_db(transaction=True)
+    @patch("api.chat_service.ProviderGateway.generate_stream")
+    @patch.object(ChatService, "_resolve_api_key", return_value="sk-test")
+    async def test_unexpected_exception_yields_internal_error(
+        self, mock_resolve, mock_stream, user_a
+    ):
+        async def gen():
+            raise RuntimeError("boom")
+            yield  # noqa: unreachable - makes this an async generator
+
+        mock_stream.return_value = gen()
+        conversation = await Conversation.objects.acreate(user=user_a)
+
+        service = ChatService(repository=self.mock_repo)
+        events = await self._collect_events(
+            service,
+            user=user_a,
+            session_id=str(conversation.id),
+            user_text="Hello",
+            config=DEFAULT_CONFIG,
+        )
+
+        assert len(events) == 1
+        assert events[0].type == "error"
+        assert events[0].error_code == "internal_error"
+        assert events[0].error_message == "Internal server error"
