@@ -21,7 +21,7 @@ def _embedding_settings(settings):
 def mock_sentence_transformer():
     with patch("sentence_transformers.SentenceTransformer") as mock_st:
         mock_instance = MagicMock()
-        mock_instance.get_sentence_embedding_dimension.return_value = 384
+        mock_instance.get_embedding_dimension.return_value = 384
 
         mock_array = MagicMock()
         mock_array.tolist.return_value = [[0.1] * 384, [0.2] * 384]
@@ -55,7 +55,7 @@ class TestEmbeddingService:
 
         dim = service.dimensions
         assert dim == 384
-        mock_sentence_transformer.get_sentence_embedding_dimension.assert_called_once()
+        mock_sentence_transformer.get_embedding_dimension.assert_called_once()
         assert service._model is not None
 
     def test_embed_texts(self, mock_sentence_transformer):
@@ -94,7 +94,7 @@ class TestEmbeddingService:
 
         with patch("sentence_transformers.SentenceTransformer") as mock_st:
             mock_instance = MagicMock()
-            mock_instance.get_sentence_embedding_dimension.return_value = 384
+            mock_instance.get_embedding_dimension.return_value = 384
             mock_st.return_value = mock_instance
 
             service = EmbeddingService.get_instance()
@@ -105,12 +105,12 @@ class TestEmbeddingService:
         service = EmbeddingService.get_instance()
 
         service.dimensions
-        mock_sentence_transformer.get_sentence_embedding_dimension.assert_called_once()
+        mock_sentence_transformer.get_embedding_dimension.assert_called_once()
 
         service.embed_texts(["Another text"])
         mock_sentence_transformer.encode.assert_called_once()
 
-        mock_sentence_transformer.get_sentence_embedding_dimension.assert_called_once()
+        mock_sentence_transformer.get_embedding_dimension.assert_called_once()
 
     def test_embed_texts_with_unicode(self, mock_sentence_transformer):
         service = EmbeddingService.get_instance()
@@ -167,7 +167,7 @@ class TestEmbeddingService:
         assert not errors
         assert len(dimensions) == 5
         assert all(d == 384 for d in dimensions)
-        mock_sentence_transformer.get_sentence_embedding_dimension.assert_called_once()
+        mock_sentence_transformer.get_embedding_dimension.assert_called_once()
 
     def test_missing_model_setting_raises(self, settings):
         del settings.EMBEDDING_MODEL
