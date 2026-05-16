@@ -1,3 +1,4 @@
+import logging
 from dataclasses import dataclass
 
 from django.conf import settings
@@ -11,6 +12,8 @@ from .chunking import (
 )
 from .embeddings import EmbeddingService
 from .models import Document, DocumentChunk
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True, slots=True)
@@ -118,15 +121,27 @@ class DocumentService:
 
         qs = DocumentChunk.objects.filter(document__user=user)
 
+        logger.debug(f"Chunks for user: {qs.count()}")
+
         if document_ids:
             qs = qs.filter(document_id__in=document_ids)
 
-        results = (
-            qs.annotate(distance=CosineDistance("embedding", query_embedding))
-            .filter(distance__lt=settings.RAG_SIMILARITY_THRESHOLD)
+        annotated = qs.annotate(distance=CosineDistance("embedding", query_embedding))
+        logger.debug(
+            f"Threshold: {settings.RAG_SIMILARITY_THRESHOLD:.4f}, "
+            f"top_k: {settings.RAG_TOP_K}"
+        )
+        logger.debug(
+            f"Distances (first 20): "
+            f"{list(annotated.values_list('distance', 'content')[:20])}"
+        )
+
+        results = list(
+            annotated.filter(distance__lt=settings.RAG_SIMILARITY_THRESHOLD)
             .select_related("document")
             .order_by("distance")[: settings.RAG_TOP_K]
         )
+        logger.debug(f"After threshold filter: {len(results)} results")
 
         return [
             SearchResult(
