@@ -4,11 +4,12 @@ from typing import Any, Literal
 
 import openai
 import tiktoken
-from openai import OpenAI
+from asgiref.sync import sync_to_async
+from openai import AsyncOpenAI
 
 from .document_service import DocumentService
 from .models import UserApiKey
-from .repositories import DjangoMessageRepository, StoredMessage
+from .repositories import AsyncDjangoMessageRepository, StoredMessage
 
 logger = logging.getLogger(__name__)
 
@@ -174,16 +175,16 @@ class HistoryWindow:
 
 
 class ProviderGateway:
-    def _generate_openai(
+    async def _generate_openai(
         self,
         *,
         api_key: str,
         config: LLMConfig,
         messages: list[StoredMessage],
     ) -> GenerationResult:
-        client = OpenAI(api_key=api_key, timeout=30.0, max_retries=2)
+        client = AsyncOpenAI(api_key=api_key, timeout=30.0, max_retries=2)
         try:
-            response = client.chat.completions.create(
+            response = await client.chat.completions.create(
                 model=config.model,
                 messages=[{"role": "system", "content": config.system_prompt}]
                 + [{"role": m.role, "content": m.content} for m in messages],
@@ -214,7 +215,7 @@ class ProviderGateway:
             model_input=list(messages),
         )
 
-    def generate(
+    async def generate(
         self,
         *,
         api_key: str,
@@ -222,23 +223,23 @@ class ProviderGateway:
         messages: list[StoredMessage],
     ) -> GenerationResult:
         if config.provider == "openai":
-            return self._generate_openai(
+            return await self._generate_openai(
                 api_key=api_key, config=config, messages=messages
             )
         raise PermanentProviderError(f"Unsupported provider: {config.provider}")
 
 
 class ChatService:
-    def __init__(self, repository: DjangoMessageRepository | None = None) -> None:
-        self.repository = repository or DjangoMessageRepository()
+    def __init__(self, repository: AsyncDjangoMessageRepository | None = None) -> None:
+        self.repository = repository or AsyncDjangoMessageRepository()
         self.counter = TokenCounter()
         self.window = HistoryWindow()
         self.gateway = ProviderGateway()
         self.document_service = DocumentService()
 
-    def _resolve_api_key(self, user, provider: str) -> str:
+    async def _resolve_api_key(self, user, provider: str) -> str:
         try:
-            key_record = UserApiKey.objects.get(user=user, provider=provider)
+            key_record = await UserApiKey.objects.aget(user=user, provider=provider)
         except UserApiKey.DoesNotExist:
             raise MissingApiKeyError(
                 f"No API key configured for provider '{provider}'. "
@@ -256,7 +257,7 @@ class ChatService:
             )
         return "\n\n".join(chunks)
 
-    def generate_reply(
+    async def generate_reply(
         self,
         *,
         user,
@@ -274,11 +275,10 @@ class ChatService:
         context_chunks = None
 
         if document_ids is not None:
-            search_results = self.document_service.search(
-                user=user,
-                query=clean_user_text,
-                document_ids=document_ids or None,
-            )
+            search_results = await sync_to_async(
+                self.document_service.search,
+                thread_sensitive=True,
+            )(user=user, query=clean_user_text, document_ids=document_ids or None)
             if search_results:
                 context_block = self._format_rag_context(search_results)
                 user_message = f"<CONTEXT>\n{context_block}\n</CONTEXT>\n\n<QUESTION>\n{clean_user_text}\n</QUESTION>"
@@ -294,9 +294,9 @@ class ChatService:
                     for i, r in enumerate(search_results, 1)
                 ]
 
-        api_key = self._resolve_api_key(user, config.provider)
+        api_key = await self._resolve_api_key(user, config.provider)
 
-        history = self.repository.list_messages(
+        history = await self.repository.list_messages(
             session_id=session_id, limit=config.history_limit
         )
         candidate_messages = [
@@ -313,7 +313,7 @@ class ChatService:
         )
 
         try:
-            result = self.gateway.generate(
+            result = await self.gateway.generate(
                 api_key=api_key, config=config, messages=trimmed
             )
         except ChatServiceError:
@@ -335,7 +335,7 @@ class ChatService:
         if context_chunks:
             user_meta["context_chunks"] = context_chunks
 
-        user_msg, assistant_msg = self.repository.append_message_pair(
+        user_msg, assistant_msg = await self.repository.append_message_pair(
             session_id=session_id,
             user_content=user_message,
             assistant_content=result.text,

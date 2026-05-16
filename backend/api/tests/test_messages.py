@@ -1,5 +1,5 @@
 import uuid
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 
 import pytest
 from django.contrib.auth import get_user_model
@@ -32,8 +32,8 @@ def conversation_b(user_b):
 
 @pytest.mark.django_db
 class TestMessageCreation:
-    @patch("api.chat_service.OpenAI")
-    @patch("api.chat_service.ProviderGateway.generate")
+    @patch("api.chat_service.AsyncOpenAI")
+    @patch("api.chat_service.ProviderGateway.generate", new_callable=AsyncMock)
     def test_create_message_in_own_conversation(
         self, mock_generate, mock_openai, auth_client_a, conversation_a, api_key
     ):
@@ -97,8 +97,8 @@ class TestMessageCreation:
         response = auth_client_a.post(url, {"content": "Hello"})
         assert response.status_code == status.HTTP_404_NOT_FOUND
 
-    @patch("api.chat_service.OpenAI")
-    @patch("api.chat_service.ProviderGateway.generate")
+    @patch("api.chat_service.AsyncOpenAI")
+    @patch("api.chat_service.ProviderGateway.generate", new_callable=AsyncMock)
     def test_ai_temporary_error_returns_503(
         self, mock_generate, mock_openai, auth_client_a, conversation_a, api_key
     ):
@@ -107,8 +107,8 @@ class TestMessageCreation:
         response = auth_client_a.post(url, {"content": "Hello"})
         assert response.status_code == status.HTTP_503_SERVICE_UNAVAILABLE
 
-    @patch("api.chat_service.OpenAI")
-    @patch("api.chat_service.ProviderGateway.generate")
+    @patch("api.chat_service.AsyncOpenAI")
+    @patch("api.chat_service.ProviderGateway.generate", new_callable=AsyncMock)
     def test_ai_permanent_error_returns_502(
         self, mock_generate, mock_openai, auth_client_a, conversation_a, api_key
     ):
@@ -123,8 +123,8 @@ class TestMessageCreation:
         assert response.status_code == status.HTTP_403_FORBIDDEN
         assert "No API key configured" in response.data["error"]
 
-    @patch("api.chat_service.OpenAI")
-    @patch("api.chat_service.ProviderGateway.generate")
+    @patch("api.chat_service.AsyncOpenAI")
+    @patch("api.chat_service.ProviderGateway.generate", new_callable=AsyncMock)
     def test_auto_title_from_short_message(
         self, mock_generate, mock_openai, auth_client_a, user_a, api_key
     ):
@@ -147,8 +147,8 @@ class TestMessageCreation:
         conv.refresh_from_db()
         assert conv.title == "Hello"
 
-    @patch("api.chat_service.OpenAI")
-    @patch("api.chat_service.ProviderGateway.generate")
+    @patch("api.chat_service.AsyncOpenAI")
+    @patch("api.chat_service.ProviderGateway.generate", new_callable=AsyncMock)
     def test_auto_title_truncates_long_message(
         self, mock_generate, mock_openai, auth_client_a, user_a, api_key
     ):
@@ -175,8 +175,8 @@ class TestMessageCreation:
         assert not conv.title.endswith(" ...")
         assert long_msg.startswith(conv.title.rstrip("."))
 
-    @patch("api.chat_service.OpenAI")
-    @patch("api.chat_service.ProviderGateway.generate")
+    @patch("api.chat_service.AsyncOpenAI")
+    @patch("api.chat_service.ProviderGateway.generate", new_callable=AsyncMock)
     def test_auto_title_preserves_existing_title(
         self, mock_generate, mock_openai, auth_client_a, conversation_a, api_key
     ):
@@ -197,8 +197,8 @@ class TestMessageCreation:
         conversation_a.refresh_from_db()
         assert conversation_a.title == "Alice's chat"
 
-    @patch("api.chat_service.OpenAI")
-    @patch("api.chat_service.ProviderGateway.generate")
+    @patch("api.chat_service.AsyncOpenAI")
+    @patch("api.chat_service.ProviderGateway.generate", new_callable=AsyncMock)
     def test_auto_title_not_set_on_provider_error(
         self, mock_generate, mock_openai, auth_client_a, user_a, api_key
     ):

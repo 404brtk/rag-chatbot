@@ -2,6 +2,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import Any
 
+from asgiref.sync import sync_to_async
 from django.db import transaction
 from django.utils import timezone
 
@@ -17,24 +18,14 @@ class StoredMessage:
 
 
 class DjangoMessageRepository:
-    def list_messages(
-        self,
-        session_id: str,
-        *,
-        limit: int | None = None,
-    ) -> list[StoredMessage]:
-        qs = (
+    def _build_base_queryset(self, session_id: str):
+        return (
             Message.objects.filter(conversation_id=session_id)
             .only("role", "content", "created_at", "meta", "id")
             .order_by("-created_at")
         )
 
-        if limit is not None:
-            qs = qs[:limit]
-
-        rows = list(qs)
-        rows.reverse()
-
+    def _rows_to_stored_messages(self, rows) -> list[StoredMessage]:
         return [
             StoredMessage(
                 role="assistant" if row.role == Message.Role.AI else row.role,
@@ -44,6 +35,22 @@ class DjangoMessageRepository:
             )
             for row in rows
         ]
+
+    def list_messages(
+        self,
+        session_id: str,
+        *,
+        limit: int | None = None,
+    ) -> list[StoredMessage]:
+        qs = self._build_base_queryset(session_id)
+
+        if limit is not None:
+            qs = qs[:limit]
+
+        rows = list(qs)
+        rows.reverse()
+
+        return self._rows_to_stored_messages(rows)
 
     def append_message(
         self,
@@ -58,7 +65,7 @@ class DjangoMessageRepository:
     ) -> Message:
         db_role = Message.Role.AI if role == "assistant" else Message.Role.USER
 
-        message = Message.objects.create(
+        return Message.objects.create(
             conversation=session,
             role=db_role,
             content=content,
@@ -67,8 +74,6 @@ class DjangoMessageRepository:
             usage=usage,
             meta=meta or {},
         )
-
-        return message
 
     def append_message_pair(
         self,
@@ -108,3 +113,73 @@ class DjangoMessageRepository:
             session.save(update_fields=["last_message_at"])
 
             return user_msg, assistant_msg
+
+
+class AsyncDjangoMessageRepository:
+    def __init__(self) -> None:
+        self._sync_repo = DjangoMessageRepository()
+
+    async def list_messages(
+        self,
+        session_id: str,
+        *,
+        limit: int | None = None,
+    ) -> list[StoredMessage]:
+        qs = self._sync_repo._build_base_queryset(session_id)
+
+        if limit is not None:
+            qs = qs[:limit]
+
+        rows = [row async for row in qs]
+        rows.reverse()
+
+        return self._sync_repo._rows_to_stored_messages(rows)
+
+    async def append_message(
+        self,
+        *,
+        session: Conversation,
+        role: str,
+        content: str,
+        provider: str | None,
+        model: str | None,
+        usage: dict[str, Any] | None,
+        meta: dict[str, Any] | None,
+    ) -> Message:
+        db_role = Message.Role.AI if role == "assistant" else Message.Role.USER
+
+        return await Message.objects.acreate(
+            conversation=session,
+            role=db_role,
+            content=content,
+            provider=provider,
+            model=model,
+            usage=usage,
+            meta=meta or {},
+        )
+
+    async def append_message_pair(
+        self,
+        *,
+        session_id: str,
+        user_content: str,
+        assistant_content: str,
+        provider: str,
+        model: str,
+        usage: dict[str, Any] | None,
+        user_meta: dict[str, Any] | None,
+        assistant_meta: dict[str, Any] | None,
+    ) -> tuple[Message, Message]:
+        return await sync_to_async(
+            self._sync_repo.append_message_pair,
+            thread_sensitive=True,
+        )(
+            session_id=session_id,
+            user_content=user_content,
+            assistant_content=assistant_content,
+            provider=provider,
+            model=model,
+            usage=usage,
+            user_meta=user_meta,
+            assistant_meta=assistant_meta,
+        )

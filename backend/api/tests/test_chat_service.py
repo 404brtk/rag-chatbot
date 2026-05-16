@@ -1,6 +1,6 @@
 from dataclasses import replace
 from datetime import datetime, timezone
-from unittest.mock import MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import openai
 import pytest
@@ -257,8 +257,8 @@ class TestHistoryWindowFitToTokenLimit:
 
 
 class TestProviderGateway:
-    @patch("api.chat_service.OpenAI")
-    def test_routes_to_openai_for_openai_provider(self, mock_openai_cls):
+    @patch("api.chat_service.AsyncOpenAI")
+    async def test_routes_to_openai_for_openai_provider(self, mock_openai_cls):
         mock_client = MagicMock()
         mock_openai_cls.return_value = mock_client
 
@@ -269,10 +269,10 @@ class TestProviderGateway:
             "prompt_tokens": 5,
             "completion_tokens": 2,
         }
-        mock_client.chat.completions.create.return_value = mock_response
+        mock_client.chat.completions.create = AsyncMock(return_value=mock_response)
 
         gateway = ProviderGateway()
-        result = gateway.generate(
+        result = await gateway.generate(
             api_key="sk-test",
             config=DEFAULT_CONFIG,
             messages=[StoredMessage(role="user", content="Hi")],
@@ -282,12 +282,12 @@ class TestProviderGateway:
         assert result.text == "Hello!"
         mock_client.chat.completions.create.assert_called_once()
 
-    def test_raises_permanent_error_for_unsupported_provider(self):
+    async def test_raises_permanent_error_for_unsupported_provider(self):
         gateway = ProviderGateway()
         config = replace(DEFAULT_CONFIG, provider="unsupported")
 
         with pytest.raises(PermanentProviderError, match="Unsupported provider"):
-            gateway.generate(
+            await gateway.generate(
                 api_key="sk-test",
                 config=config,
                 messages=[StoredMessage(role="user", content="Hi")],
@@ -328,8 +328,8 @@ class TestProviderGateway:
             ),
         ],
     )
-    @patch("api.chat_service.OpenAI")
-    def test_maps_openai_errors(
+    @patch("api.chat_service.AsyncOpenAI")
+    async def test_maps_openai_errors(
         self, mock_openai_cls, error_class, expected_exception, kwargs
     ):
         mock_client = MagicMock()
@@ -338,7 +338,7 @@ class TestProviderGateway:
 
         gateway = ProviderGateway()
         with pytest.raises(expected_exception):
-            gateway.generate(
+            await gateway.generate(
                 api_key="sk-test",
                 config=DEFAULT_CONFIG,
                 messages=[StoredMessage(role="user", content="Hi")],
@@ -377,16 +377,20 @@ class TestFormatRagContext:
 class TestChatServiceGenerateReply:
     def setup_method(self):
         self.mock_repo = MagicMock()
+        self.mock_repo.list_messages = AsyncMock(return_value=[])
+        self.mock_repo.append_message_pair = AsyncMock(
+            return_value=(MagicMock(id="user-id"), MagicMock(id="assistant-id"))
+        )
         self.mock_user = MagicMock()
 
     @pytest.mark.parametrize("user_text", ["", "   \t\n  "])
-    @patch("api.chat_service.ProviderGateway.generate")
-    def test_raises_invalid_input_on_empty_or_whitespace_text(
+    @patch("api.chat_service.ProviderGateway.generate", new_callable=AsyncMock)
+    async def test_raises_invalid_input_on_empty_or_whitespace_text(
         self, mock_generate, user_text
     ):
         service = ChatService(repository=self.mock_repo)
         with pytest.raises(InvalidInputError, match="cannot be empty"):
-            service.generate_reply(
+            await service.generate_reply(
                 user=self.mock_user,
                 session_id="test-session",
                 user_text=user_text,
@@ -398,24 +402,26 @@ class TestChatServiceGenerateReply:
         "error_class",
         [TemporaryProviderError, PermanentProviderError],
     )
-    @patch("api.chat_service.ProviderGateway.generate")
+    @patch("api.chat_service.ProviderGateway.generate", new_callable=AsyncMock)
     @patch.object(ChatService, "_resolve_api_key", return_value="sk-test")
-    def test_propagates_provider_errors(self, mock_resolve, mock_generate, error_class):
+    async def test_propagates_provider_errors(
+        self, mock_resolve, mock_generate, error_class
+    ):
         mock_generate.side_effect = error_class("service error")
         self.mock_repo.list_messages.return_value = []
 
         service = ChatService(repository=self.mock_repo)
         with pytest.raises(error_class):
-            service.generate_reply(
+            await service.generate_reply(
                 user=self.mock_user,
                 session_id="test-session",
                 user_text="Hello",
                 config=DEFAULT_CONFIG,
             )
 
-    @patch("api.chat_service.ProviderGateway.generate")
+    @patch("api.chat_service.ProviderGateway.generate", new_callable=AsyncMock)
     @patch.object(ChatService, "_resolve_api_key", return_value="sk-test")
-    def test_strips_whitespace_from_user_text(self, mock_resolve, mock_generate):
+    async def test_strips_whitespace_from_user_text(self, mock_resolve, mock_generate):
         mock_generate.return_value = GenerationResult(
             text="Hi!",
             provider="openai",
@@ -432,7 +438,7 @@ class TestChatServiceGenerateReply:
         )
 
         service = ChatService(repository=self.mock_repo)
-        service.generate_reply(
+        await service.generate_reply(
             user=self.mock_user,
             session_id="test-session",
             user_text="  Hello  ",
@@ -442,9 +448,9 @@ class TestChatServiceGenerateReply:
         call_kwargs = self.mock_repo.append_message_pair.call_args[1]
         assert call_kwargs["user_content"] == "Hello"
 
-    @patch("api.chat_service.ProviderGateway.generate")
+    @patch("api.chat_service.ProviderGateway.generate", new_callable=AsyncMock)
     @patch.object(ChatService, "_resolve_api_key", return_value="sk-test")
-    def test_passes_history_and_new_message_to_window(
+    async def test_passes_history_and_new_message_to_window(
         self, mock_resolve, mock_generate
     ):
         mock_generate.return_value = GenerationResult(
@@ -464,7 +470,7 @@ class TestChatServiceGenerateReply:
         )
 
         service = ChatService(repository=self.mock_repo)
-        service.generate_reply(
+        await service.generate_reply(
             user=self.mock_user,
             session_id="test-session",
             user_text="New question",
@@ -477,9 +483,11 @@ class TestChatServiceGenerateReply:
         assert len(user_messages) == 1
         assert "New question" in user_messages[0].content
 
-    @patch("api.chat_service.ProviderGateway.generate")
+    @patch("api.chat_service.ProviderGateway.generate", new_callable=AsyncMock)
     @patch.object(ChatService, "_resolve_api_key", return_value="sk-test")
-    def test_appends_message_pair_to_repository(self, mock_resolve, mock_generate):
+    async def test_appends_message_pair_to_repository(
+        self, mock_resolve, mock_generate
+    ):
         mock_generate.return_value = GenerationResult(
             text="Response text",
             provider="openai",
@@ -500,7 +508,7 @@ class TestChatServiceGenerateReply:
         )
 
         service = ChatService(repository=self.mock_repo)
-        result = service.generate_reply(
+        result = await service.generate_reply(
             user=self.mock_user,
             session_id="test-session",
             user_text="Hello",
@@ -511,10 +519,10 @@ class TestChatServiceGenerateReply:
         assert result.assistant_message_id == "assistant-uuid"
         self.mock_repo.append_message_pair.assert_called_once()
 
-    @patch("api.chat_service.ProviderGateway.generate")
+    @patch("api.chat_service.ProviderGateway.generate", new_callable=AsyncMock)
     @patch.object(ChatService, "_resolve_api_key", return_value="sk-test")
     @patch("api.chat_service.DocumentService")
-    def test_injects_context_tags_when_search_has_results(
+    async def test_injects_context_tags_when_search_has_results(
         self, mock_doc_svc_cls, mock_resolve, mock_generate
     ):
         mock_doc_svc_cls.return_value.search.return_value = [
@@ -536,7 +544,7 @@ class TestChatServiceGenerateReply:
         )
 
         service = ChatService(repository=self.mock_repo)
-        service.generate_reply(
+        await service.generate_reply(
             user=self.mock_user,
             session_id="test-session",
             user_text="Hello",
@@ -554,10 +562,10 @@ class TestChatServiceGenerateReply:
         assert "Hello" in user_content
         assert "</QUESTION>" in user_content
 
-    @patch("api.chat_service.ProviderGateway.generate")
+    @patch("api.chat_service.ProviderGateway.generate", new_callable=AsyncMock)
     @patch.object(ChatService, "_resolve_api_key", return_value="sk-test")
     @patch("api.chat_service.DocumentService")
-    def test_includes_context_chunks_and_raw_question_in_user_meta(
+    async def test_includes_context_chunks_and_raw_question_in_user_meta(
         self, mock_doc_svc_cls, mock_resolve, mock_generate
     ):
         mock_doc_svc_cls.return_value.search.return_value = [
@@ -580,7 +588,7 @@ class TestChatServiceGenerateReply:
         )
 
         service = ChatService(repository=self.mock_repo)
-        service.generate_reply(
+        await service.generate_reply(
             user=self.mock_user,
             session_id="test-session",
             user_text="  Question  ",
@@ -600,10 +608,10 @@ class TestChatServiceGenerateReply:
         assert user_meta["context_chunks"][1]["index"] == 2
         assert user_meta["context_chunks"][1]["content"] == "Info B"
 
-    @patch("api.chat_service.ProviderGateway.generate")
+    @patch("api.chat_service.ProviderGateway.generate", new_callable=AsyncMock)
     @patch.object(ChatService, "_resolve_api_key", return_value="sk-test")
     @patch("api.chat_service.DocumentService")
-    def test_does_not_inject_context_when_document_ids_is_none(
+    async def test_does_not_inject_context_when_document_ids_is_none(
         self, mock_doc_svc_cls, mock_resolve, mock_generate
     ):
         mock_generate.return_value = GenerationResult(
@@ -622,7 +630,7 @@ class TestChatServiceGenerateReply:
         )
 
         service = ChatService(repository=self.mock_repo)
-        service.generate_reply(
+        await service.generate_reply(
             user=self.mock_user,
             session_id="test-session",
             user_text="Hello",
@@ -635,10 +643,10 @@ class TestChatServiceGenerateReply:
         assert call_kwargs["user_meta"]["raw_question"] == "Hello"
         mock_doc_svc_cls.return_value.search.assert_not_called()
 
-    @patch("api.chat_service.ProviderGateway.generate")
+    @patch("api.chat_service.ProviderGateway.generate", new_callable=AsyncMock)
     @patch.object(ChatService, "_resolve_api_key", return_value="sk-test")
     @patch("api.chat_service.DocumentService")
-    def test_skips_context_injection_when_search_returns_no_results(
+    async def test_skips_context_injection_when_search_returns_no_results(
         self, mock_doc_svc_cls, mock_resolve, mock_generate
     ):
         mock_doc_svc_cls.return_value.search.return_value = []
@@ -658,7 +666,7 @@ class TestChatServiceGenerateReply:
         )
 
         service = ChatService(repository=self.mock_repo)
-        service.generate_reply(
+        await service.generate_reply(
             user=self.mock_user,
             session_id="test-session",
             user_text="Hello",
@@ -670,9 +678,9 @@ class TestChatServiceGenerateReply:
         assert call_kwargs["user_content"] == "Hello"
         assert "context_chunks" not in call_kwargs["user_meta"]
 
-    @patch("api.chat_service.UserApiKey.objects.get")
-    def test_raises_missing_api_key_error_when_no_key_set(self, mock_get):
+    @patch("api.chat_service.UserApiKey.objects.aget")
+    async def test_raises_missing_api_key_error_when_no_key_set(self, mock_get):
         mock_get.side_effect = UserApiKey.DoesNotExist
         service = ChatService(repository=self.mock_repo)
         with pytest.raises(MissingApiKeyError, match="No API key configured"):
-            service._resolve_api_key(self.mock_user, "openai")
+            await service._resolve_api_key(self.mock_user, "openai")

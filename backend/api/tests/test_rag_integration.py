@@ -1,4 +1,4 @@
-from unittest.mock import MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from django.urls import reverse
@@ -23,13 +23,13 @@ def _mock_openai_response(mock_openai_class, content="Hello!", usage=None):
     mock_response = MagicMock()
     mock_response.choices = [MagicMock(message=MagicMock(content=content))]
     mock_response.usage = usage
-    mock_client.chat.completions.create.return_value = mock_response
+    mock_client.chat.completions.create = AsyncMock(return_value=mock_response)
     return mock_client
 
 
 @pytest.mark.django_db
 class TestRAGIntegration:
-    @patch("api.chat_service.OpenAI")
+    @patch("api.chat_service.AsyncOpenAI")
     def test_message_without_document_ids_ignores_rag(
         self, mock_openai_class, auth_client_a, user_a, mock_document_service, api_key
     ):
@@ -53,7 +53,7 @@ class TestRAGIntegration:
         assert len(user_messages) == 1
         assert "<CONTEXT>" not in user_messages[-1]["content"]
 
-    @patch("api.chat_service.OpenAI")
+    @patch("api.chat_service.AsyncOpenAI")
     def test_message_with_empty_document_ids_searches_all(
         self, mock_openai_class, auth_client_a, user_a, mock_document_service, api_key
     ):
@@ -98,7 +98,7 @@ class TestRAGIntegration:
         assert "<QUESTION>" in last_content
         assert "What is in the doc?" in last_content
 
-    @patch("api.chat_service.OpenAI")
+    @patch("api.chat_service.AsyncOpenAI")
     def test_message_with_specific_document_ids(
         self, mock_openai_class, auth_client_a, user_a, mock_document_service, api_key
     ):

@@ -1,5 +1,6 @@
 import logging
 
+from asgiref.sync import async_to_sync
 from django.db import connection
 from rest_framework import generics, mixins, permissions, viewsets, status
 from rest_framework.views import APIView
@@ -123,7 +124,7 @@ class MessageViewSet(
         service = ChatService()
 
         try:
-            result = service.generate_reply(
+            result = async_to_sync(service.generate_reply)(
                 user=request.user,
                 session_id=str(conversation.id),
                 user_text=user_text,

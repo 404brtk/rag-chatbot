@@ -1,11 +1,12 @@
 import uuid
 
 import pytest
+from asgiref.sync import sync_to_async
 from django.contrib.auth import get_user_model
 from django.utils import timezone
 
 from api.models import Conversation, Message
-from api.repositories import DjangoMessageRepository
+from api.repositories import AsyncDjangoMessageRepository, DjangoMessageRepository
 
 User = get_user_model()
 
@@ -175,3 +176,124 @@ class TestAppendMessagePair:
         )
 
         assert Message.objects.filter(conversation=conversation).count() == 4
+
+
+@pytest.fixture
+def async_repo():
+    return AsyncDjangoMessageRepository()
+
+
+@pytest.mark.django_db(transaction=True)
+class TestAsyncListMessages:
+    async def test_returns_messages_in_chronological_order(
+        self, async_repo, conversation
+    ):
+        await Message.objects.acreate(
+            conversation=conversation, role="user", content="first"
+        )
+        await Message.objects.acreate(
+            conversation=conversation, role="ai", content="second"
+        )
+        await Message.objects.acreate(
+            conversation=conversation, role="user", content="third"
+        )
+
+        messages = await async_repo.list_messages(session_id=str(conversation.id))
+
+        assert [m.content for m in messages] == ["first", "second", "third"]
+
+    async def test_maps_ai_role_to_assistant(self, async_repo, conversation):
+        await Message.objects.acreate(
+            conversation=conversation, role="ai", content="AI response"
+        )
+
+        messages = await async_repo.list_messages(session_id=str(conversation.id))
+
+        assert messages[0].role == "assistant"
+
+    async def test_respects_limit_parameter(self, async_repo, conversation):
+        for i in range(5):
+            await Message.objects.acreate(
+                conversation=conversation, role="user", content=f"msg_{i}"
+            )
+
+        messages = await async_repo.list_messages(
+            session_id=str(conversation.id), limit=3
+        )
+
+        assert len(messages) == 3
+
+    async def test_returns_empty_list_for_empty_conversation(
+        self, async_repo, conversation
+    ):
+        messages = await async_repo.list_messages(session_id=str(conversation.id))
+
+        assert messages == []
+
+    async def test_includes_meta(self, async_repo, conversation):
+        await Message.objects.acreate(
+            conversation=conversation,
+            role="user",
+            content="test",
+            meta={"key": "value"},
+        )
+
+        messages = await async_repo.list_messages(session_id=str(conversation.id))
+
+        assert messages[0].meta == {"key": "value"}
+
+
+@pytest.mark.django_db(transaction=True)
+class TestAsyncAppendMessagePair:
+    async def test_creates_user_and_assistant_messages(self, async_repo, conversation):
+        user_msg, assistant_msg = await async_repo.append_message_pair(
+            session_id=str(conversation.id),
+            user_content="Hello",
+            assistant_content="Hi there!",
+            provider="openai",
+            model="gpt-5.5",
+            usage={"prompt_tokens": 5, "completion_tokens": 10},
+            user_meta={"provider_selected": "openai"},
+            assistant_meta={"input_tokens": 5},
+        )
+
+        assert user_msg.role == "user"
+        assert user_msg.content == "Hello"
+        assert assistant_msg.role == "ai"
+        assert assistant_msg.content == "Hi there!"
+        assert assistant_msg.provider == "openai"
+
+    async def test_updates_conversation_last_message_at(self, async_repo, conversation):
+        await sync_to_async(conversation.refresh_from_db)()
+        old_last_message_at = conversation.last_message_at
+
+        await async_repo.append_message_pair(
+            session_id=str(conversation.id),
+            user_content="Hello",
+            assistant_content="Hi!",
+            provider="openai",
+            model="gpt-5.5",
+            usage=None,
+            user_meta=None,
+            assistant_meta=None,
+        )
+
+        await sync_to_async(conversation.refresh_from_db)()
+        assert conversation.last_message_at > old_last_message_at
+
+    async def test_creates_two_messages_in_db(self, async_repo, conversation):
+        await async_repo.append_message_pair(
+            session_id=str(conversation.id),
+            user_content="Q",
+            assistant_content="A",
+            provider="openai",
+            model="gpt-5.5",
+            usage=None,
+            user_meta=None,
+            assistant_meta=None,
+        )
+
+        count = await sync_to_async(
+            Message.objects.filter(conversation=conversation).count
+        )()
+        assert count == 2
