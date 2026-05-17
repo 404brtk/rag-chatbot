@@ -4,6 +4,7 @@ from typing import Any
 
 from asgiref.sync import sync_to_async
 from django.db import transaction
+from django.db.models import Q
 from django.utils import timezone
 
 from .models import Message, Conversation
@@ -41,8 +42,12 @@ class DjangoMessageRepository:
         session_id: str,
         *,
         limit: int | None = None,
+        exclude_compacted: bool = False,
     ) -> list[StoredMessage]:
         qs = self._build_base_queryset(session_id)
+
+        if exclude_compacted:
+            qs = qs.filter(Q(meta__compacted__isnull=True) | Q(meta__compacted=False))
 
         if limit is not None:
             qs = qs[:limit]
@@ -114,6 +119,38 @@ class DjangoMessageRepository:
 
             return user_msg, assistant_msg
 
+    def compact_messages(self, session: Conversation) -> int:
+        messages_to_update = []
+        for msg in (
+            Message.objects.filter(conversation=session)
+            .filter(Q(meta__compacted__isnull=True) | Q(meta__compacted=False))
+            .iterator()
+        ):
+            msg.meta = {**(msg.meta or {}), "compacted": True}
+            messages_to_update.append(msg)
+        if messages_to_update:
+            Message.objects.bulk_update(messages_to_update, ["meta"])
+        return len(messages_to_update)
+
+    def apply_compaction(
+        self,
+        *,
+        session: Conversation,
+        summary: str,
+        usage: dict[str, Any] | None = None,
+    ) -> Message:
+        with transaction.atomic():
+            self.compact_messages(session)
+            return self.append_message(
+                session=session,
+                role="assistant",
+                content=summary,
+                provider=None,
+                model=None,
+                usage=usage,
+                meta={"is_compaction_summary": True},
+            )
+
 
 class AsyncDjangoMessageRepository:
     def __init__(self) -> None:
@@ -124,8 +161,12 @@ class AsyncDjangoMessageRepository:
         session_id: str,
         *,
         limit: int | None = None,
+        exclude_compacted: bool = False,
     ) -> list[StoredMessage]:
         qs = self._sync_repo._build_base_queryset(session_id)
+
+        if exclude_compacted:
+            qs = qs.filter(Q(meta__compacted__isnull=True) | Q(meta__compacted=False))
 
         if limit is not None:
             qs = qs[:limit]
@@ -183,3 +224,21 @@ class AsyncDjangoMessageRepository:
             user_meta=user_meta,
             assistant_meta=assistant_meta,
         )
+
+    async def compact_messages(self, session: Conversation) -> int:
+        return await sync_to_async(
+            self._sync_repo.compact_messages,
+            thread_sensitive=True,
+        )(session)
+
+    async def apply_compaction(
+        self,
+        *,
+        session: Conversation,
+        summary: str,
+        usage: dict[str, Any] | None = None,
+    ) -> Message:
+        return await sync_to_async(
+            self._sync_repo.apply_compaction,
+            thread_sensitive=True,
+        )(session=session, summary=summary, usage=usage)

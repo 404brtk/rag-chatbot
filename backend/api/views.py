@@ -35,6 +35,7 @@ from .chat_service import (
     MissingApiKeyError,
     TemporaryProviderError,
     PermanentProviderError,
+    validate_llm_config,
 )
 
 DEFAULT_SYSTEM_PROMPT = (
@@ -133,7 +134,13 @@ class MessageViewSet(
             provider=request.data.get("provider", "openai"),
             model=request.data.get("model", "gpt-5.4-mini"),
             system_prompt=DEFAULT_SYSTEM_PROMPT,
+            compaction_model=request.data.get("compaction_model") or "gpt-5.4-mini",
+            max_input_tokens=request.data.get("max_input_tokens", 12_000),
+            compaction_threshold=request.data.get("compaction_threshold", 0.8),
         )
+        validation_error = validate_llm_config(request.data)
+        if validation_error:
+            return Response(validation_error, status=status.HTTP_400_BAD_REQUEST)
         service = ChatService()
 
         try:
@@ -237,7 +244,17 @@ class MessageStreamView(View):
             provider=body.get("provider", "openai"),
             model=body.get("model", "gpt-5.4-mini"),
             system_prompt=DEFAULT_SYSTEM_PROMPT,
+            compaction_model=body.get("compaction_model") or "gpt-5.4-mini",
+            max_input_tokens=body.get("max_input_tokens", 12_000),
+            compaction_threshold=body.get("compaction_threshold", 0.8),
         )
+        validation_error = validate_llm_config(body)
+        if validation_error:
+            return StreamingHttpResponse(
+                _sse_error(validation_error["error"], validation_error.get("code")),
+                content_type="text/event-stream",
+                status=400,
+            )
         service = ChatService()
 
         async def event_generator():
@@ -258,6 +275,10 @@ class MessageStreamView(View):
                         payload["usage"] = event.usage
                         payload["provider"] = event.provider
                         payload["model"] = event.model
+                    elif event.type == "compaction_done":
+                        payload["message_id"] = event.message_id
+                        if event.usage:
+                            payload["usage"] = event.usage
                     elif event.type == "error":
                         payload["message"] = event.error_message
                         if event.error_code:

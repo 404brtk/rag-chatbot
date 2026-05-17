@@ -25,6 +25,62 @@ class LLMConfig:
     max_output_tokens: int = 1_024  # TODO: adjust
     temperature: float = 0.2
     history_limit: int = 500  # TODO: adjust
+    compaction_threshold: float = 0.8
+    compaction_model: str = "gpt-5.4-mini"
+
+
+SUPPORTED_PROVIDERS = {"openai"}
+
+
+def validate_llm_config(data: dict) -> dict | None:
+    provider = data.get("provider", "openai")
+    if provider not in SUPPORTED_PROVIDERS:
+        return {
+            "error": f"Unsupported provider: {provider}. Supported: {', '.join(sorted(SUPPORTED_PROVIDERS))}.",
+            "code": "invalid_config",
+        }
+
+    model = data.get("model", "gpt-5.4-mini")
+    if not isinstance(model, str) or not model.strip():
+        return {
+            "error": "model must be a non-empty string.",
+            "code": "invalid_config",
+        }
+
+    compaction_model = data.get("compaction_model")
+    if compaction_model is not None and (
+        not isinstance(compaction_model, str) or not compaction_model.strip()
+    ):
+        return {
+            "error": "compaction_model must be a non-empty string if provided.",
+            "code": "invalid_config",
+        }
+
+    max_input_tokens = data.get("max_input_tokens", 12_000)
+    if (
+        not isinstance(max_input_tokens, int)
+        or isinstance(max_input_tokens, bool)
+        or max_input_tokens < 100
+        or max_input_tokens > 200_000
+    ):
+        return {
+            "error": "max_input_tokens must be an integer between 100 and 200,000.",
+            "code": "invalid_config",
+        }
+
+    compaction_threshold = data.get("compaction_threshold", 0.8)
+    if (
+        not isinstance(compaction_threshold, (int, float))
+        or isinstance(compaction_threshold, bool)
+        or compaction_threshold < 0.0
+        or compaction_threshold > 1.0
+    ):
+        return {
+            "error": "compaction_threshold must be a number between 0.0 and 1.0.",
+            "code": "invalid_config",
+        }
+
+    return None
 
 
 @dataclass(frozen=True, slots=True)
@@ -42,7 +98,7 @@ class GenerationResult:
 
 @dataclass(frozen=True, slots=True)
 class StreamEvent:
-    type: Literal["token", "done", "error"]
+    type: Literal["token", "done", "error", "compaction_done"]
     content: str | None = None
     message_id: str | None = None
     title: str | None = None
@@ -148,6 +204,7 @@ class HistoryWindow:
         model: str,
         max_input_tokens: int,
         counter: TokenCounter,
+        require_user_first: bool = True,
     ) -> list[StoredMessage]:
         normalized = self.normalize(messages)
         if not normalized:
@@ -183,15 +240,15 @@ class HistoryWindow:
 
         kept = list(reversed(kept_rev))
 
-        while kept and kept[0].role != "user":
-            kept.pop(0)
+        if require_user_first:
+            while kept and kept[0].role != "user":
+                kept.pop(0)
 
         kept = self.normalize(kept)
 
         if not kept:
             raise InvalidInputError("No valid user-first history after trimming.")
 
-        # TODO: implement compaction (summarize session instead of deleting messages from context)
         return kept
 
 
@@ -310,6 +367,146 @@ class _GenerationPrep:
     context_chunks: list[dict[str, Any]] | None
     api_key: str
     trimmed_messages: list[StoredMessage]
+    session: Conversation
+    compaction_summary: str | None = None
+    compaction_message_id: str | None = None
+    compaction_tokens: list[str] | None = None
+    compaction_usage: dict[str, Any] | None = None
+
+
+class CompactionService:
+    def __init__(self, counter: TokenCounter, gateway: ProviderGateway) -> None:
+        self.counter = counter
+        self.gateway = gateway
+
+    def _format_history_for_summary(self, history: list[StoredMessage]) -> str:
+        lines = []
+        for msg in history:
+            label = "User" if msg.role == "user" else "Assistant"
+            lines.append(f"{label}: {msg.content}")
+        return "\n\n".join(lines)
+
+    def _build_summarization_prompt(self, history: list[StoredMessage]) -> str:
+        formatted_history = self._format_history_for_summary(history)
+        return (
+            f"Recent conversation:\n{formatted_history}\n\n"
+            "Create a concise but comprehensive summary of this conversation. "
+            "Preserve all key facts, decisions, user requirements, and important context. "
+            "The summary should be complete enough that someone reading it would understand "
+            "everything that was discussed and decided."
+        )
+
+    def _build_summary_config(self, model: str) -> LLMConfig:
+        return LLMConfig(
+            provider="openai",
+            model=model,
+            system_prompt="You are a conversation summarizer.",
+            max_output_tokens=1_024,
+        )
+
+    async def _call_summarizer(
+        self,
+        history: list[StoredMessage],
+        model: str,
+        api_key: str,
+    ) -> str | None:
+        chunks: list[str] = []
+        async for chunk in self._call_summarizer_stream(history, model, api_key):
+            if chunk.text:
+                chunks.append(chunk.text)
+        return "".join(chunks).strip()
+
+    async def _call_summarizer_stream(
+        self,
+        history: list[StoredMessage],
+        model: str,
+        api_key: str,
+    ):
+        summarization_prompt = self._build_summarization_prompt(history)
+        summary_config = self._build_summary_config(model)
+
+        async for chunk in self.gateway.generate_stream(
+            api_key=api_key,
+            config=summary_config,
+            messages=[StoredMessage(role="user", content=summarization_prompt)],
+        ):
+            yield chunk
+
+    @staticmethod
+    def _dedup_models(config: LLMConfig) -> list[str]:
+        models = []
+        for m in (config.compaction_model, config.model):
+            if m not in models:
+                models.append(m)
+        return models
+
+    async def _summarize_with_llm(
+        self,
+        history: list[StoredMessage],
+        config: LLMConfig,
+        api_key: str,
+    ) -> str | None:
+        models = CompactionService._dedup_models(config)
+        for model in models:
+            try:
+                summary = await self._call_summarizer(history, model, api_key)
+                if summary:
+                    return summary
+            except (TemporaryProviderError, PermanentProviderError) as e:
+                logger.warning(f"Compaction summarizer failed for model {model}: {e}")
+                continue
+        return None
+
+    async def compact(
+        self,
+        history: list[StoredMessage],
+        config: LLMConfig,
+        api_key: str,
+    ) -> str | None:
+        return await self._summarize_with_llm(history, config, api_key)
+
+    async def compact_stream(
+        self,
+        history: list[StoredMessage],
+        config: LLMConfig,
+        api_key: str,
+    ):
+        models = self._dedup_models(config)
+        for model in models:
+            collected: list[ProviderChunk] = []
+            try:
+                async for chunk in self._call_summarizer_stream(
+                    history, model, api_key
+                ):
+                    collected.append(chunk)
+            except (TemporaryProviderError, PermanentProviderError) as e:
+                logger.warning(f"Compaction summarizer failed for model {model}: {e}")
+                continue
+            for chunk in collected:
+                yield chunk
+            return
+
+    def should_compact(
+        self,
+        system_prompt: str,
+        history: list[StoredMessage],
+        new_message: StoredMessage,
+        config: LLMConfig,
+    ) -> bool:
+        system_tokens = self.counter.estimate_system_tokens(system_prompt, config.model)
+        history_tokens = sum(
+            self.counter.estimate_message_tokens(m, config.model) for m in history
+        )
+        new_tokens = self.counter.estimate_message_tokens(new_message, config.model)
+        total = system_tokens + history_tokens + new_tokens + 24
+        threshold = int(config.max_input_tokens * config.compaction_threshold)
+        return total > threshold
+
+    def chunk_truncate(self, history: list[StoredMessage]) -> list[StoredMessage]:
+        if not history:
+            return history
+        keep_from = len(history) // 2
+        return history[keep_from:]
 
 
 class ChatService:
@@ -319,6 +516,7 @@ class ChatService:
         self.window = HistoryWindow()
         self.gateway = ProviderGateway()
         self.document_service = DocumentService()
+        self.compaction = CompactionService(self.counter, self.gateway)
 
     async def _resolve_api_key(self, user, provider: str) -> str:
         try:
@@ -377,21 +575,77 @@ class ChatService:
                 ]
 
         api_key = await self._resolve_api_key(user, config.provider)
+        session = await Conversation.objects.aget(id=session_id)
 
         history = await self.repository.list_messages(
-            session_id=session_id, limit=config.history_limit
+            session_id=session_id, limit=config.history_limit, exclude_compacted=True
         )
-        candidate_messages = [
-            *history,
-            StoredMessage(role="user", content=user_message),
-        ]
+        new_msg = StoredMessage(role="user", content=user_message)
+
+        compaction_summary = None
+        compaction_msg_id = None
+        compaction_tokens = None
+        compaction_usage = None
+
+        if self.compaction.should_compact(
+            system_prompt=config.system_prompt,
+            history=history,
+            new_message=new_msg,
+            config=config,
+        ):
+            logger.debug(
+                f"Compaction triggered - max_input_tokens={config.max_input_tokens} threshold={config.compaction_threshold:.2f} history_len={len(history)}"
+            )
+            tokens: list[str] = []
+            summary_usage = None
+            full_text = ""
+            async for chunk in self.compaction.compact_stream(
+                history=history,
+                config=config,
+                api_key=api_key,
+            ):
+                if chunk.text:
+                    tokens.append(chunk.text)
+                    full_text += chunk.text
+                if chunk.usage:
+                    summary_usage = chunk.usage
+            summary = full_text.strip()
+            if summary:
+                compaction_msg = await self.repository.apply_compaction(
+                    session=session, summary=summary, usage=summary_usage
+                )
+                compaction_summary = summary
+                compaction_msg_id = str(compaction_msg.id)
+                compaction_tokens = tokens
+                compaction_usage = summary_usage
+                history = await self.repository.list_messages(
+                    session_id=session_id,
+                    limit=config.history_limit,
+                    exclude_compacted=True,
+                )
+                logger.debug(
+                    f"Compaction completed - summary_len={len(summary)} tokens={len(tokens)}"
+                )
+            else:
+                original_count = len(history)
+                history = self.compaction.chunk_truncate(history)
+                logger.warning(
+                    "Compaction summarization produced no output — fell back to chunk_truncate (kept %d/%d)",
+                    len(history),
+                    original_count,
+                )
+
+        has_summary_prefix = bool(history) and (history[0].meta or {}).get(
+            "is_compaction_summary"
+        )
 
         trimmed = self.window.fit_to_token_limit(
             system_prompt=config.system_prompt,
-            messages=candidate_messages,
+            messages=[*history, new_msg],
             model=config.model,
             max_input_tokens=config.max_input_tokens,
             counter=self.counter,
+            require_user_first=not has_summary_prefix,
         )
 
         return _GenerationPrep(
@@ -400,6 +654,11 @@ class ChatService:
             context_chunks=context_chunks,
             api_key=api_key,
             trimmed_messages=trimmed,
+            session=session,
+            compaction_summary=compaction_summary,
+            compaction_message_id=compaction_msg_id,
+            compaction_tokens=compaction_tokens,
+            compaction_usage=compaction_usage,
         )
 
     @staticmethod
@@ -502,7 +761,16 @@ class ChatService:
                 document_ids=document_ids,
             )
 
-            session = await Conversation.objects.aget(id=session_id)
+            if prep.compaction_tokens:
+                for token in prep.compaction_tokens:
+                    yield StreamEvent(type="token", content=token)
+                yield StreamEvent(
+                    type="compaction_done",
+                    message_id=prep.compaction_message_id,
+                    usage=prep.compaction_usage,
+                )
+
+            session = prep.session
 
             user_meta = self._build_user_meta(
                 prep.clean_user_text, config, prep.context_chunks

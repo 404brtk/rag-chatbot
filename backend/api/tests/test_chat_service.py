@@ -9,6 +9,7 @@ from api.models import Conversation, UserApiKey
 from api.repositories import StoredMessage
 from api.chat_service import (
     ChatService,
+    CompactionService,
     GenerationResult,
     HistoryWindow,
     InvalidInputError,
@@ -257,6 +258,24 @@ class TestHistoryWindowFitToTokenLimit:
         assert result[1].content == "Hello"
         assert result[2].content == "How are you?"
 
+    def test_preserves_assistant_prefix_when_require_user_first_false(self):
+        messages = [
+            _msg("assistant", "Summary of prior conversation"),
+            _msg("user", "Current question"),
+        ]
+        result = self.window.fit_to_token_limit(
+            system_prompt="You are helpful.",
+            messages=messages,
+            model="gpt-5.5",
+            max_input_tokens=4096,
+            counter=self.counter,
+            require_user_first=False,
+        )
+        assert len(result) == 2
+        assert result[0].role == "assistant"
+        assert result[0].content == "Summary of prior conversation"
+        assert result[1].role == "user"
+
 
 class TestProviderGateway:
     @patch("api.chat_service.AsyncOpenAI")
@@ -475,7 +494,19 @@ class TestChatServiceGenerateReply:
         self.mock_repo.append_message_pair = AsyncMock(
             return_value=(MagicMock(id="user-id"), MagicMock(id="assistant-id"))
         )
+        self.mock_repo.apply_compaction = AsyncMock(
+            return_value=MagicMock(id="summary-id")
+        )
         self.mock_user = MagicMock()
+        self.mock_session = MagicMock()
+        self._session_patch = patch(
+            "api.chat_service.Conversation.objects.aget",
+            new=AsyncMock(return_value=self.mock_session),
+        )
+        self._session_patch.start()
+
+    def teardown_method(self):
+        self._session_patch.stop()
 
     @pytest.mark.parametrize("user_text", ["", "   \t\n  "])
     @patch("api.chat_service.ProviderGateway.generate", new_callable=AsyncMock)
@@ -787,6 +818,9 @@ class TestChatServiceGenerateReplyStream:
         self.mock_repo.append_message = AsyncMock(
             side_effect=lambda **kwargs: MagicMock(id=f"msg-{kwargs['role']}")
         )
+        self.mock_repo.apply_compaction = AsyncMock(
+            return_value=MagicMock(id="summary-id")
+        )
         self.mock_user = MagicMock()
 
     async def _collect_events(self, service, **kwargs):
@@ -1072,3 +1106,369 @@ class TestChatServiceGenerateReplyStream:
         assert events[0].type == "error"
         assert events[0].error_code == "internal_error"
         assert events[0].error_message == "Internal server error"
+
+
+class TestCompactionService:
+    def setup_method(self):
+        self.counter = TokenCounter()
+        self.gateway = MagicMock()
+        self.gateway.generate_stream = MagicMock()
+        self.service = CompactionService(self.counter, self.gateway)
+
+    def test_should_compact_returns_false_when_under_threshold(self):
+        history = [_msg("user", "Hello")]
+        new_msg = _msg("user", "How are you?")
+        config = replace(DEFAULT_CONFIG, max_input_tokens=4096)
+        assert not self.service.should_compact(
+            system_prompt=config.system_prompt,
+            history=history,
+            new_message=new_msg,
+            config=config,
+        )
+
+    def test_should_compact_returns_true_when_over_threshold(self):
+        long_history = [
+            _msg("user", "word " * 5000),
+            _msg("assistant", "answer " * 5000),
+        ]
+        new_msg = _msg("user", "How are you?")
+        config = replace(DEFAULT_CONFIG, max_input_tokens=100)
+        assert self.service.should_compact(
+            system_prompt=config.system_prompt,
+            history=long_history,
+            new_message=new_msg,
+            config=config,
+        )
+
+    def test_should_compact_exact_boundary(self):
+        msg = _msg("user", "Hello world")
+        config = replace(DEFAULT_CONFIG, compaction_threshold=1.0)
+        system_tokens = self.counter.estimate_system_tokens(
+            config.system_prompt, config.model
+        )
+        msg_tokens = self.counter.estimate_message_tokens(msg, config.model)
+        total = system_tokens + msg_tokens + 24
+
+        exact_boundary = replace(config, max_input_tokens=total)
+        assert not self.service.should_compact(
+            system_prompt=config.system_prompt,
+            history=[],
+            new_message=msg,
+            config=exact_boundary,
+        )
+
+        one_over = replace(config, max_input_tokens=total - 1)
+        assert self.service.should_compact(
+            system_prompt=config.system_prompt,
+            history=[],
+            new_message=msg,
+            config=one_over,
+        )
+
+    async def test_compact_calls_llm_with_formatted_history(self):
+        async def _fake_stream():
+            yield ProviderChunk(text="Summary text.")
+
+        self.gateway.generate_stream.return_value = _fake_stream()
+        history = [_msg("user", "Hello"), _msg("assistant", "Hi there")]
+        config = replace(DEFAULT_CONFIG, compaction_model="gpt-5.4-mini")
+
+        result = await self.service.compact(
+            history=history,
+            config=config,
+            api_key="sk-test",
+        )
+
+        assert result == "Summary text."
+        self.gateway.generate_stream.assert_called_once()
+        call_messages = self.gateway.generate_stream.call_args[1]["messages"]
+        assert len(call_messages) == 1
+        assert "User: Hello" in call_messages[0].content
+        assert "Assistant: Hi there" in call_messages[0].content
+
+    async def test_compact_falls_back_to_main_model_when_compact_model_fails(self):
+        async def _fake_stream():
+            yield ProviderChunk(text="Fallback summary.")
+
+        self.gateway.generate_stream.side_effect = [
+            TemporaryProviderError("rate limited"),
+            _fake_stream(),
+        ]
+        config = replace(DEFAULT_CONFIG, compaction_model="gpt-5.4-mini")
+
+        result = await self.service.compact(
+            history=[_msg("user", "Hello")],
+            config=config,
+            api_key="sk-test",
+        )
+
+        assert result == "Fallback summary."
+        assert self.gateway.generate_stream.call_count == 2
+
+    async def test_compact_returns_none_when_both_models_fail(self):
+        self.gateway.generate_stream.side_effect = TemporaryProviderError(
+            "rate limited"
+        )
+        config = replace(DEFAULT_CONFIG, compaction_model="gpt-5.4-mini")
+
+        result = await self.service.compact(
+            history=[_msg("user", "Hello")],
+            config=config,
+            api_key="sk-test",
+        )
+
+        assert result is None
+
+    async def test_summarize_dedups_when_models_are_identical(self):
+        async def _fake_stream():
+            yield ProviderChunk(text="Summary.")
+
+        self.gateway.generate_stream.return_value = _fake_stream()
+        config = replace(DEFAULT_CONFIG, compaction_model="gpt-5.5")
+
+        result = await self.service.compact(
+            history=[_msg("user", "Hello")],
+            config=config,
+            api_key="sk-test",
+        )
+
+        assert result == "Summary."
+        assert self.gateway.generate_stream.call_count == 1
+
+    def test_chunk_truncate_keeps_second_half(self):
+        history = [
+            _msg("user", "1"),
+            _msg("assistant", "a"),
+            _msg("user", "2"),
+            _msg("assistant", "b"),
+            _msg("user", "3"),
+            _msg("assistant", "c"),
+        ]
+        result = self.service.chunk_truncate(history)
+        assert len(result) == 3
+        assert result[0].content == "b"
+
+    def test_chunk_truncate_empty_returns_empty(self):
+        assert self.service.chunk_truncate([]) == []
+
+    async def test_compact_stream_does_not_yield_partial_on_fallback(self):
+        async def _failing_stream():
+            yield ProviderChunk(text="Part")
+            raise TemporaryProviderError("model 1 failed")
+
+        async def _good_stream():
+            yield ProviderChunk(text="Full summary.")
+
+        self.gateway.generate_stream.side_effect = [
+            _failing_stream(),
+            _good_stream(),
+        ]
+        config = replace(DEFAULT_CONFIG, compaction_model="gpt-5.4-mini")
+
+        chunks = []
+        async for chunk in self.service.compact_stream(
+            history=[_msg("user", "Hello")],
+            config=config,
+            api_key="sk-test",
+        ):
+            chunks.append(chunk)
+
+        text_chunks = [c for c in chunks if c.text]
+        assert len(text_chunks) == 1
+        assert text_chunks[0].text == "Full summary."
+        assert self.gateway.generate_stream.call_count == 2
+
+
+class TestChatServiceCompaction:
+    def setup_method(self):
+        self.mock_repo = MagicMock()
+        self.mock_repo.list_messages = AsyncMock(return_value=[])
+        self.mock_repo.append_message = AsyncMock(
+            side_effect=lambda **kwargs: MagicMock(id=f"msg-{kwargs['role']}")
+        )
+        self.mock_repo.apply_compaction = AsyncMock(
+            return_value=MagicMock(id="summary-id")
+        )
+        self.mock_user = MagicMock()
+        self.mock_session = MagicMock()
+        self.mock_session.asave = AsyncMock()
+        self.mock_session.arefresh_from_db = AsyncMock()
+        self._session_patch = patch(
+            "api.chat_service.Conversation.objects.aget",
+            new=AsyncMock(return_value=self.mock_session),
+        )
+        self._session_patch.start()
+
+    def teardown_method(self):
+        self._session_patch.stop()
+
+    @patch.object(CompactionService, "should_compact", return_value=True)
+    @patch.object(ChatService, "_resolve_api_key", return_value="sk-test")
+    async def test_prepare_generation_triggers_compaction_and_returns_summary(
+        self, mock_resolve, mock_should
+    ):
+        async def _fake_compact_stream():
+            yield ProviderChunk(text="This is the conversation summary.")
+
+        mock_compact_stream = MagicMock(return_value=_fake_compact_stream())
+        with patch.object(CompactionService, "compact_stream", mock_compact_stream):
+            history = [
+                _msg("user", "question one"),
+                _msg("assistant", "answer one"),
+                _msg("user", "question two"),
+                _msg("assistant", "answer two"),
+            ]
+            summary_msg = _msg(
+                "assistant",
+                "This is the conversation summary.",
+                meta={"is_compaction_summary": True},
+            )
+            self.mock_repo.list_messages.side_effect = [history, [summary_msg]]
+            service = ChatService(repository=self.mock_repo)
+            prep = await service._prepare_generation(
+                user=self.mock_user,
+                session_id="test-session",
+                user_text="Hello",
+                config=DEFAULT_CONFIG,
+            )
+
+        assert prep.compaction_summary == "This is the conversation summary."
+        assert prep.compaction_message_id == "summary-id"
+        assert prep.compaction_tokens == ["This is the conversation summary."]
+        self.mock_repo.apply_compaction.assert_called_once()
+        apply_call = self.mock_repo.apply_compaction.call_args[1]
+        assert apply_call["session"] == self.mock_session
+        assert apply_call["summary"] == "This is the conversation summary."
+        assert self.mock_repo.list_messages.call_count == 2
+        assert prep.trimmed_messages[0].meta.get("is_compaction_summary") is True
+
+    @patch.object(CompactionService, "should_compact", return_value=True)
+    @patch.object(ChatService, "_resolve_api_key", return_value="sk-test")
+    async def test_prepare_generation_falls_back_to_chunk_truncate(
+        self, mock_resolve, mock_should
+    ):
+        async def _empty_gen():
+            if False:
+                yield
+
+        mock_compact_stream = MagicMock(return_value=_empty_gen())
+        with patch.object(CompactionService, "compact_stream", mock_compact_stream):
+            history = [
+                _msg("user", "question one"),
+                _msg("assistant", "answer one"),
+                _msg("user", "question two"),
+                _msg("assistant", "answer two"),
+                _msg("user", "question three"),
+                _msg("assistant", "answer three"),
+            ]
+            self.mock_repo.list_messages.return_value = history
+            service = ChatService(repository=self.mock_repo)
+            prep = await service._prepare_generation(
+                user=self.mock_user,
+                session_id="test-session",
+                user_text="Hello",
+                config=DEFAULT_CONFIG,
+            )
+
+        assert prep.compaction_summary is None
+        assert prep.compaction_tokens is None
+        self.mock_repo.apply_compaction.assert_not_called()
+        assert len(prep.trimmed_messages) == 3
+        assert prep.trimmed_messages[0].content == "question three"
+
+    @patch.object(CompactionService, "should_compact", return_value=False)
+    @patch.object(ChatService, "_resolve_api_key", return_value="sk-test")
+    async def test_prepare_generation_no_compaction_when_under_threshold(
+        self, mock_resolve, mock_should
+    ):
+        history = [
+            _msg("user", "question one"),
+            _msg("assistant", "answer one"),
+        ]
+        self.mock_repo.list_messages.return_value = history
+        service = ChatService(repository=self.mock_repo)
+        prep = await service._prepare_generation(
+            user=self.mock_user,
+            session_id="test-session",
+            user_text="Hello",
+            config=DEFAULT_CONFIG,
+        )
+
+        assert prep.compaction_summary is None
+        self.mock_repo.apply_compaction.assert_not_called()
+        assert len(prep.trimmed_messages) == 3
+        assert prep.trimmed_messages[0].content == "question one"
+        assert prep.trimmed_messages[1].content == "answer one"
+        assert prep.trimmed_messages[2].content == "Hello"
+
+    @patch.object(CompactionService, "should_compact", return_value=False)
+    @patch.object(ChatService, "_resolve_api_key", return_value="sk-test")
+    async def test_prepare_generation_preserves_existing_summary_without_new_compaction(
+        self, mock_resolve, mock_should
+    ):
+        history = [
+            _msg("assistant", "Prior summary", meta={"is_compaction_summary": True}),
+            _msg("user", "follow up question"),
+            _msg("assistant", "follow up answer"),
+        ]
+        self.mock_repo.list_messages.return_value = history
+        service = ChatService(repository=self.mock_repo)
+        prep = await service._prepare_generation(
+            user=self.mock_user,
+            session_id="test-session",
+            user_text="Hello",
+            config=DEFAULT_CONFIG,
+        )
+
+        assert prep.compaction_summary is None
+        self.mock_repo.apply_compaction.assert_not_called()
+        assert len(prep.trimmed_messages) == 4
+        assert prep.trimmed_messages[0].meta.get("is_compaction_summary") is True
+        assert prep.trimmed_messages[0].content == "Prior summary"
+
+    @patch.object(CompactionService, "should_compact", return_value=True)
+    @patch.object(ChatService, "_resolve_api_key", return_value="sk-test")
+    @patch("api.chat_service.ProviderGateway.generate_stream")
+    async def test_stream_yields_compaction_events_when_triggered(
+        self, mock_stream, mock_resolve, mock_should
+    ):
+        async def _fake_compact_stream():
+            yield ProviderChunk(text="Sum")
+            yield ProviderChunk(text="mary.")
+
+        mock_compact_stream = MagicMock(return_value=_fake_compact_stream())
+        with patch.object(CompactionService, "compact_stream", mock_compact_stream):
+
+            async def gen():
+                yield ProviderChunk(text="Answer")
+
+            mock_stream.return_value = gen()
+            history = [
+                _msg("user", "question one"),
+                _msg("assistant", "answer one"),
+            ]
+            summary_msg = _msg(
+                "assistant", "Summary.", meta={"is_compaction_summary": True}
+            )
+            self.mock_repo.list_messages.side_effect = [history, [summary_msg]]
+            service = ChatService(repository=self.mock_repo)
+            events = [
+                e
+                async for e in service.generate_reply_stream(
+                    user=self.mock_user,
+                    session_id="test-session",
+                    user_text="Hello",
+                    config=DEFAULT_CONFIG,
+                )
+            ]
+
+        assert len(events) == 5
+        assert events[0].type == "token"
+        assert events[0].content == "Sum"
+        assert events[1].type == "token"
+        assert events[1].content == "mary."
+        assert events[2].type == "compaction_done"
+        assert events[2].message_id == "summary-id"
+        assert events[3].type == "token"
+        assert events[3].content == "Answer"
+        assert events[4].type == "done"

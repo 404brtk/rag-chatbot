@@ -297,3 +297,73 @@ class TestAsyncAppendMessagePair:
             Message.objects.filter(conversation=conversation).count
         )()
         assert count == 2
+
+
+@pytest.mark.django_db
+class TestCompactMessages:
+    def test_marks_messages_as_compacted(self, repo, conversation):
+        Message.objects.create(conversation=conversation, role="user", content="first")
+        Message.objects.create(conversation=conversation, role="ai", content="second")
+
+        count = repo.compact_messages(conversation)
+
+        assert count == 2
+        for msg in Message.objects.filter(conversation=conversation):
+            assert msg.meta.get("compacted") is True
+
+    def test_does_not_recompact_already_compacted(self, repo, conversation):
+        Message.objects.create(
+            conversation=conversation,
+            role="user",
+            content="first",
+            meta={"compacted": True},
+        )
+        Message.objects.create(conversation=conversation, role="ai", content="second")
+
+        count = repo.compact_messages(conversation)
+
+        assert count == 1
+
+    def test_returns_zero_for_empty_conversation(self, repo, conversation):
+        count = repo.compact_messages(conversation)
+        assert count == 0
+
+
+@pytest.mark.django_db
+class TestApplyCompaction:
+    def test_marks_compacted_and_appends_summary(self, repo, conversation):
+        Message.objects.create(
+            conversation=conversation, role="user", content="question"
+        )
+        Message.objects.create(conversation=conversation, role="ai", content="answer")
+
+        summary_msg = repo.apply_compaction(
+            session=conversation, summary="Summary of conversation", usage=None
+        )
+
+        assert summary_msg.role == "ai"
+        assert summary_msg.content == "Summary of conversation"
+        assert summary_msg.meta.get("is_compaction_summary") is True
+        assert summary_msg.provider is None
+        assert summary_msg.model is None
+
+        messages = repo.list_messages(session_id=str(conversation.id))
+        compacted_count = sum(1 for m in messages if m.meta.get("compacted"))
+        assert compacted_count == 2
+
+    def test_preserves_existing_meta_on_compacted_messages(self, repo, conversation):
+        Message.objects.create(
+            conversation=conversation,
+            role="user",
+            content="question",
+            meta={"existing_key": "value"},
+        )
+        Message.objects.create(conversation=conversation, role="ai", content="answer")
+
+        repo.apply_compaction(session=conversation, summary="Summary", usage=None)
+
+        compacted = Message.objects.filter(
+            conversation=conversation, role="user"
+        ).first()
+        assert compacted.meta.get("existing_key") == "value"
+        assert compacted.meta.get("compacted") is True
