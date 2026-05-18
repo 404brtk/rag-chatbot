@@ -137,6 +137,8 @@ class DjangoMessageRepository:
         *,
         session: Conversation,
         summary: str,
+        provider: str,
+        model: str,
         usage: dict[str, Any] | None = None,
     ) -> Message:
         with transaction.atomic():
@@ -145,8 +147,8 @@ class DjangoMessageRepository:
                 session=session,
                 role="assistant",
                 content=summary,
-                provider=None,
-                model=None,
+                provider=provider,
+                model=model,
                 usage=usage,
                 meta={"is_compaction_summary": True},
             )
@@ -236,9 +238,11 @@ class AsyncDjangoMessageRepository:
         *,
         session: Conversation,
         summary: str,
+        provider: str,
+        model: str,
         usage: dict[str, Any] | None = None,
     ) -> Message:
         return await sync_to_async(
             self._sync_repo.apply_compaction,
             thread_sensitive=True,
-        )(session=session, summary=summary, usage=usage)
+        )(session=session, summary=summary, provider=provider, model=model, usage=usage)

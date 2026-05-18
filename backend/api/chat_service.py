@@ -2,11 +2,13 @@ import logging
 from dataclasses import dataclass, replace
 from typing import Any, Literal
 
+import httpx
 import openai
 import tiktoken
 from asgiref.sync import sync_to_async
 from openai import AsyncOpenAI
 
+from django.conf import settings
 from django.utils import timezone
 
 from .document_service import DocumentService
@@ -18,7 +20,7 @@ logger = logging.getLogger(__name__)
 
 @dataclass(frozen=True, slots=True)
 class LLMConfig:
-    provider: Literal["openai"]
+    provider: Literal["openai", "llamacpp"]
     model: str
     system_prompt: str
     max_input_tokens: int = 12_000  # TODO: adjust
@@ -29,7 +31,7 @@ class LLMConfig:
     compaction_model: str = "gpt-5.4-mini"
 
 
-SUPPORTED_PROVIDERS = {"openai"}
+SUPPORTED_PROVIDERS = {"openai", "llamacpp"}
 
 
 def validate_llm_config(data: dict) -> dict | None:
@@ -168,6 +170,19 @@ class TokenCounter:
 
 
 class ProviderGateway:
+    _llamacpp_context: int | None = None
+
+    @staticmethod
+    def _build_client(*, api_key: str, provider: str) -> AsyncOpenAI:
+        if provider == "llamacpp":
+            return AsyncOpenAI(
+                base_url=f"{settings.LLAMACPP_BASE_URL}/v1",
+                api_key=api_key,
+                timeout=60.0,
+                max_retries=2,
+            )
+        return AsyncOpenAI(api_key=api_key, timeout=30.0, max_retries=2)
+
     async def _generate_openai(
         self,
         *,
@@ -175,7 +190,7 @@ class ProviderGateway:
         config: LLMConfig,
         messages: list[StoredMessage],
     ) -> GenerationResult:
-        client = AsyncOpenAI(api_key=api_key, timeout=30.0, max_retries=2)
+        client = self._build_client(api_key=api_key, provider=config.provider)
         try:
             response = await client.chat.completions.create(
                 model=config.model,
@@ -200,7 +215,7 @@ class ProviderGateway:
 
         return GenerationResult(
             text=response.choices[0].message.content.strip(),
-            provider="openai",
+            provider=config.provider,
             model=config.model,
             input_tokens=usage_dict.get("prompt_tokens"),
             output_tokens=usage_dict.get("completion_tokens"),
@@ -215,7 +230,7 @@ class ProviderGateway:
         config: LLMConfig,
         messages: list[StoredMessage],
     ) -> GenerationResult:
-        if config.provider == "openai":
+        if config.provider in {"openai", "llamacpp"}:
             return await self._generate_openai(
                 api_key=api_key, config=config, messages=messages
             )
@@ -228,7 +243,7 @@ class ProviderGateway:
         config: LLMConfig,
         messages: list[StoredMessage],
     ):
-        client = AsyncOpenAI(api_key=api_key, timeout=30.0, max_retries=2)
+        client = self._build_client(api_key=api_key, provider=config.provider)
         try:
             stream = await client.chat.completions.create(
                 model=config.model,
@@ -266,13 +281,28 @@ class ProviderGateway:
         config: LLMConfig,
         messages: list[StoredMessage],
     ):
-        if config.provider == "openai":
+        if config.provider in {"openai", "llamacpp"}:
             async for chunk in self._generate_openai_stream(
                 api_key=api_key, config=config, messages=messages
             ):
                 yield chunk
             return
         raise PermanentProviderError(f"Unsupported provider: {config.provider}")
+
+    @staticmethod
+    async def discover_llamacpp_context() -> int:
+        if ProviderGateway._llamacpp_context is not None:
+            return ProviderGateway._llamacpp_context
+
+        base = settings.LLAMACPP_BASE_URL
+        async with httpx.AsyncClient(timeout=5.0) as client:
+            resp = await client.get(f"{base}/props")
+            resp.raise_for_status()
+            n_ctx = resp.json()["default_generation_settings"]["n_ctx"]
+
+        ProviderGateway._llamacpp_context = n_ctx
+        logger.info(f"Discovered llama.cpp context window: {n_ctx} tokens")
+        return n_ctx
 
 
 @dataclass(frozen=True, slots=True)
@@ -311,9 +341,9 @@ class CompactionService:
             "everything that was discussed and decided."
         )
 
-    def _build_summary_config(self, model: str) -> LLMConfig:
+    def _build_summary_config(self, model: str, provider: str) -> LLMConfig:
         return LLMConfig(
-            provider="openai",
+            provider=provider,
             model=model,
             system_prompt="You are a conversation summarizer.",
             max_output_tokens=1_024,
@@ -324,9 +354,12 @@ class CompactionService:
         history: list[StoredMessage],
         model: str,
         api_key: str,
+        provider: str,
     ) -> str | None:
         chunks: list[str] = []
-        async for chunk in self._call_summarizer_stream(history, model, api_key):
+        async for chunk in self._call_summarizer_stream(
+            history, model, api_key, provider
+        ):
             if chunk.text:
                 chunks.append(chunk.text)
         return "".join(chunks).strip()
@@ -336,9 +369,10 @@ class CompactionService:
         history: list[StoredMessage],
         model: str,
         api_key: str,
+        provider: str,
     ):
         summarization_prompt = self._build_summarization_prompt(history)
-        summary_config = self._build_summary_config(model)
+        summary_config = self._build_summary_config(model, provider)
 
         async for chunk in self.gateway.generate_stream(
             api_key=api_key,
@@ -364,7 +398,9 @@ class CompactionService:
         models = CompactionService._dedup_models(config)
         for model in models:
             try:
-                summary = await self._call_summarizer(history, model, api_key)
+                summary = await self._call_summarizer(
+                    history, model, api_key, config.provider
+                )
                 if summary:
                     return summary
             except (TemporaryProviderError, PermanentProviderError) as e:
@@ -391,7 +427,7 @@ class CompactionService:
             collected: list[ProviderChunk] = []
             try:
                 async for chunk in self._call_summarizer_stream(
-                    history, model, api_key
+                    history, model, api_key, config.provider
                 ):
                     collected.append(chunk)
             except (TemporaryProviderError, PermanentProviderError) as e:
@@ -444,6 +480,8 @@ class ChatService:
         self.compaction = CompactionService(self.counter, self.gateway)
 
     async def _resolve_api_key(self, user, provider: str) -> str:
+        if provider == "llamacpp":
+            return "llamacpp"
         try:
             key_record = await UserApiKey.objects.aget(user=user, provider=provider)
         except UserApiKey.DoesNotExist:
@@ -500,6 +538,12 @@ class ChatService:
                 ]
 
         api_key = await self._resolve_api_key(user, config.provider)
+
+        if config.provider == "llamacpp":
+            n_ctx = await ProviderGateway.discover_llamacpp_context()
+            if config.max_input_tokens > n_ctx:
+                config = replace(config, max_input_tokens=n_ctx)
+
         session = await Conversation.objects.aget(id=session_id)
 
         history = await self.repository.list_messages(
@@ -537,7 +581,11 @@ class ChatService:
             summary = full_text.strip()
             if summary:
                 compaction_msg = await self.repository.apply_compaction(
-                    session=session, summary=summary, usage=summary_usage
+                    session=session,
+                    summary=summary,
+                    provider=config.provider,
+                    model=config.model,
+                    usage=summary_usage,
                 )
                 compaction_summary = summary
                 compaction_msg_id = str(compaction_msg.id)
