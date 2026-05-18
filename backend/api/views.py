@@ -4,7 +4,7 @@ import logging
 
 from asgiref.sync import async_to_sync, sync_to_async
 from django.db import connection
-from django.http import StreamingHttpResponse
+from django.http import StreamingHttpResponse, JsonResponse
 from django.shortcuts import get_object_or_404, aget_object_or_404
 from django.utils.decorators import method_decorator
 from django.views import View
@@ -83,12 +83,10 @@ class RegisterView(generics.CreateAPIView):
     permission_classes = [permissions.AllowAny]
 
 
-class ModelListView(APIView):
-    permission_classes = [permissions.AllowAny]
-
-    def get(self, request):
-        data = async_to_sync(ChatService.get_available_models)()
-        return Response(data)
+class ModelListView(View):
+    async def get(self, request):
+        data = await ChatService.get_available_models()
+        return JsonResponse(data)
 
 
 class ConversationViewSet(viewsets.ModelViewSet):
