@@ -3,14 +3,12 @@ import json
 import logging
 
 from asgiref.sync import async_to_sync, sync_to_async
-from django.db import connection
 from django.http import StreamingHttpResponse, JsonResponse
 from django.shortcuts import get_object_or_404, aget_object_or_404
 from django.utils.decorators import method_decorator
 from django.views import View
 from django.views.decorators.csrf import csrf_exempt
 from rest_framework import exceptions, generics, mixins, permissions, viewsets, status
-from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework_simplejwt.authentication import JWTAuthentication
 
@@ -62,20 +60,17 @@ def _sse_error(message: str, code: str | None = None) -> list[str]:
     return [f"data: {json.dumps(payload)}\n\n"]
 
 
-class HealthView(APIView):
-    permission_classes = [permissions.AllowAny]
-
-    def get(self, request):
+class HealthView(View):
+    async def get(self, request):
         try:
-            with connection.cursor() as cursor:
-                cursor.execute("SELECT 1")
+            await Conversation.objects.none().aexists()
         except Exception:
             logger.exception("Health check failed")
-            return Response(
+            return JsonResponse(
                 {"status": "unhealthy"},
                 status=status.HTTP_503_SERVICE_UNAVAILABLE,
             )
-        return Response({"status": "ok", "database": "connected"})
+        return JsonResponse({"status": "ok", "database": "connected"})
 
 
 class RegisterView(generics.CreateAPIView):

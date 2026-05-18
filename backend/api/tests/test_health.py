@@ -1,7 +1,6 @@
-from unittest.mock import patch
+from unittest.mock import patch, AsyncMock
 
 import pytest
-from django.db import connection
 from rest_framework import status
 
 HEALTH_URL = "/api/health/"
@@ -20,14 +19,16 @@ class TestHealth:
     def test_health_returns_ok(self, client):
         response = client.get(HEALTH_URL)
         assert response.status_code == status.HTTP_200_OK
-        assert response.data["status"] == "ok"
-        assert response.data["database"] == "connected"
+        data = response.json()
+        assert data["status"] == "ok"
+        assert data["database"] == "connected"
 
     def test_health_db_down_returns_503(self, client):
-        with patch.object(
-            connection, "cursor", side_effect=RuntimeError("connection failed")
-        ):
+        mock_qs = AsyncMock()
+        mock_qs.aexists = AsyncMock(side_effect=RuntimeError("connection failed"))
+        with patch("api.views.Conversation.objects.none", return_value=mock_qs):
             response = client.get(HEALTH_URL)
         assert response.status_code == status.HTTP_503_SERVICE_UNAVAILABLE
-        assert response.data["status"] == "unhealthy"
-        assert "database" not in response.data
+        data = response.json()
+        assert data["status"] == "unhealthy"
+        assert "database" not in data
