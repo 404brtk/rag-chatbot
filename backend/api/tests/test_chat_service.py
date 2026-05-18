@@ -11,7 +11,6 @@ from api.chat_service import (
     ChatService,
     CompactionService,
     GenerationResult,
-    HistoryWindow,
     InvalidInputError,
     LLMConfig,
     MissingApiKeyError,
@@ -92,189 +91,6 @@ class TestTokenCounter:
     def test_truncate_text_negative_limit_returns_empty(self):
         result = self.counter.truncate_text_to_max_tokens("Hello", "gpt-5.5", -5)
         assert result == ""
-
-
-class TestHistoryWindowNormalize:
-    def setup_method(self):
-        self.window = HistoryWindow()
-
-    def test_merges_consecutive_same_role_messages(self):
-        messages = [
-            _msg("user", "Hello"),
-            _msg("user", "Can you help?"),
-        ]
-        result = self.window.normalize(messages)
-        assert len(result) == 1
-        assert "Hello" in result[0].content
-        assert "Can you help?" in result[0].content
-
-    def test_strips_empty_messages(self):
-        messages = [
-            _msg("user", "Hello"),
-            _msg("assistant", ""),
-            _msg("assistant", "Hi there"),
-        ]
-        result = self.window.normalize(messages)
-        assert len(result) == 2
-        assert result[0].role == "user"
-        assert result[1].role == "assistant"
-
-    def test_strips_whitespace_only_messages(self):
-        messages = [
-            _msg("user", "   "),
-        ]
-        result = self.window.normalize(messages)
-        assert len(result) == 0
-
-    def test_preserves_alternating_roles(self):
-        messages = [
-            _msg("user", "Hello"),
-            _msg("assistant", "Hi"),
-            _msg("user", "How are you?"),
-        ]
-        result = self.window.normalize(messages)
-        assert len(result) == 3
-        assert result[0].role == "user"
-        assert result[1].role == "assistant"
-        assert result[2].role == "user"
-
-    def test_preserves_none_meta_as_empty_dict(self):
-        msg = StoredMessage(role="user", content="Hello", created_at=None, meta=None)
-        result = self.window.normalize([msg])
-        assert result[0].meta == {}
-
-    def test_merged_message_uses_later_timestamp(self):
-        messages = [
-            _msg("user", "First", created_at=datetime(2025, 1, 1, tzinfo=timezone.utc)),
-            _msg(
-                "user", "Second", created_at=datetime(2025, 6, 1, tzinfo=timezone.utc)
-            ),
-        ]
-        result = self.window.normalize(messages)
-        assert len(result) == 1
-        assert result[0].created_at == datetime(2025, 6, 1, tzinfo=timezone.utc)
-
-
-class TestHistoryWindowFitToTokenLimit:
-    def setup_method(self):
-        self.window = HistoryWindow()
-        self.counter = TokenCounter()
-
-    def test_raises_on_empty_history(self):
-        with pytest.raises(InvalidInputError, match="Empty message history"):
-            self.window.fit_to_token_limit(
-                system_prompt="You are helpful.",
-                messages=[_msg("user", "")],
-                model="gpt-5.5",
-                max_input_tokens=4096,
-                counter=self.counter,
-            )
-
-    def test_raises_when_no_user_first_history_after_trimming(self):
-        messages = [
-            _msg("assistant", "Just me here"),
-        ]
-        with pytest.raises(InvalidInputError, match="No valid user-first history"):
-            self.window.fit_to_token_limit(
-                system_prompt="You are helpful.",
-                messages=messages,
-                model="gpt-5.5",
-                max_input_tokens=4096,
-                counter=self.counter,
-            )
-
-    def test_trims_older_messages_from_start(self):
-        short_prompt = "Hi"
-        messages = [
-            _msg("user", "first question"),
-            _msg("assistant", "first answer"),
-            _msg("user", "second question"),
-            _msg("assistant", "second answer"),
-            _msg("user", "current question"),
-        ]
-        system_tokens = self.counter.estimate_system_tokens(short_prompt, "gpt-5.5")
-        user_msg_tokens = self.counter.estimate_message_tokens(
-            _msg("user", "current question"), "gpt-5.5"
-        )
-
-        tight_limit = system_tokens + 24 + user_msg_tokens + 10
-
-        result = self.window.fit_to_token_limit(
-            system_prompt=short_prompt,
-            messages=messages,
-            model="gpt-5.5",
-            max_input_tokens=tight_limit,
-            counter=self.counter,
-        )
-
-        assert result[-1].content == "current question"
-        assert result[0].role == "user"
-
-    def test_first_kept_message_is_always_user(self):
-        messages = [
-            _msg("assistant", "stray assistant msg"),
-            _msg("user", "real question"),
-        ]
-        result = self.window.fit_to_token_limit(
-            system_prompt="Hi",
-            messages=messages,
-            model="gpt-5.5",
-            max_input_tokens=4096,
-            counter=self.counter,
-        )
-        assert result[0].role == "user"
-
-    def test_truncates_first_message_when_it_exceeds_budget(self):
-        long_content = "word " * 2000
-        messages = [
-            _msg("user", long_content),
-        ]
-        result = self.window.fit_to_token_limit(
-            system_prompt="You are helpful.",
-            messages=messages,
-            model="gpt-5.5",
-            max_input_tokens=100,
-            counter=self.counter,
-        )
-        assert len(result) == 1
-        assert result[0].role == "user"
-        assert result[0].meta.get("truncated_for_model") is True
-
-    def test_full_history_fits_within_budget(self):
-        messages = [
-            _msg("user", "Hi"),
-            _msg("assistant", "Hello"),
-            _msg("user", "How are you?"),
-        ]
-        result = self.window.fit_to_token_limit(
-            system_prompt="You are helpful.",
-            messages=messages,
-            model="gpt-5.5",
-            max_input_tokens=4096,
-            counter=self.counter,
-        )
-        assert len(result) == 3
-        assert result[0].content == "Hi"
-        assert result[1].content == "Hello"
-        assert result[2].content == "How are you?"
-
-    def test_preserves_assistant_prefix_when_require_user_first_false(self):
-        messages = [
-            _msg("assistant", "Summary of prior conversation"),
-            _msg("user", "Current question"),
-        ]
-        result = self.window.fit_to_token_limit(
-            system_prompt="You are helpful.",
-            messages=messages,
-            model="gpt-5.5",
-            max_input_tokens=4096,
-            counter=self.counter,
-            require_user_first=False,
-        )
-        assert len(result) == 2
-        assert result[0].role == "assistant"
-        assert result[0].content == "Summary of prior conversation"
-        assert result[1].role == "user"
 
 
 class TestProviderGateway:
@@ -1235,21 +1051,51 @@ class TestCompactionService:
         assert result == "Summary."
         assert self.gateway.generate_stream.call_count == 1
 
-    def test_chunk_truncate_keeps_second_half(self):
+    def test_chunk_truncate_returns_all_when_under_threshold(self):
         history = [
             _msg("user", "1"),
             _msg("assistant", "a"),
             _msg("user", "2"),
             _msg("assistant", "b"),
-            _msg("user", "3"),
-            _msg("assistant", "c"),
         ]
-        result = self.service.chunk_truncate(history)
-        assert len(result) == 3
-        assert result[0].content == "b"
+        new_msg = _msg("user", "3")
+        config = replace(DEFAULT_CONFIG, max_input_tokens=4096)
+        result = self.service.chunk_truncate(
+            history=history,
+            new_message=new_msg,
+            system_prompt=config.system_prompt,
+            config=config,
+        )
+        assert len(result) == 4
+        assert result[0].content == "1"
+
+    def test_chunk_truncate_halves_until_under_threshold(self):
+        long_msg = _msg("user", "word " * 2000)
+        history = [long_msg] * 6
+        new_msg = _msg("user", "Hello")
+        config = replace(
+            DEFAULT_CONFIG, max_input_tokens=4096, compaction_threshold=0.5
+        )
+        result = self.service.chunk_truncate(
+            history=history,
+            new_message=new_msg,
+            system_prompt=config.system_prompt,
+            config=config,
+        )
+        assert len(result) == 1
 
     def test_chunk_truncate_empty_returns_empty(self):
-        assert self.service.chunk_truncate([]) == []
+        new_msg = _msg("user", "Hello")
+        config = DEFAULT_CONFIG
+        assert (
+            self.service.chunk_truncate(
+                history=[],
+                new_message=new_msg,
+                system_prompt=config.system_prompt,
+                config=config,
+            )
+            == []
+        )
 
     async def test_compact_stream_does_not_yield_partial_on_fallback(self):
         async def _failing_stream():
@@ -1340,41 +1186,37 @@ class TestChatServiceCompaction:
         assert apply_call["session"] == self.mock_session
         assert apply_call["summary"] == "This is the conversation summary."
         assert self.mock_repo.list_messages.call_count == 2
-        assert prep.trimmed_messages[0].meta.get("is_compaction_summary") is True
+        assert prep.messages[0].meta.get("is_compaction_summary") is True
 
-    @patch.object(CompactionService, "should_compact", return_value=True)
     @patch.object(ChatService, "_resolve_api_key", return_value="sk-test")
-    async def test_prepare_generation_falls_back_to_chunk_truncate(
-        self, mock_resolve, mock_should
-    ):
+    async def test_prepare_generation_falls_back_to_chunk_truncate(self, mock_resolve):
         async def _empty_gen():
             if False:
                 yield
 
         mock_compact_stream = MagicMock(return_value=_empty_gen())
         with patch.object(CompactionService, "compact_stream", mock_compact_stream):
-            history = [
-                _msg("user", "question one"),
-                _msg("assistant", "answer one"),
-                _msg("user", "question two"),
-                _msg("assistant", "answer two"),
-                _msg("user", "question three"),
-                _msg("assistant", "answer three"),
-            ]
+            long_msg = _msg("user", "word " * 400)
+            history = [long_msg] * 6
             self.mock_repo.list_messages.return_value = history
             service = ChatService(repository=self.mock_repo)
+            config = replace(
+                DEFAULT_CONFIG,
+                max_input_tokens=400,
+                compaction_threshold=0.5,
+            )
             prep = await service._prepare_generation(
                 user=self.mock_user,
                 session_id="test-session",
                 user_text="Hello",
-                config=DEFAULT_CONFIG,
+                config=config,
             )
 
         assert prep.compaction_summary is None
         assert prep.compaction_tokens is None
         self.mock_repo.apply_compaction.assert_not_called()
-        assert len(prep.trimmed_messages) == 3
-        assert prep.trimmed_messages[0].content == "question three"
+        assert len(prep.messages) == 2
+        assert prep.messages[0].content.startswith("word ")
 
     @patch.object(CompactionService, "should_compact", return_value=False)
     @patch.object(ChatService, "_resolve_api_key", return_value="sk-test")
@@ -1396,10 +1238,10 @@ class TestChatServiceCompaction:
 
         assert prep.compaction_summary is None
         self.mock_repo.apply_compaction.assert_not_called()
-        assert len(prep.trimmed_messages) == 3
-        assert prep.trimmed_messages[0].content == "question one"
-        assert prep.trimmed_messages[1].content == "answer one"
-        assert prep.trimmed_messages[2].content == "Hello"
+        assert len(prep.messages) == 3
+        assert prep.messages[0].content == "question one"
+        assert prep.messages[1].content == "answer one"
+        assert prep.messages[2].content == "Hello"
 
     @patch.object(CompactionService, "should_compact", return_value=False)
     @patch.object(ChatService, "_resolve_api_key", return_value="sk-test")
@@ -1422,9 +1264,9 @@ class TestChatServiceCompaction:
 
         assert prep.compaction_summary is None
         self.mock_repo.apply_compaction.assert_not_called()
-        assert len(prep.trimmed_messages) == 4
-        assert prep.trimmed_messages[0].meta.get("is_compaction_summary") is True
-        assert prep.trimmed_messages[0].content == "Prior summary"
+        assert len(prep.messages) == 4
+        assert prep.messages[0].meta.get("is_compaction_summary") is True
+        assert prep.messages[0].content == "Prior summary"
 
     @patch.object(CompactionService, "should_compact", return_value=True)
     @patch.object(ChatService, "_resolve_api_key", return_value="sk-test")

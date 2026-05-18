@@ -167,91 +167,6 @@ class TokenCounter:
         return enc.decode(ids[:max_tokens]).strip()
 
 
-class HistoryWindow:
-    def normalize(self, messages: list[StoredMessage]) -> list[StoredMessage]:
-        normalized: list[StoredMessage] = []
-
-        for msg in messages:
-            content = (msg.content or "").strip()
-            if not content:
-                continue
-
-            if normalized and normalized[-1].role == msg.role:
-                prev = normalized[-1]
-                normalized[-1] = StoredMessage(
-                    role=prev.role,
-                    content=f"{prev.content}\n\n{content}",
-                    created_at=msg.created_at,
-                    meta=prev.meta,
-                )
-            else:
-                normalized.append(
-                    StoredMessage(
-                        role=msg.role,
-                        content=content,
-                        created_at=msg.created_at,
-                        meta=msg.meta or {},
-                    )
-                )
-
-        return normalized
-
-    def fit_to_token_limit(
-        self,
-        *,
-        system_prompt: str,
-        messages: list[StoredMessage],
-        model: str,
-        max_input_tokens: int,
-        counter: TokenCounter,
-        require_user_first: bool = True,
-    ) -> list[StoredMessage]:
-        normalized = self.normalize(messages)
-        if not normalized:
-            raise InvalidInputError("Empty message history.")
-
-        running = counter.estimate_system_tokens(system_prompt, model) + 24
-        kept_rev: list[StoredMessage] = []
-
-        for msg in reversed(normalized):
-            cost = counter.estimate_message_tokens(msg, model)
-            if running + cost <= max_input_tokens:
-                kept_rev.append(msg)
-                running += cost
-                continue
-
-            if not kept_rev:
-                remain = max_input_tokens - running - 6
-                truncated = counter.truncate_text_to_max_tokens(
-                    msg.content,
-                    model=model,
-                    max_tokens=max(0, remain),
-                )
-                if truncated:
-                    kept_rev.append(
-                        StoredMessage(
-                            role=msg.role,
-                            content=truncated,
-                            created_at=msg.created_at,
-                            meta={**(msg.meta or {}), "truncated_for_model": True},
-                        )
-                    )
-            break
-
-        kept = list(reversed(kept_rev))
-
-        if require_user_first:
-            while kept and kept[0].role != "user":
-                kept.pop(0)
-
-        kept = self.normalize(kept)
-
-        if not kept:
-            raise InvalidInputError("No valid user-first history after trimming.")
-
-        return kept
-
-
 class ProviderGateway:
     async def _generate_openai(
         self,
@@ -366,7 +281,7 @@ class _GenerationPrep:
     user_message: str
     context_chunks: list[dict[str, Any]] | None
     api_key: str
-    trimmed_messages: list[StoredMessage]
+    messages: list[StoredMessage]
     session: Conversation
     compaction_summary: str | None = None
     compaction_message_id: str | None = None
@@ -502,18 +417,28 @@ class CompactionService:
         threshold = int(config.max_input_tokens * config.compaction_threshold)
         return total > threshold
 
-    def chunk_truncate(self, history: list[StoredMessage]) -> list[StoredMessage]:
-        if not history:
-            return history
-        keep_from = len(history) // 2
-        return history[keep_from:]
+    def chunk_truncate(
+        self,
+        *,
+        history: list[StoredMessage],
+        new_message: StoredMessage,
+        system_prompt: str,
+        config: LLMConfig,
+    ) -> list[StoredMessage]:
+        while len(history) > 1 and self.should_compact(
+            system_prompt=system_prompt,
+            history=history,
+            new_message=new_message,
+            config=config,
+        ):
+            history = history[len(history) // 2 :]
+        return history
 
 
 class ChatService:
     def __init__(self, repository: AsyncDjangoMessageRepository | None = None) -> None:
         self.repository = repository or AsyncDjangoMessageRepository()
         self.counter = TokenCounter()
-        self.window = HistoryWindow()
         self.gateway = ProviderGateway()
         self.document_service = DocumentService()
         self.compaction = CompactionService(self.counter, self.gateway)
@@ -628,32 +553,24 @@ class ChatService:
                 )
             else:
                 original_count = len(history)
-                history = self.compaction.chunk_truncate(history)
+                history = self.compaction.chunk_truncate(
+                    history=history,
+                    new_message=new_msg,
+                    system_prompt=config.system_prompt,
+                    config=config,
+                )
                 logger.warning(
                     "Compaction summarization produced no output — fell back to chunk_truncate (kept %d/%d)",
                     len(history),
                     original_count,
                 )
 
-        has_summary_prefix = bool(history) and (history[0].meta or {}).get(
-            "is_compaction_summary"
-        )
-
-        trimmed = self.window.fit_to_token_limit(
-            system_prompt=config.system_prompt,
-            messages=[*history, new_msg],
-            model=config.model,
-            max_input_tokens=config.max_input_tokens,
-            counter=self.counter,
-            require_user_first=not has_summary_prefix,
-        )
-
         return _GenerationPrep(
             clean_user_text=clean_user_text,
             user_message=user_message,
             context_chunks=context_chunks,
             api_key=api_key,
-            trimmed_messages=trimmed,
+            messages=[*history, new_msg],
             session=session,
             compaction_summary=compaction_summary,
             compaction_message_id=compaction_msg_id,
@@ -705,7 +622,7 @@ class ChatService:
 
         try:
             result = await self.gateway.generate(
-                api_key=prep.api_key, config=config, messages=prep.trimmed_messages
+                api_key=prep.api_key, config=config, messages=prep.messages
             )
         except ChatServiceError:
             logger.exception(
@@ -789,7 +706,7 @@ class ChatService:
             assistant_text = ""
             usage_data = None
             async for chunk in self.gateway.generate_stream(
-                api_key=prep.api_key, config=config, messages=prep.trimmed_messages
+                api_key=prep.api_key, config=config, messages=prep.messages
             ):
                 if chunk.text:
                     assistant_text += chunk.text
@@ -804,7 +721,7 @@ class ChatService:
                     )
                     + sum(
                         self.counter.estimate_message_tokens(m, config.model)
-                        for m in prep.trimmed_messages
+                        for m in prep.messages
                     ),
                     "completion_tokens": self.counter.estimate_text_tokens(
                         assistant_text, config.model
@@ -821,7 +738,7 @@ class ChatService:
                 meta={
                     "input_tokens": usage_data.get("prompt_tokens"),
                     "output_tokens": usage_data.get("completion_tokens"),
-                    "model_input_message_count": len(prep.trimmed_messages),
+                    "model_input_message_count": len(prep.messages),
                 },
             )
 
