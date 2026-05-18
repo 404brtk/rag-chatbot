@@ -8,6 +8,7 @@ from .views import (
     DocumentViewSet,
     RegisterView,
     UserApiKeyViewSet,
+    ModelListView,
 )
 
 router = DefaultRouter()
@@ -20,6 +21,7 @@ message_list = MessageViewSet.as_view({"get": "list", "post": "create"})
 urlpatterns = [
     path("health/", HealthView.as_view(), name="health"),
     path("register/", RegisterView.as_view(), name="register"),
+    path("models/", ModelListView.as_view(), name="models"),
     path("", include(router.urls)),
     path(
         "conversations/<uuid:conversation_pk>/messages/",

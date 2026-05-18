@@ -1,4 +1,5 @@
 import logging
+import time
 from dataclasses import dataclass, replace
 from typing import Any, Literal
 
@@ -171,6 +172,10 @@ class TokenCounter:
 
 class ProviderGateway:
     _llamacpp_context: int | None = None
+    _llamacpp_context_fetched_at: float = 0.0
+    _llamacpp_models: list[dict] | None = None
+    _llamacpp_models_fetched_at: float = 0.0
+    CACHE_TTL_SECONDS = 300.0
 
     @staticmethod
     def _build_client(*, api_key: str, provider: str) -> AsyncOpenAI:
@@ -291,7 +296,12 @@ class ProviderGateway:
 
     @staticmethod
     async def discover_llamacpp_context() -> int:
-        if ProviderGateway._llamacpp_context is not None:
+        now = time.time()
+        if (
+            ProviderGateway._llamacpp_context is not None
+            and (now - ProviderGateway._llamacpp_context_fetched_at)
+            < ProviderGateway.CACHE_TTL_SECONDS
+        ):
             return ProviderGateway._llamacpp_context
 
         base = settings.LLAMACPP_BASE_URL
@@ -301,8 +311,30 @@ class ProviderGateway:
             n_ctx = resp.json()["default_generation_settings"]["n_ctx"]
 
         ProviderGateway._llamacpp_context = n_ctx
+        ProviderGateway._llamacpp_context_fetched_at = now
         logger.info(f"Discovered llama.cpp context window: {n_ctx} tokens")
         return n_ctx
+
+    @staticmethod
+    async def discover_llamacpp_models() -> list[dict]:
+        now = time.time()
+        if (
+            ProviderGateway._llamacpp_models is not None
+            and (now - ProviderGateway._llamacpp_models_fetched_at)
+            < ProviderGateway.CACHE_TTL_SECONDS
+        ):
+            return ProviderGateway._llamacpp_models
+
+        base = settings.LLAMACPP_BASE_URL
+        async with httpx.AsyncClient(timeout=5.0) as client:
+            resp = await client.get(f"{base}/v1/models")
+            resp.raise_for_status()
+            data = resp.json().get("data", [])
+
+        ProviderGateway._llamacpp_models = data
+        ProviderGateway._llamacpp_models_fetched_at = now
+        logger.info(f"Discovered {len(data)} llama.cpp model(s)")
+        return data
 
 
 @dataclass(frozen=True, slots=True)
@@ -829,3 +861,14 @@ class ChatService:
                 error_message="Internal server error",
                 error_code="internal_error",
             )
+
+    @staticmethod
+    async def get_available_models() -> dict[str, list[str]]:
+        openai_models = list(getattr(settings, "OPENAI_MODELS", []))
+        llamacpp_models: list[str] = []
+        try:
+            raw = await ProviderGateway.discover_llamacpp_models()
+            llamacpp_models = [m["id"] for m in raw]
+        except Exception:
+            logger.warning("Failed to discover llama.cpp models")
+        return {"openai": openai_models, "llamacpp": llamacpp_models}

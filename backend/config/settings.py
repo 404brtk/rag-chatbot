@@ -162,6 +162,8 @@ RAG_SIMILARITY_THRESHOLD = env.float("RAG_SIMILARITY_THRESHOLD", default=0.5)
 
 LLAMACPP_BASE_URL = env.str("LLAMACPP_BASE_URL", default="http://localhost:8080")
 
+OPENAI_MODELS = env.list("OPENAI_MODELS", default=["gpt-5.4-mini"])
+
 CORS_ALLOWED_ORIGINS = env.list("CORS_ALLOWED_ORIGINS", default=[])
 CORS_ALLOW_ALL_ORIGINS = DEBUG
 

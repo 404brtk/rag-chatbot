@@ -38,6 +38,8 @@ from .chat_service import (
     validate_llm_config,
 )
 
+logger = logging.getLogger(__name__)
+
 DEFAULT_SYSTEM_PROMPT = (
     "You are an expert Senior Developer and AI Coding Assistant. "
     "You will be provided with reference documents in the user's message. "
@@ -68,7 +70,6 @@ class HealthView(APIView):
             with connection.cursor() as cursor:
                 cursor.execute("SELECT 1")
         except Exception:
-            logger = logging.getLogger(__name__)
             logger.exception("Health check failed")
             return Response(
                 {"status": "unhealthy"},
@@ -80,6 +81,14 @@ class HealthView(APIView):
 class RegisterView(generics.CreateAPIView):
     serializer_class = RegisterSerializer
     permission_classes = [permissions.AllowAny]
+
+
+class ModelListView(APIView):
+    permission_classes = [permissions.AllowAny]
+
+    def get(self, request):
+        data = async_to_sync(ChatService.get_available_models)()
+        return Response(data)
 
 
 class ConversationViewSet(viewsets.ModelViewSet):

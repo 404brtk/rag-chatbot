@@ -1484,3 +1484,92 @@ class TestChatServiceCompaction:
         n_ctx = await ProviderGateway.discover_llamacpp_context()
 
         assert n_ctx == 16384
+
+    @patch("api.chat_service.httpx.AsyncClient")
+    async def test_discover_llamacpp_models_fetches_data(self, mock_client_cls):
+        ProviderGateway._llamacpp_models = None
+
+        mock_client = MagicMock()
+        mock_client.__aenter__.return_value = mock_client
+        fake_resp = MagicMock()
+        fake_resp.raise_for_status = MagicMock()
+        fake_resp.json.return_value = {
+            "data": [
+                {"id": "model-a", "object": "model", "owned_by": "llamacpp"},
+                {"id": "model-b", "object": "model", "owned_by": "llamacpp"},
+            ]
+        }
+        mock_client.get = AsyncMock(return_value=fake_resp)
+        mock_client_cls.return_value = mock_client
+
+        models = await ProviderGateway.discover_llamacpp_models()
+
+        assert len(models) == 2
+        assert models[0]["id"] == "model-a"
+        assert models[1]["id"] == "model-b"
+        assert ProviderGateway._llamacpp_models == models
+        mock_client.get.assert_called_once_with("http://localhost:8080/v1/models")
+
+    async def test_discover_llamacpp_models_returns_cached_value(self):
+        ProviderGateway._llamacpp_models = [
+            {"id": "cached-model", "object": "model", "owned_by": "llamacpp"}
+        ]
+        ProviderGateway._llamacpp_models_fetched_at = 100.0
+
+        with patch("api.chat_service.time.time", return_value=200.0):
+            models = await ProviderGateway.discover_llamacpp_models()
+
+        assert models == [
+            {"id": "cached-model", "object": "model", "owned_by": "llamacpp"}
+        ]
+
+    @patch("api.chat_service.httpx.AsyncClient")
+    async def test_discover_llamacpp_models_fetches_fresh_after_ttl_expires(
+        self, mock_client_cls
+    ):
+        ProviderGateway._llamacpp_models = [
+            {"id": "stale-model", "object": "model", "owned_by": "llamacpp"}
+        ]
+        ProviderGateway._llamacpp_models_fetched_at = 100.0
+
+        mock_client = MagicMock()
+        mock_client.__aenter__.return_value = mock_client
+        fake_resp = MagicMock()
+        fake_resp.raise_for_status = MagicMock()
+        fake_resp.json.return_value = {
+            "data": [{"id": "fresh-model", "object": "model", "owned_by": "llamacpp"}]
+        }
+        mock_client.get = AsyncMock(return_value=fake_resp)
+        mock_client_cls.return_value = mock_client
+
+        with patch("api.chat_service.time.time", return_value=450.0):
+            models = await ProviderGateway.discover_llamacpp_models()
+
+        assert models == [
+            {"id": "fresh-model", "object": "model", "owned_by": "llamacpp"}
+        ]
+        mock_client.get.assert_called_once()
+
+
+class TestChatServiceGetAvailableModels:
+    @patch("api.chat_service.ProviderGateway.discover_llamacpp_models")
+    async def test_returns_both_providers(self, mock_discover):
+        mock_discover.return_value = [
+            {"id": "local-model", "object": "model", "owned_by": "llamacpp"}
+        ]
+
+        models = await ChatService.get_available_models()
+
+        assert "openai" in models
+        assert "llamacpp" in models
+        assert models["llamacpp"] == ["local-model"]
+
+    @patch("api.chat_service.ProviderGateway.discover_llamacpp_models")
+    async def test_handles_llamacpp_failure_gracefully(self, mock_discover):
+        mock_discover.side_effect = Exception("Connection refused")
+
+        models = await ChatService.get_available_models()
+
+        assert "openai" in models
+        assert "llamacpp" in models
+        assert models["llamacpp"] == []
