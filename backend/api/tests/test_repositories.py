@@ -338,14 +338,17 @@ class TestApplyCompaction:
         Message.objects.create(conversation=conversation, role="ai", content="answer")
 
         summary_msg = repo.apply_compaction(
-            session=conversation, summary="Summary of conversation", usage=None
+            session=conversation,
+            summary="Summary of conversation",
+            provider="openai",
+            model="gpt-model",
         )
 
         assert summary_msg.role == "ai"
         assert summary_msg.content == "Summary of conversation"
         assert summary_msg.meta.get("is_compaction_summary") is True
-        assert summary_msg.provider is None
-        assert summary_msg.model is None
+        assert summary_msg.provider == "openai"
+        assert summary_msg.model == "gpt-model"
 
         messages = repo.list_messages(session_id=str(conversation.id))
         compacted_count = sum(1 for m in messages if m.meta.get("compacted"))
@@ -360,7 +363,12 @@ class TestApplyCompaction:
         )
         Message.objects.create(conversation=conversation, role="ai", content="answer")
 
-        repo.apply_compaction(session=conversation, summary="Summary", usage=None)
+        repo.apply_compaction(
+            session=conversation,
+            summary="Summary",
+            provider="openai",
+            model="gpt-model",
+        )
 
         compacted = Message.objects.filter(
             conversation=conversation, role="user"

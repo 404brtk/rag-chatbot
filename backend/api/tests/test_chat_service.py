@@ -3,6 +3,7 @@ from datetime import datetime, timezone
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import openai
+import httpx
 import pytest
 
 from api.models import Conversation, UserApiKey
@@ -249,6 +250,25 @@ class TestProviderGateway:
                 messages=[StoredMessage(role="user", content="Hi")],
             ):
                 pass
+
+    @patch("api.chat_service.AsyncOpenAI")
+    def test_build_client_llamacpp_sets_base_url(self, mock_openai_cls):
+        ProviderGateway._build_client(api_key="llamacpp", provider="llamacpp")
+        mock_openai_cls.assert_called_once_with(
+            base_url="http://localhost:8080/v1",
+            api_key="llamacpp",
+            timeout=60.0,
+            max_retries=2,
+        )
+
+    @patch("api.chat_service.AsyncOpenAI")
+    def test_build_client_openai_uses_defaults(self, mock_openai_cls):
+        ProviderGateway._build_client(api_key="sk-test", provider="openai")
+        mock_openai_cls.assert_called_once_with(
+            api_key="sk-test",
+            timeout=30.0,
+            max_retries=2,
+        )
 
 
 class TestFormatRagContext:
@@ -618,6 +638,13 @@ class TestChatServiceGenerateReply:
         call_kwargs = self.mock_repo.append_message_pair.call_args[1]
         assert call_kwargs["user_content"] == "Hello"
         assert "context_chunks" not in call_kwargs["user_meta"]
+
+    @patch("api.chat_service.UserApiKey.objects.aget")
+    async def test_resolve_api_key_skips_db_for_llamacpp(self, mock_get):
+        service = ChatService(repository=self.mock_repo)
+        key = await service._resolve_api_key(self.mock_user, "llamacpp")
+        assert key == "llamacpp"
+        mock_get.assert_not_called()
 
     @patch("api.chat_service.UserApiKey.objects.aget")
     async def test_raises_missing_api_key_error_when_no_key_set(self, mock_get):
@@ -1185,8 +1212,45 @@ class TestChatServiceCompaction:
         apply_call = self.mock_repo.apply_compaction.call_args[1]
         assert apply_call["session"] == self.mock_session
         assert apply_call["summary"] == "This is the conversation summary."
+        assert apply_call["provider"] == "openai"
+        assert apply_call["model"] == "gpt-5.5"
         assert self.mock_repo.list_messages.call_count == 2
         assert prep.messages[0].meta.get("is_compaction_summary") is True
+
+    @patch.object(ProviderGateway, "discover_llamacpp_context", return_value=4096)
+    @patch.object(CompactionService, "should_compact", return_value=True)
+    @patch.object(ChatService, "_resolve_api_key", return_value="llamacpp")
+    async def test_compaction_summary_records_provider_and_model_for_llamacpp(
+        self, mock_resolve, mock_should, mock_discover
+    ):
+        async def _fake_compact_stream():
+            yield ProviderChunk(text="Summary from llama.cpp.")
+
+        mock_compact_stream = MagicMock(return_value=_fake_compact_stream())
+        with patch.object(CompactionService, "compact_stream", mock_compact_stream):
+            history = [_msg("user", "question one")]
+            summary_msg = _msg(
+                "assistant",
+                "Summary from llama.cpp.",
+                meta={"is_compaction_summary": True},
+            )
+            self.mock_repo.list_messages.side_effect = [history, [summary_msg]]
+            service = ChatService(repository=self.mock_repo)
+            config = replace(
+                DEFAULT_CONFIG,
+                provider="llamacpp",
+                model="gemma-4-E4B-it",
+            )
+            await service._prepare_generation(
+                user=self.mock_user,
+                session_id="test-session",
+                user_text="Hello",
+                config=config,
+            )
+
+        apply_call = self.mock_repo.apply_compaction.call_args[1]
+        assert apply_call["provider"] == "llamacpp"
+        assert apply_call["model"] == "gemma-4-E4B-it"
 
     @patch.object(ChatService, "_resolve_api_key", return_value="sk-test")
     async def test_prepare_generation_falls_back_to_chunk_truncate(self, mock_resolve):
@@ -1314,3 +1378,109 @@ class TestChatServiceCompaction:
         assert events[3].type == "token"
         assert events[3].content == "Answer"
         assert events[4].type == "done"
+
+        self.mock_repo.apply_compaction.assert_called_once()
+        apply_call = self.mock_repo.apply_compaction.call_args[1]
+        assert apply_call["provider"] == "openai"
+        assert apply_call["model"] == "gpt-5.5"
+
+    @patch.object(ProviderGateway, "discover_llamacpp_context", return_value=4096)
+    @patch.object(ChatService, "_resolve_api_key", return_value="sk-test")
+    @patch.object(CompactionService, "should_compact", return_value=True)
+    async def test_prepare_generation_clamps_max_input_tokens_for_llamacpp(
+        self, mock_should, mock_resolve, mock_discover
+    ):
+        config = replace(DEFAULT_CONFIG, provider="llamacpp", max_input_tokens=32768)
+        history = [_msg("user", "Hello")]
+        self.mock_repo.list_messages.return_value = history
+        service = ChatService(repository=self.mock_repo)
+
+        async def _fake_compact():
+            yield ProviderChunk(text="Summary.")
+
+        with patch.object(
+            CompactionService, "compact_stream", return_value=_fake_compact()
+        ):
+            await service._prepare_generation(
+                user=self.mock_user,
+                session_id="test-session",
+                user_text="Hello",
+                config=config,
+            )
+
+        mock_discover.assert_called_once()
+        call_config = mock_should.call_args[1]["config"]
+        assert call_config.max_input_tokens == 4096
+
+    @patch.object(
+        ProviderGateway,
+        "discover_llamacpp_context",
+        side_effect=httpx.ConnectError("Connection refused"),
+    )
+    @patch.object(ChatService, "_resolve_api_key", return_value="sk-test")
+    async def test_prepare_generation_propagates_discovery_failure(
+        self, mock_resolve, mock_discover
+    ):
+        config = replace(DEFAULT_CONFIG, provider="llamacpp", max_input_tokens=4096)
+        self.mock_repo.list_messages.return_value = [_msg("user", "Hello")]
+        service = ChatService(repository=self.mock_repo)
+
+        with pytest.raises(httpx.ConnectError, match="Connection refused"):
+            await service._prepare_generation(
+                user=self.mock_user,
+                session_id="test-session",
+                user_text="Hello",
+                config=config,
+            )
+
+    @patch.object(ProviderGateway, "discover_llamacpp_context", return_value=8192)
+    @patch.object(ChatService, "_resolve_api_key", return_value="sk-test")
+    @patch.object(CompactionService, "should_compact", return_value=True)
+    async def test_prepare_generation_skips_clamp_when_within_context(
+        self, mock_should, mock_resolve, mock_discover
+    ):
+        config = replace(DEFAULT_CONFIG, provider="llamacpp", max_input_tokens=4096)
+        history = [_msg("user", "Hello")]
+        self.mock_repo.list_messages.return_value = history
+        service = ChatService(repository=self.mock_repo)
+
+        async def _fake_compact():
+            yield ProviderChunk(text="Summary.")
+
+        with patch.object(
+            CompactionService, "compact_stream", return_value=_fake_compact()
+        ):
+            await service._prepare_generation(
+                user=self.mock_user,
+                session_id="test-session",
+                user_text="Hello",
+                config=config,
+            )
+
+        call_config = mock_should.call_args[1]["config"]
+        assert call_config.max_input_tokens == 4096
+
+    @patch("api.chat_service.httpx.AsyncClient")
+    async def test_discover_llamacpp_context_fetches_n_ctx(self, mock_client_cls):
+        ProviderGateway._llamacpp_context = None
+
+        mock_client = MagicMock()
+        mock_client.__aenter__.return_value = mock_client
+        fake_resp = MagicMock()
+        fake_resp.raise_for_status = MagicMock()
+        fake_resp.json.return_value = {"default_generation_settings": {"n_ctx": 8192}}
+        mock_client.get = AsyncMock(return_value=fake_resp)
+        mock_client_cls.return_value = mock_client
+
+        n_ctx = await ProviderGateway.discover_llamacpp_context()
+
+        assert n_ctx == 8192
+        assert ProviderGateway._llamacpp_context == 8192
+        mock_client.get.assert_called_once_with("http://localhost:8080/props")
+
+    async def test_discover_llamacpp_context_returns_cached_value(self):
+        ProviderGateway._llamacpp_context = 16384
+
+        n_ctx = await ProviderGateway.discover_llamacpp_context()
+
+        assert n_ctx == 16384
