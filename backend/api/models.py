@@ -96,7 +96,6 @@ class Conversation(UUIDModel):
     )
     created_at = models.DateTimeField(auto_now_add=True)
     last_message_at = models.DateTimeField(default=timezone.now, db_index=True)
-    meta = models.JSONField(default=dict, blank=True)
 
     class Meta:
         indexes = [
