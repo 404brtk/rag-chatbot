@@ -1,4 +1,4 @@
-from api.chat_service import validate_llm_config
+from api.llm_config import validate_llm_config
 
 
 class TestValidateLLMConfig:

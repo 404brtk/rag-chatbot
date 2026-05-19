@@ -8,7 +8,7 @@ from django.contrib.auth import get_user_model
 from django.test import AsyncClient
 from rest_framework.test import APIClient
 
-from api.chat_service import StreamEvent
+from api.llm_config import StreamEvent
 from api.models import Conversation
 
 from .conftest import VALID_PASSWORD

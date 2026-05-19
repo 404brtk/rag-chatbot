@@ -26,9 +26,9 @@ from .serializers import (
     RegisterSerializer,
     UserApiKeySerializer,
 )
-from .chat_service import (
+from .chat_service import ChatService
+from .llm_config import (
     LLMConfig,
-    ChatService,
     InvalidInputError,
     MissingApiKeyError,
     TemporaryProviderError,

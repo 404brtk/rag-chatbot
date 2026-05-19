@@ -29,7 +29,7 @@ def _mock_openai_response(mock_openai_class, content="Hello!", usage=None):
 
 @pytest.mark.django_db
 class TestRAGIntegration:
-    @patch("api.chat_service.AsyncOpenAI")
+    @patch("api.provider_gateway.AsyncOpenAI")
     def test_message_without_document_ids_ignores_rag(
         self, mock_openai_class, auth_client_a, user_a, mock_document_service, api_key
     ):
@@ -53,7 +53,7 @@ class TestRAGIntegration:
         assert len(user_messages) == 1
         assert "<CONTEXT>" not in user_messages[-1]["content"]
 
-    @patch("api.chat_service.AsyncOpenAI")
+    @patch("api.provider_gateway.AsyncOpenAI")
     def test_message_with_empty_document_ids_searches_all(
         self, mock_openai_class, auth_client_a, user_a, mock_document_service, api_key
     ):
@@ -98,7 +98,7 @@ class TestRAGIntegration:
         assert "<QUESTION>" in last_content
         assert "What is in the doc?" in last_content
 
-    @patch("api.chat_service.AsyncOpenAI")
+    @patch("api.provider_gateway.AsyncOpenAI")
     def test_message_with_specific_document_ids(
         self, mock_openai_class, auth_client_a, user_a, mock_document_service, api_key
     ):

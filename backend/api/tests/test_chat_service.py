@@ -1,277 +1,29 @@
 from dataclasses import replace
-from datetime import datetime, timezone
 from unittest.mock import AsyncMock, MagicMock, patch
 
-import openai
 import httpx
 import pytest
 
 from api.models import Conversation, UserApiKey
 from api.repositories import StoredMessage
-from api.chat_service import (
-    ChatService,
-    CompactionService,
+from api.chat_service import ChatService
+from api.compaction_service import CompactionService
+from api.provider_gateway import ProviderGateway
+from api.llm_config import (
     GenerationResult,
     InvalidInputError,
-    LLMConfig,
     MissingApiKeyError,
     PermanentProviderError,
     ProviderChunk,
-    ProviderGateway,
     StreamEvent,
     TemporaryProviderError,
-    TokenCounter,
 )
 from api.document_service import SearchResult
 
-
-def _msg(role, content, created_at=None, meta=None):
-    return StoredMessage(
-        role=role,
-        content=content,
-        created_at=created_at or datetime(2025, 1, 1, tzinfo=timezone.utc),
-        meta=meta or {},
-    )
+from .conftest import DEFAULT_CONFIG, _msg
 
 
-DEFAULT_CONFIG = LLMConfig(
-    provider="openai",
-    model="gpt-5.5",
-    system_prompt="You are a helpful assistant.",
-)
-
-
-class TestTokenCounter:
-    def setup_method(self):
-        self.counter = TokenCounter()
-
-    def test_estimate_text_tokens_counts_correctly(self):
-        count = self.counter.estimate_text_tokens("Hello, world!", "gpt-5.5")
-        assert count > 0
-        assert isinstance(count, int)
-
-    def test_estimate_text_tokens_uses_fallback_for_unknown_model(self):
-        count = self.counter.estimate_text_tokens("Hello", "nonexistent-model-xyz")
-        assert count > 0
-
-    def test_estimate_message_tokens_includes_overhead(self):
-        msg = _msg("user", "Hello")
-        text_tokens = self.counter.estimate_text_tokens("Hello", "gpt-5.5")
-        message_tokens = self.counter.estimate_message_tokens(msg, "gpt-5.5")
-        assert message_tokens == text_tokens + 3
-
-    def test_estimate_system_tokens_with_content(self):
-        count = self.counter.estimate_system_tokens(
-            "You are a helpful assistant.", "gpt-5.5"
-        )
-        assert count > 3
-
-    def test_estimate_system_tokens_empty_string_returns_zero(self):
-        assert self.counter.estimate_system_tokens("", "gpt-5.5") == 0
-
-    def test_estimate_system_tokens_whitespace_only_returns_zero(self):
-        assert self.counter.estimate_system_tokens("   \n\t  ", "gpt-5.5") == 0
-
-    def test_truncate_text_under_limit_returns_unchanged(self):
-        text = "Hello"
-        result = self.counter.truncate_text_to_max_tokens(text, "gpt-5.5", 100)
-        assert result == text
-
-    def test_truncate_text_over_limit_truncates(self):
-        text = "This is a longer piece of text that should be truncated"
-        result = self.counter.truncate_text_to_max_tokens(text, "gpt-5.5", 2)
-        full_count = self.counter.estimate_text_tokens(text, "gpt-5.5")
-        truncated_count = self.counter.estimate_text_tokens(result, "gpt-5.5")
-        assert truncated_count <= 2
-        assert truncated_count < full_count
-
-    def test_truncate_text_zero_limit_returns_empty(self):
-        result = self.counter.truncate_text_to_max_tokens("Hello", "gpt-5.5", 0)
-        assert result == ""
-
-    def test_truncate_text_negative_limit_returns_empty(self):
-        result = self.counter.truncate_text_to_max_tokens("Hello", "gpt-5.5", -5)
-        assert result == ""
-
-
-class TestProviderGateway:
-    @patch("api.chat_service.AsyncOpenAI")
-    async def test_routes_to_openai_for_openai_provider(self, mock_openai_cls):
-        mock_client = MagicMock()
-        mock_openai_cls.return_value = mock_client
-
-        mock_response = MagicMock()
-        mock_response.choices = [MagicMock()]
-        mock_response.choices[0].message.content = "Hello!"
-        mock_response.usage.model_dump.return_value = {
-            "prompt_tokens": 5,
-            "completion_tokens": 2,
-        }
-        mock_client.chat.completions.create = AsyncMock(return_value=mock_response)
-
-        gateway = ProviderGateway()
-        result = await gateway.generate(
-            api_key="sk-test",
-            config=DEFAULT_CONFIG,
-            messages=[StoredMessage(role="user", content="Hi")],
-        )
-
-        assert result.provider == "openai"
-        assert result.text == "Hello!"
-        mock_client.chat.completions.create.assert_called_once()
-
-    async def test_raises_permanent_error_for_unsupported_provider(self):
-        gateway = ProviderGateway()
-        config = replace(DEFAULT_CONFIG, provider="unsupported")
-
-        with pytest.raises(PermanentProviderError, match="Unsupported provider"):
-            await gateway.generate(
-                api_key="sk-test",
-                config=config,
-                messages=[StoredMessage(role="user", content="Hi")],
-            )
-
-    @pytest.mark.parametrize(
-        "error_class,expected_exception,kwargs",
-        [
-            (
-                openai.RateLimitError,
-                TemporaryProviderError,
-                {"message": "rate limited", "response": MagicMock(), "body": None},
-            ),
-            (
-                openai.BadRequestError,
-                PermanentProviderError,
-                {"message": "bad request", "response": MagicMock(), "body": None},
-            ),
-            (
-                openai.APIConnectionError,
-                TemporaryProviderError,
-                {"request": MagicMock()},
-            ),
-            (
-                openai.APITimeoutError,
-                TemporaryProviderError,
-                {"request": MagicMock()},
-            ),
-            (
-                openai.InternalServerError,
-                TemporaryProviderError,
-                {"message": "internal error", "response": MagicMock(), "body": None},
-            ),
-            (
-                openai.AuthenticationError,
-                PermanentProviderError,
-                {"message": "invalid key", "response": MagicMock(), "body": None},
-            ),
-        ],
-    )
-    @patch("api.chat_service.AsyncOpenAI")
-    async def test_maps_openai_errors(
-        self, mock_openai_cls, error_class, expected_exception, kwargs
-    ):
-        mock_client = MagicMock()
-        mock_openai_cls.return_value = mock_client
-        mock_client.chat.completions.create.side_effect = error_class(**kwargs)
-
-        gateway = ProviderGateway()
-        with pytest.raises(expected_exception):
-            await gateway.generate(
-                api_key="sk-test",
-                config=DEFAULT_CONFIG,
-                messages=[StoredMessage(role="user", content="Hi")],
-            )
-
-    @patch("api.chat_service.AsyncOpenAI")
-    async def test_stream_yields_tokens_and_usage(self, mock_openai_cls):
-        mock_client = MagicMock()
-        mock_openai_cls.return_value = mock_client
-
-        chunk_a = MagicMock(usage=None, choices=[MagicMock()])
-        chunk_a.choices[0].delta.content = "Hello"
-        chunk_b = MagicMock(usage=None, choices=[MagicMock()])
-        chunk_b.choices[0].delta.content = " world"
-        usage_chunk = MagicMock(choices=[], usage=MagicMock())
-        usage_chunk.usage.model_dump.return_value = {
-            "prompt_tokens": 10,
-            "completion_tokens": 3,
-        }
-
-        async def fake_stream():
-            for c in [chunk_a, chunk_b, usage_chunk]:
-                yield c
-
-        mock_client.chat.completions.create = AsyncMock(return_value=fake_stream())
-
-        gateway = ProviderGateway()
-        chunks = [
-            c
-            async for c in gateway.generate_stream(
-                api_key="sk-test",
-                config=DEFAULT_CONFIG,
-                messages=[StoredMessage(role="user", content="Hi")],
-            )
-        ]
-
-        text_chunks = [c for c in chunks if c.text]
-        usage_chunks = [c for c in chunks if c.usage]
-        assert len(text_chunks) == 2
-        assert text_chunks[0] == ProviderChunk(text="Hello")
-        assert text_chunks[1] == ProviderChunk(text=" world")
-        assert len(usage_chunks) == 1
-        assert usage_chunks[0].usage["prompt_tokens"] == 10
-
-    @patch("api.chat_service.AsyncOpenAI")
-    async def test_stream_maps_openai_errors(self, mock_openai_cls):
-        mock_client = MagicMock()
-        mock_openai_cls.return_value = mock_client
-        mock_client.chat.completions.create = AsyncMock(
-            side_effect=openai.RateLimitError(
-                message="rate limited", response=MagicMock(), body=None
-            )
-        )
-
-        gateway = ProviderGateway()
-        with pytest.raises(TemporaryProviderError):
-            async for _ in gateway.generate_stream(
-                api_key="sk-test",
-                config=DEFAULT_CONFIG,
-                messages=[StoredMessage(role="user", content="Hi")],
-            ):
-                pass
-
-    async def test_stream_raises_for_unsupported_provider(self):
-        gateway = ProviderGateway()
-        config = replace(DEFAULT_CONFIG, provider="unsupported")
-        with pytest.raises(PermanentProviderError, match="Unsupported provider"):
-            async for _ in gateway.generate_stream(
-                api_key="sk-test",
-                config=config,
-                messages=[StoredMessage(role="user", content="Hi")],
-            ):
-                pass
-
-    @patch("api.chat_service.AsyncOpenAI")
-    def test_build_client_llamacpp_sets_base_url(self, mock_openai_cls):
-        ProviderGateway._build_client(api_key="llamacpp", provider="llamacpp")
-        mock_openai_cls.assert_called_once_with(
-            base_url="http://localhost:8080/v1",
-            api_key="llamacpp",
-            timeout=60.0,
-            max_retries=2,
-        )
-
-    @patch("api.chat_service.AsyncOpenAI")
-    def test_build_client_openai_uses_defaults(self, mock_openai_cls):
-        ProviderGateway._build_client(api_key="sk-test", provider="openai")
-        mock_openai_cls.assert_called_once_with(
-            api_key="sk-test",
-            timeout=30.0,
-            max_retries=2,
-        )
-
-
-class TestFormatRagContext:
+class TestChatServiceStatic:
     def test_formats_single_chunk_with_label_and_source(self):
         results = [
             SearchResult(
@@ -299,8 +51,6 @@ class TestFormatRagContext:
     def test_returns_empty_string_for_empty_list(self):
         assert ChatService._format_rag_context([]) == ""
 
-
-class TestComputeTitle:
     def test_short_text_returned_as_is(self):
         assert ChatService._compute_title("Hello world") == "Hello world"
 
@@ -321,6 +71,28 @@ class TestComputeTitle:
 
     def test_strips_whitespace(self):
         assert ChatService._compute_title("  Hello  ") == "Hello"
+
+    @patch("api.chat_service.ProviderGateway.discover_llamacpp_models")
+    async def test_returns_both_providers(self, mock_discover):
+        mock_discover.return_value = [
+            {"id": "local-model", "object": "model", "owned_by": "llamacpp"}
+        ]
+
+        models = await ChatService.get_available_models()
+
+        assert "openai" in models
+        assert "llamacpp" in models
+        assert models["llamacpp"] == ["local-model"]
+
+    @patch("api.chat_service.ProviderGateway.discover_llamacpp_models")
+    async def test_handles_llamacpp_failure_gracefully(self, mock_discover):
+        mock_discover.side_effect = Exception("Connection refused")
+
+        models = await ChatService.get_available_models()
+
+        assert "openai" in models
+        assert "llamacpp" in models
+        assert models["llamacpp"] == []
 
 
 class TestChatServiceGenerateReply:
@@ -931,7 +703,7 @@ class TestChatServiceGenerateReplyStream:
     ):
         async def gen():
             raise RuntimeError("boom")
-            yield  # noqa: unreachable - makes this an async generator
+            yield  # makes this an async generator
 
         mock_stream.return_value = gen()
         conversation = await Conversation.objects.acreate(user=user_a)
@@ -949,207 +721,6 @@ class TestChatServiceGenerateReplyStream:
         assert events[0].type == "error"
         assert events[0].error_code == "internal_error"
         assert events[0].error_message == "Internal server error"
-
-
-class TestCompactionService:
-    def setup_method(self):
-        self.counter = TokenCounter()
-        self.gateway = MagicMock()
-        self.gateway.generate_stream = MagicMock()
-        self.service = CompactionService(self.counter, self.gateway)
-
-    def test_should_compact_returns_false_when_under_threshold(self):
-        history = [_msg("user", "Hello")]
-        new_msg = _msg("user", "How are you?")
-        config = replace(DEFAULT_CONFIG, max_input_tokens=4096)
-        assert not self.service.should_compact(
-            system_prompt=config.system_prompt,
-            history=history,
-            new_message=new_msg,
-            config=config,
-        )
-
-    def test_should_compact_returns_true_when_over_threshold(self):
-        long_history = [
-            _msg("user", "word " * 5000),
-            _msg("assistant", "answer " * 5000),
-        ]
-        new_msg = _msg("user", "How are you?")
-        config = replace(DEFAULT_CONFIG, max_input_tokens=100)
-        assert self.service.should_compact(
-            system_prompt=config.system_prompt,
-            history=long_history,
-            new_message=new_msg,
-            config=config,
-        )
-
-    def test_should_compact_exact_boundary(self):
-        msg = _msg("user", "Hello world")
-        config = replace(DEFAULT_CONFIG, compaction_threshold=1.0)
-        system_tokens = self.counter.estimate_system_tokens(
-            config.system_prompt, config.model
-        )
-        msg_tokens = self.counter.estimate_message_tokens(msg, config.model)
-        total = system_tokens + msg_tokens + 24
-
-        exact_boundary = replace(config, max_input_tokens=total)
-        assert not self.service.should_compact(
-            system_prompt=config.system_prompt,
-            history=[],
-            new_message=msg,
-            config=exact_boundary,
-        )
-
-        one_over = replace(config, max_input_tokens=total - 1)
-        assert self.service.should_compact(
-            system_prompt=config.system_prompt,
-            history=[],
-            new_message=msg,
-            config=one_over,
-        )
-
-    async def test_compact_calls_llm_with_formatted_history(self):
-        async def _fake_stream():
-            yield ProviderChunk(text="Summary text.")
-
-        self.gateway.generate_stream.return_value = _fake_stream()
-        history = [_msg("user", "Hello"), _msg("assistant", "Hi there")]
-        config = replace(DEFAULT_CONFIG, compaction_model="gpt-5.4-mini")
-
-        result = await self.service.compact(
-            history=history,
-            config=config,
-            api_key="sk-test",
-        )
-
-        assert result == "Summary text."
-        self.gateway.generate_stream.assert_called_once()
-        call_messages = self.gateway.generate_stream.call_args[1]["messages"]
-        assert len(call_messages) == 1
-        assert "User: Hello" in call_messages[0].content
-        assert "Assistant: Hi there" in call_messages[0].content
-
-    async def test_compact_falls_back_to_main_model_when_compact_model_fails(self):
-        async def _fake_stream():
-            yield ProviderChunk(text="Fallback summary.")
-
-        self.gateway.generate_stream.side_effect = [
-            TemporaryProviderError("rate limited"),
-            _fake_stream(),
-        ]
-        config = replace(DEFAULT_CONFIG, compaction_model="gpt-5.4-mini")
-
-        result = await self.service.compact(
-            history=[_msg("user", "Hello")],
-            config=config,
-            api_key="sk-test",
-        )
-
-        assert result == "Fallback summary."
-        assert self.gateway.generate_stream.call_count == 2
-
-    async def test_compact_returns_none_when_both_models_fail(self):
-        self.gateway.generate_stream.side_effect = TemporaryProviderError(
-            "rate limited"
-        )
-        config = replace(DEFAULT_CONFIG, compaction_model="gpt-5.4-mini")
-
-        result = await self.service.compact(
-            history=[_msg("user", "Hello")],
-            config=config,
-            api_key="sk-test",
-        )
-
-        assert result is None
-
-    async def test_summarize_dedups_when_models_are_identical(self):
-        async def _fake_stream():
-            yield ProviderChunk(text="Summary.")
-
-        self.gateway.generate_stream.return_value = _fake_stream()
-        config = replace(DEFAULT_CONFIG, compaction_model="gpt-5.5")
-
-        result = await self.service.compact(
-            history=[_msg("user", "Hello")],
-            config=config,
-            api_key="sk-test",
-        )
-
-        assert result == "Summary."
-        assert self.gateway.generate_stream.call_count == 1
-
-    def test_chunk_truncate_returns_all_when_under_threshold(self):
-        history = [
-            _msg("user", "1"),
-            _msg("assistant", "a"),
-            _msg("user", "2"),
-            _msg("assistant", "b"),
-        ]
-        new_msg = _msg("user", "3")
-        config = replace(DEFAULT_CONFIG, max_input_tokens=4096)
-        result = self.service.chunk_truncate(
-            history=history,
-            new_message=new_msg,
-            system_prompt=config.system_prompt,
-            config=config,
-        )
-        assert len(result) == 4
-        assert result[0].content == "1"
-
-    def test_chunk_truncate_halves_until_under_threshold(self):
-        long_msg = _msg("user", "word " * 2000)
-        history = [long_msg] * 6
-        new_msg = _msg("user", "Hello")
-        config = replace(
-            DEFAULT_CONFIG, max_input_tokens=4096, compaction_threshold=0.5
-        )
-        result = self.service.chunk_truncate(
-            history=history,
-            new_message=new_msg,
-            system_prompt=config.system_prompt,
-            config=config,
-        )
-        assert len(result) == 1
-
-    def test_chunk_truncate_empty_returns_empty(self):
-        new_msg = _msg("user", "Hello")
-        config = DEFAULT_CONFIG
-        assert (
-            self.service.chunk_truncate(
-                history=[],
-                new_message=new_msg,
-                system_prompt=config.system_prompt,
-                config=config,
-            )
-            == []
-        )
-
-    async def test_compact_stream_does_not_yield_partial_on_fallback(self):
-        async def _failing_stream():
-            yield ProviderChunk(text="Part")
-            raise TemporaryProviderError("model 1 failed")
-
-        async def _good_stream():
-            yield ProviderChunk(text="Full summary.")
-
-        self.gateway.generate_stream.side_effect = [
-            _failing_stream(),
-            _good_stream(),
-        ]
-        config = replace(DEFAULT_CONFIG, compaction_model="gpt-5.4-mini")
-
-        chunks = []
-        async for chunk in self.service.compact_stream(
-            history=[_msg("user", "Hello")],
-            config=config,
-            api_key="sk-test",
-        ):
-            chunks.append(chunk)
-
-        text_chunks = [c for c in chunks if c.text]
-        assert len(text_chunks) == 1
-        assert text_chunks[0].text == "Full summary."
-        assert self.gateway.generate_stream.call_count == 2
 
 
 class TestChatServiceCompaction:
@@ -1459,117 +1030,3 @@ class TestChatServiceCompaction:
 
         call_config = mock_should.call_args[1]["config"]
         assert call_config.max_input_tokens == 4096
-
-    @patch("api.chat_service.httpx.AsyncClient")
-    async def test_discover_llamacpp_context_fetches_n_ctx(self, mock_client_cls):
-        ProviderGateway._llamacpp_context = None
-
-        mock_client = MagicMock()
-        mock_client.__aenter__.return_value = mock_client
-        fake_resp = MagicMock()
-        fake_resp.raise_for_status = MagicMock()
-        fake_resp.json.return_value = {"default_generation_settings": {"n_ctx": 8192}}
-        mock_client.get = AsyncMock(return_value=fake_resp)
-        mock_client_cls.return_value = mock_client
-
-        n_ctx = await ProviderGateway.discover_llamacpp_context()
-
-        assert n_ctx == 8192
-        assert ProviderGateway._llamacpp_context == 8192
-        mock_client.get.assert_called_once_with("http://localhost:8080/props")
-
-    async def test_discover_llamacpp_context_returns_cached_value(self):
-        ProviderGateway._llamacpp_context = 16384
-
-        n_ctx = await ProviderGateway.discover_llamacpp_context()
-
-        assert n_ctx == 16384
-
-    @patch("api.chat_service.httpx.AsyncClient")
-    async def test_discover_llamacpp_models_fetches_data(self, mock_client_cls):
-        ProviderGateway._llamacpp_models = None
-
-        mock_client = MagicMock()
-        mock_client.__aenter__.return_value = mock_client
-        fake_resp = MagicMock()
-        fake_resp.raise_for_status = MagicMock()
-        fake_resp.json.return_value = {
-            "data": [
-                {"id": "model-a", "object": "model", "owned_by": "llamacpp"},
-                {"id": "model-b", "object": "model", "owned_by": "llamacpp"},
-            ]
-        }
-        mock_client.get = AsyncMock(return_value=fake_resp)
-        mock_client_cls.return_value = mock_client
-
-        models = await ProviderGateway.discover_llamacpp_models()
-
-        assert len(models) == 2
-        assert models[0]["id"] == "model-a"
-        assert models[1]["id"] == "model-b"
-        assert ProviderGateway._llamacpp_models == models
-        mock_client.get.assert_called_once_with("http://localhost:8080/v1/models")
-
-    async def test_discover_llamacpp_models_returns_cached_value(self):
-        ProviderGateway._llamacpp_models = [
-            {"id": "cached-model", "object": "model", "owned_by": "llamacpp"}
-        ]
-        ProviderGateway._llamacpp_models_fetched_at = 100.0
-
-        with patch("api.chat_service.time.time", return_value=200.0):
-            models = await ProviderGateway.discover_llamacpp_models()
-
-        assert models == [
-            {"id": "cached-model", "object": "model", "owned_by": "llamacpp"}
-        ]
-
-    @patch("api.chat_service.httpx.AsyncClient")
-    async def test_discover_llamacpp_models_fetches_fresh_after_ttl_expires(
-        self, mock_client_cls
-    ):
-        ProviderGateway._llamacpp_models = [
-            {"id": "stale-model", "object": "model", "owned_by": "llamacpp"}
-        ]
-        ProviderGateway._llamacpp_models_fetched_at = 100.0
-
-        mock_client = MagicMock()
-        mock_client.__aenter__.return_value = mock_client
-        fake_resp = MagicMock()
-        fake_resp.raise_for_status = MagicMock()
-        fake_resp.json.return_value = {
-            "data": [{"id": "fresh-model", "object": "model", "owned_by": "llamacpp"}]
-        }
-        mock_client.get = AsyncMock(return_value=fake_resp)
-        mock_client_cls.return_value = mock_client
-
-        with patch("api.chat_service.time.time", return_value=450.0):
-            models = await ProviderGateway.discover_llamacpp_models()
-
-        assert models == [
-            {"id": "fresh-model", "object": "model", "owned_by": "llamacpp"}
-        ]
-        mock_client.get.assert_called_once()
-
-
-class TestChatServiceGetAvailableModels:
-    @patch("api.chat_service.ProviderGateway.discover_llamacpp_models")
-    async def test_returns_both_providers(self, mock_discover):
-        mock_discover.return_value = [
-            {"id": "local-model", "object": "model", "owned_by": "llamacpp"}
-        ]
-
-        models = await ChatService.get_available_models()
-
-        assert "openai" in models
-        assert "llamacpp" in models
-        assert models["llamacpp"] == ["local-model"]
-
-    @patch("api.chat_service.ProviderGateway.discover_llamacpp_models")
-    async def test_handles_llamacpp_failure_gracefully(self, mock_discover):
-        mock_discover.side_effect = Exception("Connection refused")
-
-        models = await ChatService.get_available_models()
-
-        assert "openai" in models
-        assert "llamacpp" in models
-        assert models["llamacpp"] == []

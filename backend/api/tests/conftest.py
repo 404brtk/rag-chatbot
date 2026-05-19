@@ -1,14 +1,32 @@
+from datetime import datetime, timezone
+
 import pytest
 from cryptography.fernet import Fernet
 from django.contrib.auth import get_user_model
 from rest_framework.test import APIClient
 
+from api.llm_config import LLMConfig
 from api.models import UserApiKey
+from api.repositories import StoredMessage
 
 User = get_user_model()
 
 VALID_PASSWORD = "4Ah?,*d]GAx2"
 TOKEN_URL = "/api/token/"
+DEFAULT_CONFIG = LLMConfig(
+    provider="openai",
+    model="gpt-5.5",
+    system_prompt="You are a helpful assistant.",
+)
+
+
+def _msg(role, content, created_at=None, meta=None):
+    return StoredMessage(
+        role=role,
+        content=content,
+        created_at=created_at or datetime(2025, 1, 1, tzinfo=timezone.utc),
+        meta=meta or {},
+    )
 
 
 @pytest.fixture(autouse=True)
