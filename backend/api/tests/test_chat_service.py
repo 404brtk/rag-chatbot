@@ -298,7 +298,7 @@ class TestChatServiceGenerateReply:
     @patch("api.chat_service.ProviderGateway.generate", new_callable=AsyncMock)
     @patch.object(ChatService, "_resolve_api_key", return_value="sk-test")
     @patch("api.chat_service.DocumentService")
-    async def test_includes_context_chunks_and_raw_question_in_user_meta(
+    async def test_includes_context_chunks_and_raw_question_on_user_message(
         self, mock_doc_svc_cls, mock_resolve, mock_generate
     ):
         mock_doc_svc_cls.return_value.search.return_value = [
@@ -329,17 +329,17 @@ class TestChatServiceGenerateReply:
             document_ids=["doc-1"],
         )
 
-        user_meta = self.mock_repo.append_message_pair.call_args[1]["user_meta"]
-        assert user_meta["raw_question"] == "Question"
-        assert len(user_meta["context_chunks"]) == 2
-        assert user_meta["context_chunks"][0]["index"] == 1
-        assert user_meta["context_chunks"][0]["content"] == "Info A"
-        assert user_meta["context_chunks"][0]["document_filename"] == "a.txt"
-        assert user_meta["context_chunks"][0]["document_id"] == "d1"
-        assert user_meta["context_chunks"][0]["chunk_index"] == 0
-        assert user_meta["context_chunks"][0]["distance"] == 0.1
-        assert user_meta["context_chunks"][1]["index"] == 2
-        assert user_meta["context_chunks"][1]["content"] == "Info B"
+        call_kwargs = self.mock_repo.append_message_pair.call_args[1]
+        assert call_kwargs["user_raw_question"] == "Question"
+        assert len(call_kwargs["user_context"]) == 2
+        assert call_kwargs["user_context"][0]["index"] == 1
+        assert call_kwargs["user_context"][0]["content"] == "Info A"
+        assert call_kwargs["user_context"][0]["document_filename"] == "a.txt"
+        assert call_kwargs["user_context"][0]["document_id"] == "d1"
+        assert call_kwargs["user_context"][0]["chunk_index"] == 0
+        assert call_kwargs["user_context"][0]["distance"] == 0.1
+        assert call_kwargs["user_context"][1]["index"] == 2
+        assert call_kwargs["user_context"][1]["content"] == "Info B"
 
     @patch("api.chat_service.ProviderGateway.generate", new_callable=AsyncMock)
     @patch.object(ChatService, "_resolve_api_key", return_value="sk-test")
@@ -372,8 +372,8 @@ class TestChatServiceGenerateReply:
 
         call_kwargs = self.mock_repo.append_message_pair.call_args[1]
         assert call_kwargs["user_content"] == "Hello"
-        assert "context_chunks" not in call_kwargs["user_meta"]
-        assert call_kwargs["user_meta"]["raw_question"] == "Hello"
+        assert call_kwargs["user_context"] is None
+        assert call_kwargs["user_raw_question"] == "Hello"
         mock_doc_svc_cls.return_value.search.assert_not_called()
 
     @patch("api.chat_service.ProviderGateway.generate", new_callable=AsyncMock)
@@ -409,7 +409,7 @@ class TestChatServiceGenerateReply:
 
         call_kwargs = self.mock_repo.append_message_pair.call_args[1]
         assert call_kwargs["user_content"] == "Hello"
-        assert "context_chunks" not in call_kwargs["user_meta"]
+        assert call_kwargs["user_context"] is None
 
     @patch("api.chat_service.UserApiKey.objects.aget")
     async def test_resolve_api_key_skips_db_for_llamacpp(self, mock_get):
@@ -499,8 +499,9 @@ class TestChatServiceGenerateReplyStream:
         user_call = self.mock_repo.append_message.call_args_list[0][1]
         assert user_call["role"] == "user"
         assert user_call["content"] == "Hello"
-        assert user_call["provider"] is None
-        assert user_call["meta"]["raw_question"] == "Hello"
+        assert user_call["provider"] == "openai"
+        assert user_call["model"] == "gpt-5.5"
+        assert user_call["raw_question"] == "Hello"
 
         assistant_call = self.mock_repo.append_message.call_args_list[1][1]
         assert assistant_call["role"] == "assistant"
@@ -765,7 +766,7 @@ class TestChatServiceCompaction:
             summary_msg = _msg(
                 "assistant",
                 "This is the conversation summary.",
-                meta={"is_compaction_summary": True},
+                is_compaction_summary=True,
             )
             self.mock_repo.list_messages.side_effect = [history, [summary_msg]]
             service = ChatService(repository=self.mock_repo)
@@ -786,7 +787,7 @@ class TestChatServiceCompaction:
         assert apply_call["provider"] == "openai"
         assert apply_call["model"] == "gpt-5.5"
         assert self.mock_repo.list_messages.call_count == 2
-        assert prep.messages[0].meta.get("is_compaction_summary") is True
+        assert prep.messages[0].is_compaction_summary is True
 
     @patch.object(ProviderGateway, "discover_llamacpp_context", return_value=4096)
     @patch.object(CompactionService, "should_compact", return_value=True)
@@ -803,7 +804,7 @@ class TestChatServiceCompaction:
             summary_msg = _msg(
                 "assistant",
                 "Summary from llama.cpp.",
-                meta={"is_compaction_summary": True},
+                is_compaction_summary=True,
             )
             self.mock_repo.list_messages.side_effect = [history, [summary_msg]]
             service = ChatService(repository=self.mock_repo)
@@ -884,7 +885,7 @@ class TestChatServiceCompaction:
         self, mock_resolve, mock_should
     ):
         history = [
-            _msg("assistant", "Prior summary", meta={"is_compaction_summary": True}),
+            _msg("assistant", "Prior summary", is_compaction_summary=True),
             _msg("user", "follow up question"),
             _msg("assistant", "follow up answer"),
         ]
@@ -900,7 +901,7 @@ class TestChatServiceCompaction:
         assert prep.compaction_summary is None
         self.mock_repo.apply_compaction.assert_not_called()
         assert len(prep.messages) == 4
-        assert prep.messages[0].meta.get("is_compaction_summary") is True
+        assert prep.messages[0].is_compaction_summary is True
         assert prep.messages[0].content == "Prior summary"
 
     @patch.object(CompactionService, "should_compact", return_value=True)
@@ -924,9 +925,7 @@ class TestChatServiceCompaction:
                 _msg("user", "question one"),
                 _msg("assistant", "answer one"),
             ]
-            summary_msg = _msg(
-                "assistant", "Summary.", meta={"is_compaction_summary": True}
-            )
+            summary_msg = _msg("assistant", "Summary.", is_compaction_summary=True)
             self.mock_repo.list_messages.side_effect = [history, [summary_msg]]
             service = ChatService(repository=self.mock_repo)
             events = [

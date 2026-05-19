@@ -36,9 +36,17 @@ class ConversationAdmin(admin.ModelAdmin):
 
 @admin.register(Message)
 class MessageAdmin(admin.ModelAdmin):
-    list_display = ("conversation", "role", "provider", "model", "created_at")
-    list_filter = ("role", "provider")
-    search_fields = ("content",)
+    list_display = (
+        "conversation",
+        "role",
+        "provider",
+        "model",
+        "compacted",
+        "is_compaction_summary",
+        "created_at",
+    )
+    list_filter = ("role", "provider", "compacted", "is_compaction_summary")
+    search_fields = ("content", "raw_question")
     list_select_related = ("conversation",)
     ordering = ("-created_at",)
 

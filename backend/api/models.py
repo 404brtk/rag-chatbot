@@ -117,6 +117,8 @@ class Message(UUIDModel):
     )
     role = models.CharField(max_length=10, choices=Role.choices, db_index=True)
     content = models.TextField()
+    raw_question = models.TextField(null=True, blank=True)
+    context = models.JSONField(null=True, blank=True)
     provider = models.CharField(
         max_length=16,
         choices=LLMProvider.choices,
@@ -125,7 +127,8 @@ class Message(UUIDModel):
     )
     model = models.CharField(max_length=128, null=True, blank=True)
     usage = models.JSONField(null=True, blank=True)
-    meta = models.JSONField(default=dict, blank=True)
+    compacted = models.BooleanField(default=False, db_index=True)
+    is_compaction_summary = models.BooleanField(default=False)
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:

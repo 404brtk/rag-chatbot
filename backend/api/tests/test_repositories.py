@@ -90,18 +90,17 @@ class TestListMessages:
 
         assert messages == []
 
-    def test_includes_created_at_and_meta(self, repo, conversation):
+    def test_includes_created_at(self, repo, conversation):
         Message.objects.create(
             conversation=conversation,
             role="user",
             content="test",
-            meta={"key": "value"},
         )
 
         messages = repo.list_messages(session_id=str(conversation.id))
 
         assert messages[0].created_at is not None
-        assert messages[0].meta == {"key": "value"}
+        assert messages[0].content == "test"
 
 
 @pytest.mark.django_db
@@ -115,23 +114,23 @@ class TestAppendMessagePair:
             provider="openai",
             model="gpt-5.5",
             usage={"prompt_tokens": 5, "completion_tokens": 10},
-            user_meta={"provider_selected": "openai"},
-            assistant_meta={"input_tokens": 5, "output_tokens": 10},
+            user_raw_question="Hello",
+            user_context=[{"chunk": 1}],
         )
         after = timezone.now()
 
         assert user_msg.role == "user"
         assert user_msg.content == "Hello"
-        assert user_msg.provider is None
-        assert user_msg.model is None
-        assert user_msg.meta == {"provider_selected": "openai"}
+        assert user_msg.provider == "openai"
+        assert user_msg.model == "gpt-5.5"
+        assert user_msg.raw_question == "Hello"
+        assert user_msg.context == [{"chunk": 1}]
 
         assert assistant_msg.role == "ai"
         assert assistant_msg.content == "Hi there!"
         assert assistant_msg.provider == "openai"
         assert assistant_msg.model == "gpt-5.5"
         assert assistant_msg.usage == {"prompt_tokens": 5, "completion_tokens": 10}
-        assert assistant_msg.meta == {"input_tokens": 5, "output_tokens": 10}
 
         assert before <= user_msg.created_at <= after
 
@@ -146,8 +145,6 @@ class TestAppendMessagePair:
             provider="openai",
             model="gpt-5.5",
             usage=None,
-            user_meta=None,
-            assistant_meta=None,
         )
 
         conversation.refresh_from_db()
@@ -161,8 +158,6 @@ class TestAppendMessagePair:
             provider="openai",
             model="gpt-5.5",
             usage=None,
-            user_meta=None,
-            assistant_meta=None,
         )
         repo.append_message_pair(
             session_id=str(conversation.id),
@@ -171,8 +166,6 @@ class TestAppendMessagePair:
             provider="openai",
             model="gpt-5.5",
             usage=None,
-            user_meta=None,
-            assistant_meta=None,
         )
 
         assert Message.objects.filter(conversation=conversation).count() == 4
@@ -230,18 +223,6 @@ class TestAsyncListMessages:
 
         assert messages == []
 
-    async def test_includes_meta(self, async_repo, conversation):
-        await Message.objects.acreate(
-            conversation=conversation,
-            role="user",
-            content="test",
-            meta={"key": "value"},
-        )
-
-        messages = await async_repo.list_messages(session_id=str(conversation.id))
-
-        assert messages[0].meta == {"key": "value"}
-
 
 @pytest.mark.django_db(transaction=True)
 class TestAsyncAppendMessagePair:
@@ -253,8 +234,7 @@ class TestAsyncAppendMessagePair:
             provider="openai",
             model="gpt-5.5",
             usage={"prompt_tokens": 5, "completion_tokens": 10},
-            user_meta={"provider_selected": "openai"},
-            assistant_meta={"input_tokens": 5},
+            user_raw_question="Hello",
         )
 
         assert user_msg.role == "user"
@@ -274,8 +254,6 @@ class TestAsyncAppendMessagePair:
             provider="openai",
             model="gpt-5.5",
             usage=None,
-            user_meta=None,
-            assistant_meta=None,
         )
 
         await sync_to_async(conversation.refresh_from_db)()
@@ -289,8 +267,6 @@ class TestAsyncAppendMessagePair:
             provider="openai",
             model="gpt-5.5",
             usage=None,
-            user_meta=None,
-            assistant_meta=None,
         )
 
         count = await sync_to_async(
@@ -309,14 +285,14 @@ class TestCompactMessages:
 
         assert count == 2
         for msg in Message.objects.filter(conversation=conversation):
-            assert msg.meta.get("compacted") is True
+            assert msg.compacted is True
 
     def test_does_not_recompact_already_compacted(self, repo, conversation):
         Message.objects.create(
             conversation=conversation,
             role="user",
             content="first",
-            meta={"compacted": True},
+            compacted=True,
         )
         Message.objects.create(conversation=conversation, role="ai", content="second")
 
@@ -346,32 +322,11 @@ class TestApplyCompaction:
 
         assert summary_msg.role == "ai"
         assert summary_msg.content == "Summary of conversation"
-        assert summary_msg.meta.get("is_compaction_summary") is True
+        assert summary_msg.is_compaction_summary is True
         assert summary_msg.provider == "openai"
         assert summary_msg.model == "gpt-model"
 
-        messages = repo.list_messages(session_id=str(conversation.id))
-        compacted_count = sum(1 for m in messages if m.meta.get("compacted"))
+        compacted_count = sum(
+            1 for m in Message.objects.filter(conversation=conversation, compacted=True)
+        )
         assert compacted_count == 2
-
-    def test_preserves_existing_meta_on_compacted_messages(self, repo, conversation):
-        Message.objects.create(
-            conversation=conversation,
-            role="user",
-            content="question",
-            meta={"existing_key": "value"},
-        )
-        Message.objects.create(conversation=conversation, role="ai", content="answer")
-
-        repo.apply_compaction(
-            session=conversation,
-            summary="Summary",
-            provider="openai",
-            model="gpt-model",
-        )
-
-        compacted = Message.objects.filter(
-            conversation=conversation, role="user"
-        ).first()
-        assert compacted.meta.get("existing_key") == "value"
-        assert compacted.meta.get("compacted") is True

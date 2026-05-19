@@ -35,11 +35,24 @@ class MessageSerializer(serializers.ModelSerializer):
             "content",
             "provider",
             "model",
+            "raw_question",
+            "context",
             "usage",
-            "meta",
+            "compacted",
+            "is_compaction_summary",
             "created_at",
         ]
-        read_only_fields = ["id", "provider", "model", "usage", "meta", "created_at"]
+        read_only_fields = [
+            "id",
+            "provider",
+            "model",
+            "raw_question",
+            "context",
+            "usage",
+            "compacted",
+            "is_compaction_summary",
+            "created_at",
+        ]
 
 
 class ConversationSerializer(serializers.ModelSerializer):

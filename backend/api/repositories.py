@@ -1,10 +1,8 @@
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Any
 
 from asgiref.sync import sync_to_async
 from django.db import transaction
-from django.db.models import Q
 from django.utils import timezone
 
 from .models import Message, Conversation
@@ -15,14 +13,20 @@ class StoredMessage:
     role: str
     content: str
     created_at: datetime | None = None
-    meta: dict[str, Any] | None = None
+    is_compaction_summary: bool = False
 
 
 class DjangoMessageRepository:
     def _build_base_queryset(self, session_id: str):
         return (
             Message.objects.filter(conversation_id=session_id)
-            .only("role", "content", "created_at", "meta", "id")
+            .only(
+                "role",
+                "content",
+                "created_at",
+                "is_compaction_summary",
+                "id",
+            )
             .order_by("-created_at")
         )
 
@@ -32,7 +36,7 @@ class DjangoMessageRepository:
                 role="assistant" if row.role == Message.Role.AI else row.role,
                 content=row.content,
                 created_at=row.created_at,
-                meta=row.meta or {},
+                is_compaction_summary=row.is_compaction_summary,
             )
             for row in rows
         ]
@@ -47,7 +51,7 @@ class DjangoMessageRepository:
         qs = self._build_base_queryset(session_id)
 
         if exclude_compacted:
-            qs = qs.filter(Q(meta__compacted__isnull=True) | Q(meta__compacted=False))
+            qs = qs.filter(compacted=False)
 
         if limit is not None:
             qs = qs[:limit]
@@ -63,10 +67,12 @@ class DjangoMessageRepository:
         session: Conversation,
         role: str,
         content: str,
-        provider: str | None,
-        model: str | None,
-        usage: dict[str, Any] | None,
-        meta: dict[str, Any] | None,
+        raw_question: str | None = None,
+        context: list | None = None,
+        provider: str | None = None,
+        model: str | None = None,
+        usage: dict | None = None,
+        is_compaction_summary: bool = False,
     ) -> Message:
         db_role = Message.Role.AI if role == "assistant" else Message.Role.USER
 
@@ -74,10 +80,12 @@ class DjangoMessageRepository:
             conversation=session,
             role=db_role,
             content=content,
+            raw_question=raw_question,
+            context=context or None,
             provider=provider,
             model=model,
             usage=usage,
-            meta=meta or {},
+            is_compaction_summary=is_compaction_summary,
         )
 
     def append_message_pair(
@@ -86,11 +94,11 @@ class DjangoMessageRepository:
         session_id: str,
         user_content: str,
         assistant_content: str,
+        user_raw_question: str | None = None,
+        user_context: list | None = None,
         provider: str,
         model: str,
-        usage: dict[str, Any] | None,
-        user_meta: dict[str, Any] | None,
-        assistant_meta: dict[str, Any] | None,
+        usage: dict | None,
     ) -> tuple[Message, Message]:
         now = timezone.now()
         with transaction.atomic():
@@ -100,10 +108,10 @@ class DjangoMessageRepository:
                 session=session,
                 role="user",
                 content=user_content,
-                provider=None,
-                model=None,
-                usage=None,
-                meta=user_meta,
+                raw_question=user_raw_question,
+                context=user_context,
+                provider=provider,
+                model=model,
             )
             assistant_msg = self.append_message(
                 session=session,
@@ -112,7 +120,6 @@ class DjangoMessageRepository:
                 provider=provider,
                 model=model,
                 usage=usage,
-                meta=assistant_meta,
             )
             session.last_message_at = now
             session.save(update_fields=["last_message_at"])
@@ -120,17 +127,9 @@ class DjangoMessageRepository:
             return user_msg, assistant_msg
 
     def compact_messages(self, session: Conversation) -> int:
-        messages_to_update = []
-        for msg in (
-            Message.objects.filter(conversation=session)
-            .filter(Q(meta__compacted__isnull=True) | Q(meta__compacted=False))
-            .iterator()
-        ):
-            msg.meta = {**(msg.meta or {}), "compacted": True}
-            messages_to_update.append(msg)
-        if messages_to_update:
-            Message.objects.bulk_update(messages_to_update, ["meta"])
-        return len(messages_to_update)
+        return Message.objects.filter(conversation=session, compacted=False).update(
+            compacted=True
+        )
 
     def apply_compaction(
         self,
@@ -139,7 +138,7 @@ class DjangoMessageRepository:
         summary: str,
         provider: str,
         model: str,
-        usage: dict[str, Any] | None = None,
+        usage: dict | None = None,
     ) -> Message:
         with transaction.atomic():
             self.compact_messages(session)
@@ -150,7 +149,7 @@ class DjangoMessageRepository:
                 provider=provider,
                 model=model,
                 usage=usage,
-                meta={"is_compaction_summary": True},
+                is_compaction_summary=True,
             )
 
 
@@ -168,7 +167,7 @@ class AsyncDjangoMessageRepository:
         qs = self._sync_repo._build_base_queryset(session_id)
 
         if exclude_compacted:
-            qs = qs.filter(Q(meta__compacted__isnull=True) | Q(meta__compacted=False))
+            qs = qs.filter(compacted=False)
 
         if limit is not None:
             qs = qs[:limit]
@@ -184,10 +183,12 @@ class AsyncDjangoMessageRepository:
         session: Conversation,
         role: str,
         content: str,
-        provider: str | None,
-        model: str | None,
-        usage: dict[str, Any] | None,
-        meta: dict[str, Any] | None,
+        raw_question: str | None = None,
+        context: list | None = None,
+        provider: str | None = None,
+        model: str | None = None,
+        usage: dict | None = None,
+        is_compaction_summary: bool = False,
     ) -> Message:
         db_role = Message.Role.AI if role == "assistant" else Message.Role.USER
 
@@ -195,10 +196,12 @@ class AsyncDjangoMessageRepository:
             conversation=session,
             role=db_role,
             content=content,
+            raw_question=raw_question,
+            context=context or None,
             provider=provider,
             model=model,
             usage=usage,
-            meta=meta or {},
+            is_compaction_summary=is_compaction_summary,
         )
 
     async def append_message_pair(
@@ -207,11 +210,11 @@ class AsyncDjangoMessageRepository:
         session_id: str,
         user_content: str,
         assistant_content: str,
+        user_raw_question: str | None = None,
+        user_context: list | None = None,
         provider: str,
         model: str,
-        usage: dict[str, Any] | None,
-        user_meta: dict[str, Any] | None,
-        assistant_meta: dict[str, Any] | None,
+        usage: dict | None,
     ) -> tuple[Message, Message]:
         return await sync_to_async(
             self._sync_repo.append_message_pair,
@@ -220,11 +223,11 @@ class AsyncDjangoMessageRepository:
             session_id=session_id,
             user_content=user_content,
             assistant_content=assistant_content,
+            user_raw_question=user_raw_question,
+            user_context=user_context,
             provider=provider,
             model=model,
             usage=usage,
-            user_meta=user_meta,
-            assistant_meta=assistant_meta,
         )
 
     async def compact_messages(self, session: Conversation) -> int:
@@ -240,7 +243,7 @@ class AsyncDjangoMessageRepository:
         summary: str,
         provider: str,
         model: str,
-        usage: dict[str, Any] | None = None,
+        usage: dict | None = None,
     ) -> Message:
         return await sync_to_async(
             self._sync_repo.apply_compaction,

@@ -20,12 +20,12 @@ DEFAULT_CONFIG = LLMConfig(
 )
 
 
-def _msg(role, content, created_at=None, meta=None):
+def _msg(role, content, created_at=None, is_compaction_summary=False):
     return StoredMessage(
         role=role,
         content=content,
         created_at=created_at or datetime(2025, 1, 1, tzinfo=timezone.utc),
-        meta=meta or {},
+        is_compaction_summary=is_compaction_summary,
     )
 
 

@@ -196,21 +196,6 @@ class ChatService:
         )
 
     @staticmethod
-    def _build_user_meta(
-        clean_user_text: str,
-        config: LLMConfig,
-        context_chunks: list[dict[str, Any]] | None,
-    ) -> dict[str, Any]:
-        meta: dict[str, Any] = {
-            "raw_question": clean_user_text,
-            "provider_selected": config.provider,
-            "model_selected": config.model,
-        }
-        if context_chunks:
-            meta["context_chunks"] = context_chunks
-        return meta
-
-    @staticmethod
     def _compute_title(user_text: str) -> str:
         stripped = user_text.strip()
         if len(stripped) <= 50:
@@ -252,10 +237,6 @@ class ChatService:
             )
             raise
 
-        user_meta = self._build_user_meta(
-            prep.clean_user_text, config, prep.context_chunks
-        )
-
         user_msg, assistant_msg = await self.repository.append_message_pair(
             session_id=session_id,
             user_content=prep.user_message,
@@ -263,12 +244,8 @@ class ChatService:
             provider=result.provider,
             model=result.model,
             usage=result.usage,
-            user_meta=user_meta,
-            assistant_meta={
-                "input_tokens": result.input_tokens,
-                "output_tokens": result.output_tokens,
-                "model_input_message_count": len(result.model_input),
-            },
+            user_raw_question=prep.clean_user_text,
+            user_context=prep.context_chunks,
         )
 
         return replace(
@@ -306,18 +283,14 @@ class ChatService:
 
             session = prep.session
 
-            user_meta = self._build_user_meta(
-                prep.clean_user_text, config, prep.context_chunks
-            )
-
             await self.repository.append_message(
                 session=session,
                 role="user",
                 content=prep.user_message,
-                provider=None,
-                model=None,
-                usage=None,
-                meta=user_meta,
+                provider=config.provider,
+                model=config.model,
+                raw_question=prep.clean_user_text,
+                context=prep.context_chunks,
             )
 
             assistant_text = ""
@@ -352,11 +325,6 @@ class ChatService:
                 provider=config.provider,
                 model=config.model,
                 usage=usage_data,
-                meta={
-                    "input_tokens": usage_data.get("prompt_tokens"),
-                    "output_tokens": usage_data.get("completion_tokens"),
-                    "model_input_message_count": len(prep.messages),
-                },
             )
 
             title = None
