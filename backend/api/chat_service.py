@@ -346,6 +346,9 @@ class ChatService:
                 usage=usage_data,
                 provider=config.provider,
                 model=config.model,
+                sent_messages=[
+                    {"role": m.role, "content": m.content} for m in prep.messages
+                ],
             )
 
         except ChatServiceError as e:

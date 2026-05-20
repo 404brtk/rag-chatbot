@@ -285,6 +285,8 @@ class MessageStreamView(View):
                         payload["usage"] = event.usage
                         payload["provider"] = event.provider
                         payload["model"] = event.model
+                        if event.sent_messages:
+                            payload["sent_messages"] = event.sent_messages
                     elif event.type == "compaction_done":
                         payload["message_id"] = event.message_id
                         if event.usage:

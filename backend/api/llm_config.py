@@ -144,6 +144,7 @@ class StreamEvent:
     model: str | None = None
     error_message: str | None = None
     error_code: str | None = None
+    sent_messages: list[dict[str, Any]] | None = None
 
 
 @dataclass(frozen=True, slots=True)
