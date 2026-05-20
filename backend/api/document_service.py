@@ -136,10 +136,17 @@ class DocumentService:
             f"{list(annotated.values_list('distance', 'content')[:20])}"
         )
 
+        if settings.RAG_SIMILARITY_THRESHOLD < 1.0:
+            qs_filtered = annotated.filter(
+                distance__lt=settings.RAG_SIMILARITY_THRESHOLD
+            )
+        else:
+            qs_filtered = annotated
+
         results = list(
-            annotated.filter(distance__lt=settings.RAG_SIMILARITY_THRESHOLD)
-            .select_related("document")
-            .order_by("distance")[: settings.RAG_TOP_K]
+            qs_filtered.select_related("document").order_by("distance")[
+                : settings.RAG_TOP_K
+            ]
         )
         logger.debug(f"After threshold filter: {len(results)} results")
 

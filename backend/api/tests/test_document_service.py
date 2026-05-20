@@ -170,6 +170,28 @@ class TestSearch:
 
         assert len(results) == 0
 
+    def test_skip_threshold_filtering(self, user_a, mock_embedding_service, settings):
+        settings.RAG_SIMILARITY_THRESHOLD = 1.0
+        mock_embedding_service.embed_query.return_value = _make_embedding(1.0)
+        document = Document.objects.create(
+            user=user_a,
+            filename="test.txt",
+            content_type="text/plain",
+            raw_text="test",
+        )
+        DocumentChunk.objects.create(
+            document=document,
+            content="far away content",
+            chunk_index=0,
+            embedding=_make_embedding(0.0, 1.0),
+        )
+
+        service = DocumentService()
+        results = service.search(user=user_a, query="test")
+
+        assert len(results) == 1
+        assert results[0].chunk_content == "far away content"
+
     def test_returns_search_result_dataclass(self, user_a, mock_embedding_service):
         mock_embedding_service.embed_query.return_value = _make_embedding(1.0)
         document = Document.objects.create(
