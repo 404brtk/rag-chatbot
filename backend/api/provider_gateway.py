@@ -153,15 +153,21 @@ class ProviderGateway:
             return ProviderGateway._llamacpp_context
 
         base = settings.LLAMACPP_BASE_URL
-        async with httpx.AsyncClient(timeout=5.0) as client:
-            resp = await client.get(f"{base}/props")
-            resp.raise_for_status()
-            n_ctx = resp.json()["default_generation_settings"]["n_ctx"]
+        try:
+            async with httpx.AsyncClient(timeout=5.0) as client:
+                resp = await client.get(f"{base}/props")
+                resp.raise_for_status()
+                n_ctx = resp.json()["default_generation_settings"]["n_ctx"]
 
-        ProviderGateway._llamacpp_context = n_ctx
-        ProviderGateway._llamacpp_context_fetched_at = now
-        logger.info(f"Discovered llama.cpp context window: {n_ctx} tokens")
-        return n_ctx
+            ProviderGateway._llamacpp_context = n_ctx
+            ProviderGateway._llamacpp_context_fetched_at = now
+            logger.info(f"Discovered llama.cpp context window: {n_ctx} tokens")
+            return n_ctx
+        except httpx.ConnectError, httpx.HTTPError:
+            logger.exception(f"Failed to connect to llama.cpp at {base}")
+            raise TemporaryProviderError(
+                f"llama.cpp server is offline or unreachable at {base}"
+            )
 
     @staticmethod
     async def discover_llamacpp_models() -> list[dict]:
@@ -174,12 +180,18 @@ class ProviderGateway:
             return ProviderGateway._llamacpp_models
 
         base = settings.LLAMACPP_BASE_URL
-        async with httpx.AsyncClient(timeout=5.0) as client:
-            resp = await client.get(f"{base}/v1/models")
-            resp.raise_for_status()
-            data = resp.json().get("data", [])
+        try:
+            async with httpx.AsyncClient(timeout=5.0) as client:
+                resp = await client.get(f"{base}/v1/models")
+                resp.raise_for_status()
+                data = resp.json().get("data", [])
 
-        ProviderGateway._llamacpp_models = data
-        ProviderGateway._llamacpp_models_fetched_at = now
-        logger.info(f"Discovered {len(data)} llama.cpp model(s)")
-        return data
+            ProviderGateway._llamacpp_models = data
+            ProviderGateway._llamacpp_models_fetched_at = now
+            logger.info(f"Discovered {len(data)} llama.cpp model(s)")
+            return data
+        except httpx.HTTPError:
+            logger.exception(f"Failed to connect to llama.cpp at {base}")
+            raise TemporaryProviderError(
+                f"llama.cpp server is offline or unreachable at {base}"
+            )

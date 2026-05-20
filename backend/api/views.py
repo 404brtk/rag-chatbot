@@ -296,6 +296,8 @@ class MessageStreamView(View):
                         if event.error_code:
                             payload["code"] = event.error_code
                     yield f"data: {json.dumps(payload)}\n\n"
+            except (TemporaryProviderError, PermanentProviderError) as e:
+                yield f"data: {json.dumps({'type': 'error', 'message': str(e)})}\n\n"
             except asyncio.CancelledError:
                 raise
 
@@ -347,6 +349,18 @@ class DocumentViewSet(
                 {"error": str(e)},
                 status=status.HTTP_400_BAD_REQUEST,
             )
+        except TemporaryProviderError as e:
+            return Response(
+                {
+                    "error": f"AI service temporarily unavailable during processing: {str(e)}"
+                },
+                status=status.HTTP_503_SERVICE_UNAVAILABLE,
+            )
+        except PermanentProviderError as e:
+            return Response(
+                {"error": f"AI service permanent error during processing: {str(e)}"},
+                status=status.HTTP_502_BAD_GATEWAY,
+            )
 
         serializer = self.get_serializer(document)
         return Response(serializer.data, status=status.HTTP_201_CREATED)
@@ -380,6 +394,18 @@ class DocumentViewSet(
             return Response(
                 {"error": str(e)},
                 status=status.HTTP_400_BAD_REQUEST,
+            )
+        except TemporaryProviderError as e:
+            return Response(
+                {
+                    "error": f"AI service temporarily unavailable during processing: {str(e)}"
+                },
+                status=status.HTTP_503_SERVICE_UNAVAILABLE,
+            )
+        except PermanentProviderError as e:
+            return Response(
+                {"error": f"AI service permanent error during processing: {str(e)}"},
+                status=status.HTTP_502_BAD_GATEWAY,
             )
 
         serializer = self.get_serializer(document)
