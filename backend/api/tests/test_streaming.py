@@ -6,7 +6,7 @@ from asgiref.sync import sync_to_async
 from django.contrib.auth import get_user_model
 from django.test import AsyncClient
 from rest_framework.test import APIClient
-from api.llm_config import StreamEvent
+from api.llm_config import StreamEvent, TemporaryProviderError
 from api.models import Conversation
 from .conftest import VALID_PASSWORD
 
@@ -45,6 +45,7 @@ class TestMessageStreamView:
                 usage={},
                 provider="openai",
                 model="gpt",
+                sent_messages=[{"role": "user", "content": "Hello"}],
             )
 
         mock_instance.generate_reply_stream = mock_stream
@@ -72,6 +73,7 @@ class TestMessageStreamView:
         assert events[0]["content"] == "Hi"
         assert events[1]["type"] == "done"
         assert events[1]["message_id"] == "msg-1"
+        assert events[1]["sent_messages"] == [{"role": "user", "content": "Hello"}]
 
     def test_invalid_json_returns_400(self, auth_client_a, user_a):
         conv = Conversation.objects.create(user=user_a)
@@ -161,3 +163,37 @@ class TestMessageStreamView:
         payload = json.loads(body.decode().removeprefix("data: "))
         assert payload["type"] == "error"
         assert payload["code"] == "invalid_document_ids"
+
+    @patch("api.views.ChatService")
+    async def test_stream_provider_error(self, mock_svc_cls, user_a, api_key):
+        conv = await sync_to_async(Conversation.objects.create)(user=user_a)
+        mock_instance = MagicMock()
+
+        async def mock_stream(*args, **kwargs):
+            yield StreamEvent(type="token", content="Hi")
+            raise TemporaryProviderError("AI service temporarily unavailable")
+
+        mock_instance.generate_reply_stream = mock_stream
+        mock_svc_cls.return_value = mock_instance
+        client = AsyncClient()
+        token_resp = await client.post(
+            "/api/token/",
+            {"email": "alice@example.com", "password": VALID_PASSWORD},
+        )
+        token = json.loads(token_resp.content)["access"]
+        response = await client.post(
+            stream_url(conv.id),
+            data=json.dumps({"content": "Hello", "provider": "openai", "model": "gpt"}),
+            content_type="application/json",
+            headers={"authorization": f"Bearer {token}"},
+        )
+        assert response.status_code == 200
+        body = b"".join([chunk async for chunk in response]).decode()
+        events = []
+        for raw in body.strip().split("\n\n"):
+            if raw.startswith("data: "):
+                events.append(json.loads(raw[6:]))
+        assert len(events) == 2
+        assert events[0]["type"] == "token"
+        assert events[1]["type"] == "error"
+        assert "temporarily unavailable" in events[1]["message"]

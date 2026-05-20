@@ -473,6 +473,7 @@ class TestChatServiceGenerateReplyStream:
         assert events[2].title is None
         assert events[2].provider == "openai"
         assert events[2].model == "gpt"
+        assert events[2].sent_messages == [{"role": "user", "content": "Hello"}]
 
     @pytest.mark.django_db(transaction=True)
     @patch("api.chat_service.ProviderGateway.generate_stream")

@@ -5,6 +5,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from api.embeddings import EmbeddingService
+from api.llm_config import TemporaryProviderError
 
 
 @pytest.fixture(autouse=True)
@@ -142,7 +143,7 @@ class TestEmbeddingService:
         service = EmbeddingService.get_instance()
         mock_sentence_transformer.encode.side_effect = RuntimeError("GPU OOM")
 
-        with pytest.raises(RuntimeError, match="GPU OOM"):
+        with pytest.raises(TemporaryProviderError, match="Embedding generation failed"):
             service.embed_texts(["Text"])
 
     def test_thread_safe_initialization(self, mock_sentence_transformer):

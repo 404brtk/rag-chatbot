@@ -200,3 +200,19 @@ class TestDocumentViewSet:
 
         assert response.status_code == status.HTTP_400_BAD_REQUEST
         assert "content" in response.json()
+
+    def test_upload_temporary_provider_error(
+        self, auth_client_a, mock_embedding_service
+    ):
+        from api.llm_config import TemporaryProviderError
+
+        mock_embedding_service.embed_texts.side_effect = TemporaryProviderError(
+            "Embedding API down"
+        )
+
+        url = reverse("document-list")
+        file = SimpleUploadedFile("test.txt", b"Hello world", content_type="text/plain")
+        response = auth_client_a.post(url, {"file": file}, format="multipart")
+
+        assert response.status_code == status.HTTP_503_SERVICE_UNAVAILABLE
+        assert "AI service temporarily unavailable" in response.json()["error"]
