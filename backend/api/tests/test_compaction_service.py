@@ -75,12 +75,12 @@ class TestCompactionService:
 
         self.gateway.generate_stream.return_value = _fake_stream()
         history = [_msg("user", "Hello"), _msg("assistant", "Hi there")]
-        config = replace(DEFAULT_CONFIG, compaction_model="gpt-5.4-mini")
+        config = replace(DEFAULT_CONFIG, compaction_model="gpt")
 
         result = await self.service.compact(
             history=history,
             config=config,
-            api_key="sk-test",
+            compaction_api_key="sk-compaction",
         )
 
         assert result == "Summary text."
@@ -90,53 +90,19 @@ class TestCompactionService:
         assert "User: Hello" in call_messages[0].content
         assert "Assistant: Hi there" in call_messages[0].content
 
-    async def test_compact_falls_back_to_main_model_when_compact_model_fails(self):
-        async def _fake_stream():
-            yield ProviderChunk(text="Fallback summary.")
-
-        self.gateway.generate_stream.side_effect = [
-            TemporaryProviderError("rate limited"),
-            _fake_stream(),
-        ]
-        config = replace(DEFAULT_CONFIG, compaction_model="gpt-5.4-mini")
-
-        result = await self.service.compact(
-            history=[_msg("user", "Hello")],
-            config=config,
-            api_key="sk-test",
-        )
-
-        assert result == "Fallback summary."
-        assert self.gateway.generate_stream.call_count == 2
-
-    async def test_compact_returns_none_when_both_models_fail(self):
+    async def test_compact_returns_none_on_failure(self):
         self.gateway.generate_stream.side_effect = TemporaryProviderError(
             "rate limited"
         )
-        config = replace(DEFAULT_CONFIG, compaction_model="gpt-5.4-mini")
+        config = replace(DEFAULT_CONFIG, compaction_model="gpt")
 
         result = await self.service.compact(
             history=[_msg("user", "Hello")],
             config=config,
-            api_key="sk-test",
+            compaction_api_key="sk-compaction",
         )
 
         assert result is None
-
-    async def test_summarize_dedups_when_models_are_identical(self):
-        async def _fake_stream():
-            yield ProviderChunk(text="Summary.")
-
-        self.gateway.generate_stream.return_value = _fake_stream()
-        config = replace(DEFAULT_CONFIG, compaction_model="gpt-5.5")
-
-        result = await self.service.compact(
-            history=[_msg("user", "Hello")],
-            config=config,
-            api_key="sk-test",
-        )
-
-        assert result == "Summary."
         assert self.gateway.generate_stream.call_count == 1
 
     def test_chunk_truncate_returns_all_when_under_threshold(self):
@@ -185,29 +151,21 @@ class TestCompactionService:
             == []
         )
 
-    async def test_compact_stream_does_not_yield_partial_on_fallback(self):
+    async def test_compact_stream_fails_silently_on_error(self):
         async def _failing_stream():
             yield ProviderChunk(text="Part")
-            raise TemporaryProviderError("model 1 failed")
+            raise TemporaryProviderError("model failed")
 
-        async def _good_stream():
-            yield ProviderChunk(text="Full summary.")
-
-        self.gateway.generate_stream.side_effect = [
-            _failing_stream(),
-            _good_stream(),
-        ]
-        config = replace(DEFAULT_CONFIG, compaction_model="gpt-5.4-mini")
+        self.gateway.generate_stream.return_value = _failing_stream()
+        config = replace(DEFAULT_CONFIG, compaction_model="gpt")
 
         chunks = []
         async for chunk in self.service.compact_stream(
             history=[_msg("user", "Hello")],
             config=config,
-            api_key="sk-test",
+            compaction_api_key="sk-compaction",
         ):
             chunks.append(chunk)
 
-        text_chunks = [c for c in chunks if c.text]
-        assert len(text_chunks) == 1
-        assert text_chunks[0].text == "Full summary."
-        assert self.gateway.generate_stream.call_count == 2
+        assert len(chunks) == 1
+        assert chunks[0].text == "Part"

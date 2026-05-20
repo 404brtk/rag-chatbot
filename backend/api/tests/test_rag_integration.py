@@ -1,9 +1,7 @@
 from unittest.mock import AsyncMock, MagicMock, patch
-
 import pytest
 from django.urls import reverse
 from rest_framework import status
-
 from api.document_service import SearchResult
 from api.models import Conversation
 
@@ -19,7 +17,6 @@ def mock_document_service():
 def _mock_openai_response(mock_openai_class, content="Hello!", usage=None):
     mock_client = MagicMock()
     mock_openai_class.return_value = mock_client
-
     mock_response = MagicMock()
     mock_response.choices = [MagicMock(message=MagicMock(content=content))]
     mock_response.usage = usage
@@ -34,20 +31,17 @@ class TestRAGIntegration:
         self, mock_openai_class, auth_client_a, user_a, mock_document_service, api_key
     ):
         mock_client = _mock_openai_response(mock_openai_class)
-
         conversation = Conversation.objects.create(user=user_a, title="Test")
         url = reverse(
             "conversation-messages", kwargs={"conversation_pk": conversation.pk}
         )
         response = auth_client_a.post(
             url,
-            {"content": "Hi", "provider": "openai"},
+            {"content": "Hi", "provider": "openai", "model": "gpt"},
             format="json",
         )
-
         assert response.status_code == status.HTTP_201_CREATED
         mock_document_service.search.assert_not_called()
-
         call_args = mock_client.chat.completions.create.call_args[1]
         user_messages = [m for m in call_args["messages"] if m["role"] == "user"]
         assert len(user_messages) == 1
@@ -58,7 +52,6 @@ class TestRAGIntegration:
         self, mock_openai_class, auth_client_a, user_a, mock_document_service, api_key
     ):
         mock_client = _mock_openai_response(mock_openai_class)
-
         mock_document_service.search.return_value = [
             SearchResult(
                 chunk_content="This is the context.",
@@ -68,7 +61,6 @@ class TestRAGIntegration:
                 distance=0.1,
             )
         ]
-
         conversation = Conversation.objects.create(user=user_a, title="Test")
         url = reverse(
             "conversation-messages", kwargs={"conversation_pk": conversation.pk}
@@ -78,18 +70,16 @@ class TestRAGIntegration:
             {
                 "content": "What is in the doc?",
                 "provider": "openai",
+                "model": "gpt",
                 "document_ids": [],
             },
             format="json",
         )
-
         assert response.status_code == status.HTTP_201_CREATED
-
         mock_document_service.search.assert_called_once()
         call_kwargs = mock_document_service.search.call_args[1]
         assert call_kwargs["query"] == "What is in the doc?"
         assert call_kwargs["document_ids"] is None
-
         call_args = mock_client.chat.completions.create.call_args[1]
         user_messages = [m for m in call_args["messages"] if m["role"] == "user"]
         last_content = user_messages[-1]["content"]
@@ -103,7 +93,6 @@ class TestRAGIntegration:
         self, mock_openai_class, auth_client_a, user_a, mock_document_service, api_key
     ):
         mock_client = _mock_openai_response(mock_openai_class)
-
         mock_document_service.search.return_value = [
             SearchResult(
                 chunk_content="Specific context.",
@@ -113,7 +102,6 @@ class TestRAGIntegration:
                 distance=0.05,
             )
         ]
-
         conversation = Conversation.objects.create(user=user_a, title="Test")
         url = reverse(
             "conversation-messages", kwargs={"conversation_pk": conversation.pk}
@@ -123,17 +111,15 @@ class TestRAGIntegration:
             {
                 "content": "What is in the doc?",
                 "provider": "openai",
+                "model": "gpt",
                 "document_ids": ["uuid-1", "uuid-2"],
             },
             format="json",
         )
-
         assert response.status_code == status.HTTP_201_CREATED
-
         mock_document_service.search.assert_called_once()
         call_kwargs = mock_document_service.search.call_args[1]
         assert call_kwargs["document_ids"] == ["uuid-1", "uuid-2"]
-
         call_args = mock_client.chat.completions.create.call_args[1]
         user_messages = [m for m in call_args["messages"] if m["role"] == "user"]
         last_content = user_messages[-1]["content"]
@@ -147,9 +133,13 @@ class TestRAGIntegration:
         )
         response = auth_client_a.post(
             url,
-            {"content": "Hi", "document_ids": "not-a-list"},
+            {
+                "content": "Hi",
+                "provider": "openai",
+                "model": "gpt",
+                "document_ids": "not-a-list",
+            },
             format="json",
         )
-
         assert response.status_code == status.HTTP_400_BAD_REQUEST
         assert "document_ids" in response.json()

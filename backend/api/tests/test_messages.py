@@ -40,7 +40,7 @@ class TestMessageCreation:
         mock_generate.return_value = GenerationResult(
             text="Mocked AI response",
             provider="openai",
-            model="gpt-5.5",
+            model="gpt",
             input_tokens=10,
             output_tokens=20,
             usage={"prompt_tokens": 10, "completion_tokens": 20},
@@ -48,7 +48,9 @@ class TestMessageCreation:
         )
 
         url = messages_url(conversation_a.id)
-        response = auth_client_a.post(url, {"content": "Hello"})
+        response = auth_client_a.post(
+            url, {"content": "Hello", "provider": "openai", "model": "gpt"}
+        )
         assert response.status_code == status.HTTP_201_CREATED
 
         assert response.data["role"] == "ai"
@@ -66,6 +68,40 @@ class TestMessageCreation:
         ai_msg = Message.objects.filter(conversation=conversation_a, role="ai").first()
         assert ai_msg.content == "Mocked AI response"
         assert response.data["id"] == str(ai_msg.id)
+
+    @patch("api.provider_gateway.AsyncOpenAI")
+    @patch("api.chat_service.ProviderGateway.generate", new_callable=AsyncMock)
+    def test_create_message_whitespace_compaction_fallback(
+        self, mock_generate, mock_openai, auth_client_a, conversation_a, api_key
+    ):
+        mock_generate.return_value = GenerationResult(
+            text="Mocked AI response",
+            provider="openai",
+            model="gpt",
+            input_tokens=10,
+            output_tokens=20,
+            usage={"prompt_tokens": 10, "completion_tokens": 20},
+            model_input=[StoredMessage(role="user", content="Hello")],
+        )
+
+        url = messages_url(conversation_a.id)
+        response = auth_client_a.post(
+            url,
+            {
+                "content": "Hello",
+                "provider": "openai",
+                "model": "gpt",
+                "compaction_provider": "   ",
+                "compaction_model": "   ",
+            },
+        )
+        assert response.status_code == status.HTTP_201_CREATED
+        assert response.data["content"] == "Mocked AI response"
+
+        assert mock_generate.call_count == 1
+        called_config = mock_generate.call_args[1]["config"]
+        assert called_config.compaction_provider == "openai"
+        assert called_config.compaction_model == "gpt"
 
     def test_create_message_empty_content_returns_400(
         self, auth_client_a, conversation_a
@@ -85,7 +121,9 @@ class TestMessageCreation:
         self, auth_client_a, conversation_b
     ):
         url = messages_url(conversation_b.id)
-        response = auth_client_a.post(url, {"content": "Sneaky"})
+        response = auth_client_a.post(
+            url, {"content": "Sneaky", "provider": "openai", "model": "gpt"}
+        )
         assert response.status_code == status.HTTP_404_NOT_FOUND
         assert Message.objects.count() == 0
 
@@ -94,7 +132,9 @@ class TestMessageCreation:
     ):
         fake_id = uuid.uuid4()
         url = messages_url(fake_id)
-        response = auth_client_a.post(url, {"content": "Hello"})
+        response = auth_client_a.post(
+            url, {"content": "Hello", "provider": "openai", "model": "gpt"}
+        )
         assert response.status_code == status.HTTP_404_NOT_FOUND
 
     @patch("api.provider_gateway.AsyncOpenAI")
@@ -104,7 +144,9 @@ class TestMessageCreation:
     ):
         mock_generate.side_effect = TemporaryProviderError("rate limited")
         url = messages_url(conversation_a.id)
-        response = auth_client_a.post(url, {"content": "Hello"})
+        response = auth_client_a.post(
+            url, {"content": "Hello", "provider": "openai", "model": "gpt"}
+        )
         assert response.status_code == status.HTTP_503_SERVICE_UNAVAILABLE
 
     @patch("api.provider_gateway.AsyncOpenAI")
@@ -114,12 +156,16 @@ class TestMessageCreation:
     ):
         mock_generate.side_effect = PermanentProviderError("bad request")
         url = messages_url(conversation_a.id)
-        response = auth_client_a.post(url, {"content": "Hello"})
+        response = auth_client_a.post(
+            url, {"content": "Hello", "provider": "openai", "model": "gpt"}
+        )
         assert response.status_code == status.HTTP_502_BAD_GATEWAY
 
     def test_missing_api_key_returns_403(self, auth_client_a, conversation_a):
         url = messages_url(conversation_a.id)
-        response = auth_client_a.post(url, {"content": "Hello"})
+        response = auth_client_a.post(
+            url, {"content": "Hello", "provider": "openai", "model": "gpt"}
+        )
         assert response.status_code == status.HTTP_403_FORBIDDEN
         assert "No API key configured" in response.data["error"]
 
@@ -131,7 +177,7 @@ class TestMessageCreation:
         mock_generate.return_value = GenerationResult(
             text="Mocked AI response",
             provider="openai",
-            model="gpt-5.5",
+            model="gpt",
             input_tokens=10,
             output_tokens=20,
             usage={"prompt_tokens": 10, "completion_tokens": 20},
@@ -141,7 +187,9 @@ class TestMessageCreation:
         conv = Conversation.objects.create(user=user_a)
 
         url = messages_url(conv.id)
-        response = auth_client_a.post(url, {"content": "Hello"})
+        response = auth_client_a.post(
+            url, {"content": "Hello", "provider": "openai", "model": "gpt"}
+        )
         assert response.status_code == status.HTTP_201_CREATED
 
         conv.refresh_from_db()
@@ -155,7 +203,7 @@ class TestMessageCreation:
         mock_generate.return_value = GenerationResult(
             text="Mocked AI response",
             provider="openai",
-            model="gpt-5.5",
+            model="gpt",
             input_tokens=10,
             output_tokens=20,
             usage={"prompt_tokens": 10, "completion_tokens": 20},
@@ -166,7 +214,9 @@ class TestMessageCreation:
 
         long_msg = "How do I implement a binary search tree in Python with proper type annotations"
         url = messages_url(conv.id)
-        response = auth_client_a.post(url, {"content": long_msg})
+        response = auth_client_a.post(
+            url, {"content": long_msg, "provider": "openai", "model": "gpt"}
+        )
         assert response.status_code == status.HTTP_201_CREATED
 
         conv.refresh_from_db()
@@ -183,7 +233,7 @@ class TestMessageCreation:
         mock_generate.return_value = GenerationResult(
             text="Mocked AI response",
             provider="openai",
-            model="gpt-5.5",
+            model="gpt",
             input_tokens=10,
             output_tokens=20,
             usage={"prompt_tokens": 10, "completion_tokens": 20},
@@ -191,7 +241,9 @@ class TestMessageCreation:
         )
 
         url = messages_url(conversation_a.id)
-        response = auth_client_a.post(url, {"content": "Some new message"})
+        response = auth_client_a.post(
+            url, {"content": "Some new message", "provider": "openai", "model": "gpt"}
+        )
         assert response.status_code == status.HTTP_201_CREATED
 
         conversation_a.refresh_from_db()
@@ -207,7 +259,9 @@ class TestMessageCreation:
         conv = Conversation.objects.create(user=user_a)
 
         url = messages_url(conv.id)
-        response = auth_client_a.post(url, {"content": "Hello"})
+        response = auth_client_a.post(
+            url, {"content": "Hello", "provider": "openai", "model": "gpt"}
+        )
         assert response.status_code == status.HTTP_503_SERVICE_UNAVAILABLE
 
         conv.refresh_from_db()

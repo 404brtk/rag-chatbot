@@ -1,16 +1,13 @@
 import json
 import uuid
 from unittest.mock import MagicMock, patch
-
 import pytest
 from asgiref.sync import sync_to_async
 from django.contrib.auth import get_user_model
 from django.test import AsyncClient
 from rest_framework.test import APIClient
-
 from api.llm_config import StreamEvent
 from api.models import Conversation
-
 from .conftest import VALID_PASSWORD
 
 User = get_user_model()
@@ -37,7 +34,6 @@ class TestMessageStreamView:
     @patch("api.views.ChatService")
     async def test_stream_success(self, mock_svc_cls, user_a, api_key):
         conv = await sync_to_async(Conversation.objects.create)(user=user_a)
-
         mock_instance = MagicMock()
 
         async def mock_stream(*args, **kwargs):
@@ -48,33 +44,29 @@ class TestMessageStreamView:
                 title=None,
                 usage={},
                 provider="openai",
-                model="gpt-5.5",
+                model="gpt",
             )
 
         mock_instance.generate_reply_stream = mock_stream
         mock_svc_cls.return_value = mock_instance
-
         client = AsyncClient()
         token_resp = await client.post(
             "/api/token/",
             {"email": "alice@example.com", "password": VALID_PASSWORD},
         )
         token = json.loads(token_resp.content)["access"]
-
         response = await client.post(
             stream_url(conv.id),
-            data=json.dumps({"content": "Hello"}),
+            data=json.dumps({"content": "Hello", "provider": "openai", "model": "gpt"}),
             content_type="application/json",
             headers={"authorization": f"Bearer {token}"},
         )
-
         assert response.status_code == 200
         body = b"".join([chunk async for chunk in response]).decode()
         events = []
         for raw in body.strip().split("\n\n"):
             if raw.startswith("data: "):
                 events.append(json.loads(raw[6:]))
-
         assert len(events) == 2
         assert events[0]["type"] == "token"
         assert events[0]["content"] == "Hi"
@@ -98,7 +90,7 @@ class TestMessageStreamView:
         conv = Conversation.objects.create(user=user_a)
         response = auth_client_a.post(
             stream_url(conv.id),
-            data=json.dumps({}),
+            data=json.dumps({"provider": "openai", "model": "gpt"}),
             content_type="application/json",
         )
         assert response.status_code == 400
@@ -111,7 +103,7 @@ class TestMessageStreamView:
         conv = Conversation.objects.create(user=user_b)
         response = auth_client_a.post(
             stream_url(conv.id),
-            data=json.dumps({"content": "Hello"}),
+            data=json.dumps({"content": "Hello", "provider": "openai", "model": "gpt"}),
             content_type="application/json",
         )
         assert response.status_code == 404
@@ -119,7 +111,6 @@ class TestMessageStreamView:
     @patch("api.views.ChatService")
     async def test_auto_title_from_stream(self, mock_svc_cls, user_a, api_key):
         conv = await sync_to_async(Conversation.objects.create)(user=user_a)
-
         mock_instance = MagicMock()
 
         async def mock_stream(*args, **kwargs):
@@ -130,33 +121,39 @@ class TestMessageStreamView:
                 title="Hello world",
                 usage={},
                 provider="openai",
-                model="gpt-5.5",
+                model="gpt",
             )
 
         mock_instance.generate_reply_stream = mock_stream
         mock_svc_cls.return_value = mock_instance
-
         client = AsyncClient()
         token_resp = await client.post(
             "/api/token/",
             {"email": "alice@example.com", "password": VALID_PASSWORD},
         )
         token = json.loads(token_resp.content)["access"]
-
         response = await client.post(
             stream_url(conv.id),
-            data=json.dumps({"content": "Hello world"}),
+            data=json.dumps(
+                {"content": "Hello world", "provider": "openai", "model": "gpt"}
+            ),
             content_type="application/json",
             headers={"authorization": f"Bearer {token}"},
         )
-
         assert response.status_code == 200
 
     def test_invalid_document_ids_returns_400(self, auth_client_a, user_a):
         conv = Conversation.objects.create(user=user_a)
         response = auth_client_a.post(
             stream_url(conv.id),
-            data=json.dumps({"content": "Hello", "document_ids": "not-a-list"}),
+            data=json.dumps(
+                {
+                    "content": "Hello",
+                    "provider": "openai",
+                    "model": "gpt",
+                    "document_ids": "not-a-list",
+                }
+            ),
             content_type="application/json",
         )
         assert response.status_code == 400

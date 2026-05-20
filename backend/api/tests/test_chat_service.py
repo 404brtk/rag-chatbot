@@ -136,7 +136,7 @@ class TestChatServiceGenerateReply:
         [TemporaryProviderError, PermanentProviderError],
     )
     @patch("api.chat_service.ProviderGateway.generate", new_callable=AsyncMock)
-    @patch.object(ChatService, "_resolve_api_key", return_value="sk-test")
+    @patch.object(ChatService, "_resolve_api_key", return_value="sk-chat")
     async def test_propagates_provider_errors(
         self, mock_resolve, mock_generate, error_class
     ):
@@ -153,12 +153,12 @@ class TestChatServiceGenerateReply:
             )
 
     @patch("api.chat_service.ProviderGateway.generate", new_callable=AsyncMock)
-    @patch.object(ChatService, "_resolve_api_key", return_value="sk-test")
+    @patch.object(ChatService, "_resolve_api_key", return_value="sk-chat")
     async def test_strips_whitespace_from_user_text(self, mock_resolve, mock_generate):
         mock_generate.return_value = GenerationResult(
             text="Hi!",
             provider="openai",
-            model="gpt-5.5",
+            model="gpt",
             input_tokens=1,
             output_tokens=1,
             usage={},
@@ -182,14 +182,14 @@ class TestChatServiceGenerateReply:
         assert call_kwargs["user_content"] == "Hello"
 
     @patch("api.chat_service.ProviderGateway.generate", new_callable=AsyncMock)
-    @patch.object(ChatService, "_resolve_api_key", return_value="sk-test")
+    @patch.object(ChatService, "_resolve_api_key", return_value="sk-chat")
     async def test_passes_history_and_new_message_to_window(
         self, mock_resolve, mock_generate
     ):
         mock_generate.return_value = GenerationResult(
             text="Hi!",
             provider="openai",
-            model="gpt-5.5",
+            model="gpt",
             input_tokens=1,
             output_tokens=1,
             usage={},
@@ -217,14 +217,14 @@ class TestChatServiceGenerateReply:
         assert "New question" in user_messages[0].content
 
     @patch("api.chat_service.ProviderGateway.generate", new_callable=AsyncMock)
-    @patch.object(ChatService, "_resolve_api_key", return_value="sk-test")
+    @patch.object(ChatService, "_resolve_api_key", return_value="sk-chat")
     async def test_appends_message_pair_to_repository(
         self, mock_resolve, mock_generate
     ):
         mock_generate.return_value = GenerationResult(
             text="Response text",
             provider="openai",
-            model="gpt-5.5",
+            model="gpt",
             input_tokens=10,
             output_tokens=5,
             usage={"prompt_tokens": 10, "completion_tokens": 5},
@@ -253,7 +253,7 @@ class TestChatServiceGenerateReply:
         self.mock_repo.append_message_pair.assert_called_once()
 
     @patch("api.chat_service.ProviderGateway.generate", new_callable=AsyncMock)
-    @patch.object(ChatService, "_resolve_api_key", return_value="sk-test")
+    @patch.object(ChatService, "_resolve_api_key", return_value="sk-chat")
     @patch("api.chat_service.DocumentService")
     async def test_injects_context_tags_when_search_has_results(
         self, mock_doc_svc_cls, mock_resolve, mock_generate
@@ -264,7 +264,7 @@ class TestChatServiceGenerateReply:
         mock_generate.return_value = GenerationResult(
             text="Answer.",
             provider="openai",
-            model="gpt-5.5",
+            model="gpt",
             input_tokens=10,
             output_tokens=5,
             usage={},
@@ -296,7 +296,7 @@ class TestChatServiceGenerateReply:
         assert "</QUESTION>" in user_content
 
     @patch("api.chat_service.ProviderGateway.generate", new_callable=AsyncMock)
-    @patch.object(ChatService, "_resolve_api_key", return_value="sk-test")
+    @patch.object(ChatService, "_resolve_api_key", return_value="sk-chat")
     @patch("api.chat_service.DocumentService")
     async def test_includes_context_chunks_and_raw_question_on_user_message(
         self, mock_doc_svc_cls, mock_resolve, mock_generate
@@ -308,7 +308,7 @@ class TestChatServiceGenerateReply:
         mock_generate.return_value = GenerationResult(
             text="Answer.",
             provider="openai",
-            model="gpt-5.5",
+            model="gpt",
             input_tokens=10,
             output_tokens=5,
             usage={},
@@ -342,7 +342,7 @@ class TestChatServiceGenerateReply:
         assert call_kwargs["user_context"][1]["content"] == "Info B"
 
     @patch("api.chat_service.ProviderGateway.generate", new_callable=AsyncMock)
-    @patch.object(ChatService, "_resolve_api_key", return_value="sk-test")
+    @patch.object(ChatService, "_resolve_api_key", return_value="sk-chat")
     @patch("api.chat_service.DocumentService")
     async def test_does_not_inject_context_when_document_ids_is_none(
         self, mock_doc_svc_cls, mock_resolve, mock_generate
@@ -350,7 +350,7 @@ class TestChatServiceGenerateReply:
         mock_generate.return_value = GenerationResult(
             text="Answer.",
             provider="openai",
-            model="gpt-5.5",
+            model="gpt",
             input_tokens=10,
             output_tokens=5,
             usage={},
@@ -377,7 +377,7 @@ class TestChatServiceGenerateReply:
         mock_doc_svc_cls.return_value.search.assert_not_called()
 
     @patch("api.chat_service.ProviderGateway.generate", new_callable=AsyncMock)
-    @patch.object(ChatService, "_resolve_api_key", return_value="sk-test")
+    @patch.object(ChatService, "_resolve_api_key", return_value="sk-chat")
     @patch("api.chat_service.DocumentService")
     async def test_skips_context_injection_when_search_returns_no_results(
         self, mock_doc_svc_cls, mock_resolve, mock_generate
@@ -386,7 +386,7 @@ class TestChatServiceGenerateReply:
         mock_generate.return_value = GenerationResult(
             text="Answer.",
             provider="openai",
-            model="gpt-5.5",
+            model="gpt",
             input_tokens=10,
             output_tokens=5,
             usage={},
@@ -443,7 +443,7 @@ class TestChatServiceGenerateReplyStream:
 
     @pytest.mark.django_db(transaction=True)
     @patch("api.chat_service.ProviderGateway.generate_stream")
-    @patch.object(ChatService, "_resolve_api_key", return_value="sk-test")
+    @patch.object(ChatService, "_resolve_api_key", return_value="sk-chat")
     async def test_yields_tokens_and_done_event(
         self, mock_resolve, mock_stream, user_a
     ):
@@ -472,11 +472,11 @@ class TestChatServiceGenerateReplyStream:
         assert events[2].message_id is not None
         assert events[2].title is None
         assert events[2].provider == "openai"
-        assert events[2].model == "gpt-5.5"
+        assert events[2].model == "gpt"
 
     @pytest.mark.django_db(transaction=True)
     @patch("api.chat_service.ProviderGateway.generate_stream")
-    @patch.object(ChatService, "_resolve_api_key", return_value="sk-test")
+    @patch.object(ChatService, "_resolve_api_key", return_value="sk-chat")
     async def test_appends_user_and_assistant_messages(
         self, mock_resolve, mock_stream, user_a
     ):
@@ -500,18 +500,18 @@ class TestChatServiceGenerateReplyStream:
         assert user_call["role"] == "user"
         assert user_call["content"] == "Hello"
         assert user_call["provider"] == "openai"
-        assert user_call["model"] == "gpt-5.5"
+        assert user_call["model"] == "gpt"
         assert user_call["raw_question"] == "Hello"
 
         assistant_call = self.mock_repo.append_message.call_args_list[1][1]
         assert assistant_call["role"] == "assistant"
         assert assistant_call["content"] == "Response"
         assert assistant_call["provider"] == "openai"
-        assert assistant_call["model"] == "gpt-5.5"
+        assert assistant_call["model"] == "gpt"
 
     @pytest.mark.django_db(transaction=True)
     @patch("api.chat_service.ProviderGateway.generate_stream")
-    @patch.object(ChatService, "_resolve_api_key", return_value="sk-test")
+    @patch.object(ChatService, "_resolve_api_key", return_value="sk-chat")
     async def test_uses_provider_usage_over_estimate(
         self, mock_resolve, mock_stream, user_a
     ):
@@ -543,7 +543,7 @@ class TestChatServiceGenerateReplyStream:
 
     @pytest.mark.django_db(transaction=True)
     @patch("api.chat_service.ProviderGateway.generate_stream")
-    @patch.object(ChatService, "_resolve_api_key", return_value="sk-test")
+    @patch.object(ChatService, "_resolve_api_key", return_value="sk-chat")
     async def test_falls_back_to_estimated_usage(
         self, mock_resolve, mock_stream, user_a
     ):
@@ -569,7 +569,7 @@ class TestChatServiceGenerateReplyStream:
 
     @pytest.mark.django_db(transaction=True)
     @patch("api.chat_service.ProviderGateway.generate_stream")
-    @patch.object(ChatService, "_resolve_api_key", return_value="sk-test")
+    @patch.object(ChatService, "_resolve_api_key", return_value="sk-chat")
     async def test_sets_title_on_untitled_session(
         self, mock_resolve, mock_stream, user_a
     ):
@@ -594,7 +594,7 @@ class TestChatServiceGenerateReplyStream:
 
     @pytest.mark.django_db(transaction=True)
     @patch("api.chat_service.ProviderGateway.generate_stream")
-    @patch.object(ChatService, "_resolve_api_key", return_value="sk-test")
+    @patch.object(ChatService, "_resolve_api_key", return_value="sk-chat")
     async def test_preserves_existing_title(self, mock_resolve, mock_stream, user_a):
         async def gen():
             yield ProviderChunk(text="Answer")
@@ -617,7 +617,7 @@ class TestChatServiceGenerateReplyStream:
 
     @pytest.mark.django_db(transaction=True)
     @patch("api.chat_service.ProviderGateway.generate_stream")
-    @patch.object(ChatService, "_resolve_api_key", return_value="sk-test")
+    @patch.object(ChatService, "_resolve_api_key", return_value="sk-chat")
     async def test_updates_last_message_at(self, mock_resolve, mock_stream, user_a):
         async def gen():
             yield ProviderChunk(text="Answer")
@@ -671,7 +671,7 @@ class TestChatServiceGenerateReplyStream:
 
     @pytest.mark.django_db(transaction=True)
     @patch("api.chat_service.ProviderGateway.generate_stream")
-    @patch.object(ChatService, "_resolve_api_key", return_value="sk-test")
+    @patch.object(ChatService, "_resolve_api_key", return_value="sk-chat")
     async def test_error_event_on_provider_failure(
         self, mock_resolve, mock_stream, user_a
     ):
@@ -698,7 +698,7 @@ class TestChatServiceGenerateReplyStream:
 
     @pytest.mark.django_db(transaction=True)
     @patch("api.chat_service.ProviderGateway.generate_stream")
-    @patch.object(ChatService, "_resolve_api_key", return_value="sk-test")
+    @patch.object(ChatService, "_resolve_api_key", return_value="sk-chat")
     async def test_unexpected_exception_yields_internal_error(
         self, mock_resolve, mock_stream, user_a
     ):
@@ -748,7 +748,9 @@ class TestChatServiceCompaction:
         self._session_patch.stop()
 
     @patch.object(CompactionService, "should_compact", return_value=True)
-    @patch.object(ChatService, "_resolve_api_key", return_value="sk-test")
+    @patch.object(
+        ChatService, "_resolve_api_key", side_effect=["sk-chat", "sk-compaction"]
+    )
     async def test_prepare_generation_triggers_compaction_and_returns_summary(
         self, mock_resolve, mock_should
     ):
@@ -785,7 +787,7 @@ class TestChatServiceCompaction:
         assert apply_call["session"] == self.mock_session
         assert apply_call["summary"] == "This is the conversation summary."
         assert apply_call["provider"] == "openai"
-        assert apply_call["model"] == "gpt-5.5"
+        assert apply_call["model"] == "gpt"
         assert self.mock_repo.list_messages.call_count == 2
         assert prep.messages[0].is_compaction_summary is True
 
@@ -796,7 +798,11 @@ class TestChatServiceCompaction:
         self, mock_resolve, mock_should, mock_discover
     ):
         async def _fake_compact_stream():
-            yield ProviderChunk(text="Summary from llama.cpp.")
+            yield ProviderChunk(
+                text="Summary from llama.cpp.",
+                provider="llamacpp",
+                model="gemma-4-E4B-it",
+            )
 
         mock_compact_stream = MagicMock(return_value=_fake_compact_stream())
         with patch.object(CompactionService, "compact_stream", mock_compact_stream):
@@ -812,6 +818,8 @@ class TestChatServiceCompaction:
                 DEFAULT_CONFIG,
                 provider="llamacpp",
                 model="gemma-4-E4B-it",
+                compaction_provider="llamacpp",
+                compaction_model="gemma-4-E4B-it",
             )
             await service._prepare_generation(
                 user=self.mock_user,
@@ -824,7 +832,7 @@ class TestChatServiceCompaction:
         assert apply_call["provider"] == "llamacpp"
         assert apply_call["model"] == "gemma-4-E4B-it"
 
-    @patch.object(ChatService, "_resolve_api_key", return_value="sk-test")
+    @patch.object(ChatService, "_resolve_api_key", return_value="sk-chat")
     async def test_prepare_generation_falls_back_to_chunk_truncate(self, mock_resolve):
         async def _empty_gen():
             if False:
@@ -855,7 +863,7 @@ class TestChatServiceCompaction:
         assert prep.messages[0].content.startswith("word ")
 
     @patch.object(CompactionService, "should_compact", return_value=False)
-    @patch.object(ChatService, "_resolve_api_key", return_value="sk-test")
+    @patch.object(ChatService, "_resolve_api_key", return_value="sk-chat")
     async def test_prepare_generation_no_compaction_when_under_threshold(
         self, mock_resolve, mock_should
     ):
@@ -880,7 +888,7 @@ class TestChatServiceCompaction:
         assert prep.messages[2].content == "Hello"
 
     @patch.object(CompactionService, "should_compact", return_value=False)
-    @patch.object(ChatService, "_resolve_api_key", return_value="sk-test")
+    @patch.object(ChatService, "_resolve_api_key", return_value="sk-chat")
     async def test_prepare_generation_preserves_existing_summary_without_new_compaction(
         self, mock_resolve, mock_should
     ):
@@ -905,7 +913,7 @@ class TestChatServiceCompaction:
         assert prep.messages[0].content == "Prior summary"
 
     @patch.object(CompactionService, "should_compact", return_value=True)
-    @patch.object(ChatService, "_resolve_api_key", return_value="sk-test")
+    @patch.object(ChatService, "_resolve_api_key", return_value="sk-chat")
     @patch("api.chat_service.ProviderGateway.generate_stream")
     async def test_stream_yields_compaction_events_when_triggered(
         self, mock_stream, mock_resolve, mock_should
@@ -952,10 +960,10 @@ class TestChatServiceCompaction:
         self.mock_repo.apply_compaction.assert_called_once()
         apply_call = self.mock_repo.apply_compaction.call_args[1]
         assert apply_call["provider"] == "openai"
-        assert apply_call["model"] == "gpt-5.5"
+        assert apply_call["model"] == "gpt"
 
     @patch.object(ProviderGateway, "discover_llamacpp_context", return_value=4096)
-    @patch.object(ChatService, "_resolve_api_key", return_value="sk-test")
+    @patch.object(ChatService, "_resolve_api_key", return_value="sk-chat")
     @patch.object(CompactionService, "should_compact", return_value=True)
     async def test_prepare_generation_clamps_max_input_tokens_for_llamacpp(
         self, mock_should, mock_resolve, mock_discover
@@ -987,7 +995,7 @@ class TestChatServiceCompaction:
         "discover_llamacpp_context",
         side_effect=httpx.ConnectError("Connection refused"),
     )
-    @patch.object(ChatService, "_resolve_api_key", return_value="sk-test")
+    @patch.object(ChatService, "_resolve_api_key", return_value="sk-chat")
     async def test_prepare_generation_propagates_discovery_failure(
         self, mock_resolve, mock_discover
     ):
@@ -1004,7 +1012,7 @@ class TestChatServiceCompaction:
             )
 
     @patch.object(ProviderGateway, "discover_llamacpp_context", return_value=8192)
-    @patch.object(ChatService, "_resolve_api_key", return_value="sk-test")
+    @patch.object(ChatService, "_resolve_api_key", return_value="sk-chat")
     @patch.object(CompactionService, "should_compact", return_value=True)
     async def test_prepare_generation_skips_clamp_when_within_context(
         self, mock_should, mock_resolve, mock_discover
