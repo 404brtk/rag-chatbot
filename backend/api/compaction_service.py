@@ -40,6 +40,8 @@ class CompactionService:
             provider=provider,
             model=model,
             system_prompt="You are a conversation summarizer.",
+            compaction_provider=provider,
+            compaction_model=model,
             max_output_tokens=1_024,
         )
 
@@ -73,63 +75,50 @@ class CompactionService:
             config=summary_config,
             messages=[StoredMessage(role="user", content=summarization_prompt)],
         ):
-            yield chunk
-
-    @staticmethod
-    def _dedup_models(config: LLMConfig) -> list[str]:
-        models = []
-        for m in (config.compaction_model, config.model):
-            if m not in models:
-                models.append(m)
-        return models
-
-    async def _summarize_with_llm(
-        self,
-        history: list[StoredMessage],
-        config: LLMConfig,
-        api_key: str,
-    ) -> str | None:
-        models = CompactionService._dedup_models(config)
-        for model in models:
-            try:
-                summary = await self._call_summarizer(
-                    history, model, api_key, config.provider
-                )
-                if summary:
-                    return summary
-            except (TemporaryProviderError, PermanentProviderError) as e:
-                logger.warning(f"Compaction summarizer failed for model {model}: {e}")
-                continue
-        return None
+            yield ProviderChunk(
+                text=chunk.text,
+                usage=chunk.usage,
+                provider=provider,
+                model=model,
+            )
 
     async def compact(
         self,
         history: list[StoredMessage],
         config: LLMConfig,
-        api_key: str,
+        compaction_api_key: str,
     ) -> str | None:
-        return await self._summarize_with_llm(history, config, api_key)
+        try:
+            return await self._call_summarizer(
+                history,
+                config.compaction_model,
+                compaction_api_key,
+                config.compaction_provider,
+            )
+        except (TemporaryProviderError, PermanentProviderError) as e:
+            logger.warning(
+                f"Compaction failed for model {config.compaction_model} on provider {config.compaction_provider}: {e}"
+            )
+            return None
 
     async def compact_stream(
         self,
         history: list[StoredMessage],
         config: LLMConfig,
-        api_key: str,
+        compaction_api_key: str,
     ):
-        models = self._dedup_models(config)
-        for model in models:
-            collected: list[ProviderChunk] = []
-            try:
-                async for chunk in self._call_summarizer_stream(
-                    history, model, api_key, config.provider
-                ):
-                    collected.append(chunk)
-            except (TemporaryProviderError, PermanentProviderError) as e:
-                logger.warning(f"Compaction summarizer failed for model {model}: {e}")
-                continue
-            for chunk in collected:
+        try:
+            async for chunk in self._call_summarizer_stream(
+                history,
+                config.compaction_model,
+                compaction_api_key,
+                config.compaction_provider,
+            ):
                 yield chunk
-            return
+        except (TemporaryProviderError, PermanentProviderError) as e:
+            logger.warning(
+                f"Compaction stream failed for model {config.compaction_model} on provider {config.compaction_provider}: {e}"
+            )
 
     def should_compact(
         self,

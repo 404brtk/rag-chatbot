@@ -15,8 +15,10 @@ VALID_PASSWORD = "4Ah?,*d]GAx2"
 TOKEN_URL = "/api/token/"
 DEFAULT_CONFIG = LLMConfig(
     provider="openai",
-    model="gpt-5.5",
+    model="gpt",
     system_prompt="You are a helpful assistant.",
+    compaction_provider="openai",
+    compaction_model="gpt",
 )
 
 
@@ -67,5 +69,5 @@ def auth_client_b(user_b):
 @pytest.fixture
 def api_key(user_a):
     return UserApiKey.objects.create(
-        user=user_a, provider="openai", encrypted_key="sk-test"
+        user=user_a, provider="openai", encrypted_key="sk-chat"
     )

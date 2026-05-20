@@ -132,17 +132,21 @@ class MessageViewSet(
                     status=status.HTTP_400_BAD_REQUEST,
                 )
 
-        config = LLMConfig(
-            provider=request.data.get("provider", "openai"),
-            model=request.data.get("model", "gpt-5.4-mini"),
-            system_prompt=DEFAULT_SYSTEM_PROMPT,
-            compaction_model=request.data.get("compaction_model") or "gpt-5.4-mini",
-            max_input_tokens=request.data.get("max_input_tokens", 12_000),
-            compaction_threshold=request.data.get("compaction_threshold", 0.8),
-        )
         validation_error = validate_llm_config(request.data)
         if validation_error:
             return Response(validation_error, status=status.HTTP_400_BAD_REQUEST)
+
+        config = LLMConfig(
+            provider=request.data["provider"],
+            model=request.data["model"],
+            system_prompt=DEFAULT_SYSTEM_PROMPT,
+            compaction_provider=(request.data.get("compaction_provider") or "").strip()
+            or request.data["provider"],
+            compaction_model=(request.data.get("compaction_model") or "").strip()
+            or request.data["model"],
+            max_input_tokens=request.data.get("max_input_tokens", 12_000),
+            compaction_threshold=request.data.get("compaction_threshold", 0.8),
+        )
         service = ChatService()
 
         try:
@@ -242,14 +246,6 @@ class MessageStreamView(View):
                 status=400,
             )
 
-        config = LLMConfig(
-            provider=body.get("provider", "openai"),
-            model=body.get("model", "gpt-5.4-mini"),
-            system_prompt=DEFAULT_SYSTEM_PROMPT,
-            compaction_model=body.get("compaction_model") or "gpt-5.4-mini",
-            max_input_tokens=body.get("max_input_tokens", 12_000),
-            compaction_threshold=body.get("compaction_threshold", 0.8),
-        )
         validation_error = validate_llm_config(body)
         if validation_error:
             return StreamingHttpResponse(
@@ -257,6 +253,18 @@ class MessageStreamView(View):
                 content_type="text/event-stream",
                 status=400,
             )
+
+        config = LLMConfig(
+            provider=body["provider"],
+            model=body["model"],
+            system_prompt=DEFAULT_SYSTEM_PROMPT,
+            compaction_provider=(body.get("compaction_provider") or "").strip()
+            or body["provider"],
+            compaction_model=(body.get("compaction_model") or "").strip()
+            or body["model"],
+            max_input_tokens=body.get("max_input_tokens", 12_000),
+            compaction_threshold=body.get("compaction_threshold", 0.8),
+        )
         service = ChatService()
 
         async def event_generator():

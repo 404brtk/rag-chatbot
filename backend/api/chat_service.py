@@ -107,6 +107,9 @@ class ChatService:
                 ]
 
         api_key = await self._resolve_api_key(user, config.provider)
+        compaction_api_key = await self._resolve_api_key(
+            user, config.compaction_provider
+        )
 
         if config.provider == "llamacpp":
             n_ctx = await ProviderGateway.discover_llamacpp_context()
@@ -140,7 +143,7 @@ class ChatService:
             async for chunk in self.compaction.compact_stream(
                 history=history,
                 config=config,
-                api_key=api_key,
+                compaction_api_key=compaction_api_key,
             ):
                 if chunk.text:
                     tokens.append(chunk.text)
@@ -152,8 +155,8 @@ class ChatService:
                 compaction_msg = await self.repository.apply_compaction(
                     session=session,
                     summary=summary,
-                    provider=config.provider,
-                    model=config.model,
+                    provider=config.compaction_provider,
+                    model=config.compaction_model,
                     usage=summary_usage,
                 )
                 compaction_summary = summary
@@ -177,9 +180,7 @@ class ChatService:
                     config=config,
                 )
                 logger.warning(
-                    "Compaction summarization produced no output — fell back to chunk_truncate (kept %d/%d)",
-                    len(history),
-                    original_count,
+                    f"Compaction summarization produced no output - fell back to chunk_truncate (kept {len(history)}/{original_count})",
                 )
 
         return _GenerationPrep(
