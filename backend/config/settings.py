@@ -158,7 +158,11 @@ EMBEDDING_MODEL = "sentence-transformers/all-MiniLM-L6-v2"
 EMBEDDING_DIMENSIONS = 384
 
 RAG_TOP_K = env.int("RAG_TOP_K", default=5)
-RAG_SIMILARITY_THRESHOLD = env.float("RAG_SIMILARITY_THRESHOLD", default=0.75)
+
+BM25_K1 = 1.2
+BM25_B = 0.75
+RRF_K = 60
+HYBRID_RETRIEVAL_POOL = 50
 
 LLAMACPP_BASE_URL = env.str("LLAMACPP_BASE_URL", default="http://localhost:8080")
 

@@ -87,5 +87,5 @@ class UserApiKeySerializer(serializers.ModelSerializer):
 class DocumentSerializer(serializers.ModelSerializer):
     class Meta:
         model = Document
-        fields = ["id", "filename", "content_type", "created_at"]
+        fields = ["id", "filename", "content_type", "language", "created_at"]
         read_only_fields = ["id", "filename", "content_type", "created_at"]

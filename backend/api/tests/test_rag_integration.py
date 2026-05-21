@@ -58,7 +58,7 @@ class TestRAGIntegration:
                 document_id="doc1",
                 document_filename="test.txt",
                 chunk_index=0,
-                distance=0.1,
+                score=0.1,
             )
         ]
         conversation = Conversation.objects.create(user=user_a, title="Test")
@@ -99,7 +99,7 @@ class TestRAGIntegration:
                 document_id="uuid-1",
                 document_filename="specific.txt",
                 chunk_index=0,
-                distance=0.05,
+                score=0.05,
             )
         ]
         conversation = Conversation.objects.create(user=user_a, title="Test")

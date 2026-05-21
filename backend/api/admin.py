@@ -53,8 +53,8 @@ class MessageAdmin(admin.ModelAdmin):
 
 @admin.register(Document)
 class DocumentAdmin(admin.ModelAdmin):
-    list_display = ("filename", "user", "content_type", "created_at")
-    list_filter = ("content_type",)
+    list_display = ("filename", "user", "content_type", "language", "created_at")
+    list_filter = ("content_type", "language")
     search_fields = ("filename", "user__email")
     list_select_related = ("user",)
     ordering = ("-created_at",)
@@ -63,11 +63,11 @@ class DocumentAdmin(admin.ModelAdmin):
 
 @admin.register(DocumentChunk)
 class DocumentChunkAdmin(admin.ModelAdmin):
-    list_display = ("document", "chunk_index", "content_preview")
+    list_display = ("document", "chunk_index", "word_count", "content_preview")
     search_fields = ("content",)
     list_select_related = ("document",)
     ordering = ("document", "chunk_index")
-    exclude = ("embedding",)
+    exclude = ("embedding", "search_vector")
 
     def content_preview(self, obj):
         return obj.content[:100]

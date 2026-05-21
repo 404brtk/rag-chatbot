@@ -13,7 +13,7 @@ from rest_framework.response import Response
 from rest_framework_simplejwt.authentication import JWTAuthentication
 
 from .document_service import DocumentService
-from .models import Conversation
+from .models import Conversation, DocumentLanguage
 from .pagination import (
     ConversationCursorPagination,
     MessageCursorPagination,
@@ -341,9 +341,22 @@ class DocumentViewSet(
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
+        language = request.data.get("language", DocumentLanguage.ENGLISH)
+        if language not in DocumentLanguage.values:
+            return Response(
+                {
+                    "language": [
+                        f"Unsupported. Choose from: {', '.join(DocumentLanguage.values)}"
+                    ]
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
         service = DocumentService()
         try:
-            document = service.process_upload(user=request.user, file=file)
+            document = service.process_upload(
+                user=request.user, file=file, language=language
+            )
         except ValueError as e:
             return Response(
                 {"error": str(e)},
@@ -381,6 +394,16 @@ class DocumentViewSet(
             )
 
         filename = request.data.get("filename", "pasted-text.txt")
+        language = request.data.get("language", DocumentLanguage.ENGLISH)
+        if language not in DocumentLanguage.values:
+            return Response(
+                {
+                    "language": [
+                        f"Unsupported. Choose from: {', '.join(DocumentLanguage.values)}"
+                    ]
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
 
         service = DocumentService()
         try:
@@ -389,6 +412,7 @@ class DocumentViewSet(
                 raw_text=str(content),
                 content_type=content_type,
                 filename=filename,
+                language=language,
             )
         except ValueError as e:
             return Response(

@@ -1,6 +1,8 @@
 import uuid
 from django.db import models
 from django.contrib.auth.models import AbstractUser, BaseUserManager
+from django.contrib.postgres.indexes import GinIndex
+from django.contrib.postgres.search import SearchVectorField
 from django.utils import timezone
 from pgvector.django import HnswIndex, VectorField
 
@@ -140,11 +142,27 @@ class Message(UUIDModel):
         return f"{self.role}: {self.content[:50]}"
 
 
+class DocumentLanguage(models.TextChoices):
+    ENGLISH = "english", "English"
+    POLISH = "polish", "Polish"
+
+
+PG_REGCONFIG: dict[str, str] = {
+    DocumentLanguage.ENGLISH: "english",
+    DocumentLanguage.POLISH: "simple",  # TODO: add polish dictionary
+}
+
+
 class Document(UUIDModel):
     user = models.ForeignKey(User, on_delete=models.CASCADE, related_name="documents")
     filename = models.CharField(max_length=255)
     content_type = models.CharField(max_length=100)
     raw_text = models.TextField()
+    language = models.CharField(
+        max_length=16,
+        choices=DocumentLanguage.choices,
+        default=DocumentLanguage.ENGLISH,
+    )
     meta = models.JSONField(default=dict, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
 
@@ -159,6 +177,8 @@ class DocumentChunk(UUIDModel):
     content = models.TextField()
     chunk_index = models.PositiveIntegerField()
     embedding = VectorField(dimensions=settings.EMBEDDING_DIMENSIONS)
+    search_vector = SearchVectorField(null=True)
+    word_count = models.PositiveIntegerField(default=0)
 
     class Meta:
         ordering = ["chunk_index"]
@@ -171,6 +191,7 @@ class DocumentChunk(UUIDModel):
                 ef_construction=64,  # TODO: adjust
                 opclasses=["vector_cosine_ops"],
             ),
+            GinIndex(fields=["search_vector"], name="chunk_search_vector_idx"),
         ]
 
     def __str__(self):

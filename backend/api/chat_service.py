@@ -101,7 +101,7 @@ class ChatService:
                         "document_id": r.document_id,
                         "document_filename": r.document_filename,
                         "chunk_index": r.chunk_index,
-                        "distance": r.distance,
+                        "score": r.score,
                     }
                     for i, r in enumerate(search_results, 1)
                 ]

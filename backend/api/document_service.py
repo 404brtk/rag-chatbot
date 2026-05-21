@@ -2,6 +2,9 @@ import logging
 from dataclasses import dataclass
 
 from django.conf import settings
+from django.contrib.postgres.search import SearchVector
+from django.db import connection
+from django.db.models import Avg, Count
 from pgvector.django import CosineDistance
 
 from .chunking import (
@@ -11,7 +14,7 @@ from .chunking import (
     extract_text,
 )
 from .embeddings import EmbeddingService
-from .models import Document, DocumentChunk
+from .models import PG_REGCONFIG, Document, DocumentChunk
 
 logger = logging.getLogger(__name__)
 
@@ -22,7 +25,7 @@ class SearchResult:
     document_id: str
     document_filename: str
     chunk_index: int
-    distance: float
+    score: float
 
 
 class DocumentService:
@@ -46,12 +49,18 @@ class DocumentService:
                 content=chunk_content,
                 chunk_index=i,
                 embedding=embedding,
+                word_count=len(chunk_content.split()),
             )
             for i, (chunk_content, embedding) in enumerate(zip(chunks, embeddings))
         ]
         DocumentChunk.objects.bulk_create(chunk_objects)
+        DocumentChunk.objects.filter(document=document).update(
+            search_vector=SearchVector(
+                "content", config=PG_REGCONFIG[document.language]
+            )
+        )
 
-    def process_upload(self, user, file) -> Document:
+    def process_upload(self, user, file, language: str = "english") -> Document:
         content_type = file.content_type or ""
         if content_type not in SUPPORTED_CONTENT_TYPES:
             raise ValueError(
@@ -76,6 +85,7 @@ class DocumentService:
             filename=file.name,
             content_type=content_type,
             raw_text=raw_text,
+            language=language,
             meta=meta,
         )
 
@@ -84,7 +94,12 @@ class DocumentService:
         return document
 
     def process_text(
-        self, user, raw_text: str, content_type: str, filename: str
+        self,
+        user,
+        raw_text: str,
+        content_type: str,
+        filename: str,
+        language: str = "english",
     ) -> Document:
         if content_type not in ("text/plain", "text/markdown"):
             raise ValueError(
@@ -102,12 +117,168 @@ class DocumentService:
             filename=filename,
             content_type=content_type,
             raw_text=raw_text,
+            language=language,
             meta=meta,
         )
 
         self._create_document_chunks(document, chunks)
 
         return document
+
+    @staticmethod
+    def _build_bm25_sql(doc_filter: str) -> str:
+        lang_values = ", ".join(
+            f"('{lang}'::varchar, '{config}'::regconfig)"
+            for lang, config in PG_REGCONFIG.items()
+        )
+        return f"""
+WITH lang_config(language, regconfig) AS (
+    VALUES {lang_values}
+),
+query_lexemes AS (
+    SELECT lc.language,
+           unnest(tsvector_to_array(to_tsvector(lc.regconfig, %s))) AS lexeme
+      FROM lang_config lc
+),
+query_tsquery AS (
+    SELECT ql.language,
+           to_tsquery(lc.regconfig, string_agg(DISTINCT ql.lexeme, ' | ')) AS tsq
+      FROM query_lexemes ql
+      JOIN lang_config lc ON lc.language = ql.language
+     GROUP BY ql.language, lc.regconfig
+),
+scope AS (
+    SELECT dc.id AS chunk_id,
+           d.language,
+           dc.search_vector,
+           dc.word_count
+      FROM api_documentchunk dc
+      JOIN api_document d ON d.id = dc.document_id
+      JOIN query_tsquery qt ON qt.language = d.language
+     WHERE d.user_id = %s
+       {doc_filter}
+       AND dc.search_vector @@ qt.tsq
+),
+term_freq AS (
+    SELECT s.chunk_id,
+           s.language,
+           s.word_count,
+           lex.lexeme,
+           array_length(lex.positions, 1)::float AS tf
+      FROM scope s,
+           unnest(s.search_vector) AS lex(lexeme, positions, weights)
+     WHERE (s.language, lex.lexeme) IN (SELECT language, lexeme FROM query_lexemes)
+),
+df_stats AS (
+    SELECT tf.lexeme,
+           tf.language,
+           COUNT(DISTINCT tf.chunk_id)::float AS doc_freq
+      FROM term_freq tf
+     GROUP BY tf.lexeme, tf.language
+),
+term_idf AS (
+    SELECT ql.lexeme,
+           ql.language,
+           ln((%s - COALESCE(ds.doc_freq, 0) + 0.5)
+              / (COALESCE(ds.doc_freq, 0) + 0.5) + 1) AS idf
+      FROM query_lexemes ql
+      LEFT JOIN df_stats ds ON ds.lexeme = ql.lexeme AND ds.language = ql.language
+)
+SELECT tf.chunk_id,
+       SUM(
+           ti.idf
+           * (tf.tf * (%s + 1))
+           / (tf.tf + %s * (1.0 - %s + %s * tf.word_count / %s))
+       ) AS bm25_score
+  FROM term_freq tf
+  JOIN term_idf ti ON ti.lexeme = tf.lexeme AND ti.language = tf.language
+ GROUP BY tf.chunk_id
+ ORDER BY bm25_score DESC
+ LIMIT %s;
+"""
+
+    def _keyword_bm25_search(
+        self,
+        user,
+        query_text: str,
+        document_ids: list[str] | None = None,
+        limit: int = 50,
+    ) -> dict[str, float]:
+        if not query_text.strip():
+            return {}
+
+        k1 = settings.BM25_K1
+        b = settings.BM25_B
+
+        stats_qs = DocumentChunk.objects.filter(document__user=user)
+        if document_ids:
+            stats_qs = stats_qs.filter(document_id__in=document_ids)
+
+        stats = stats_qs.aggregate(
+            total_chunks=Count("id"),
+            avg_dl=Avg("word_count"),
+        )
+        total_chunks = float(stats["total_chunks"] or 0)
+        avg_dl = float(stats["avg_dl"] or 1.0)
+        if avg_dl <= 0:
+            avg_dl = 1.0
+
+        doc_filter = ""
+        params: list = []
+
+        if document_ids:
+            placeholders = ", ".join(["%s::uuid"] * len(document_ids))
+            doc_filter = f"AND dc.document_id IN ({placeholders})"
+
+        sql = self._build_bm25_sql(doc_filter)
+
+        params.extend(
+            [
+                query_text,
+                str(user.id),
+                *([str(d) for d in document_ids] if document_ids else []),
+                total_chunks,
+                k1,
+                k1,
+                b,
+                b,
+                avg_dl,
+                limit,
+            ]
+        )
+
+        with connection.cursor() as cursor:
+            cursor.execute(sql, params)
+            rows = cursor.fetchall()
+
+        return {str(row[0]): float(row[1]) for row in rows}
+
+    def _vector_search(
+        self,
+        user,
+        query_embedding: list[float],
+        document_ids: list[str] | None = None,
+        limit: int = 50,
+    ) -> list[DocumentChunk]:
+        qs = DocumentChunk.objects.filter(document__user=user)
+        if document_ids:
+            qs = qs.filter(document_id__in=document_ids)
+        return list(
+            qs.annotate(distance=CosineDistance("embedding", query_embedding))
+            .select_related("document")
+            .order_by("distance")[:limit]
+        )
+
+    @staticmethod
+    def _reciprocal_rank_fusion(
+        *rank_lists: list[str],
+        k: int = 60,
+    ) -> dict[str, float]:
+        scores: dict[str, float] = {}
+        for rank_list in rank_lists:
+            for rank, chunk_id in enumerate(rank_list, start=1):
+                scores[chunk_id] = scores.get(chunk_id, 0.0) + 1.0 / (k + rank)
+        return scores
 
     def search(
         self,
@@ -116,47 +287,63 @@ class DocumentService:
         *,
         document_ids: list[str] | None = None,
     ) -> list[SearchResult]:
-
+        pool = settings.HYBRID_RETRIEVAL_POOL
+        logger.debug(
+            f"Hybrid search started for user={user.id} query='{query}' pool={pool}"
+        )
         query_embedding = self.embedding_service.embed_query(query)
 
-        qs = DocumentChunk.objects.filter(document__user=user)
+        vector_results = self._vector_search(
+            user, query_embedding, document_ids=document_ids, limit=pool
+        )
+        vector_rank_list = [str(chunk.id) for chunk in vector_results]
+        vector_map = {str(chunk.id): chunk for chunk in vector_results}
 
-        logger.debug(f"Chunks for user: {qs.count()}")
+        bm25_scores = self._keyword_bm25_search(
+            user, query, document_ids=document_ids, limit=pool
+        )
+        bm25_rank_list = list(bm25_scores.keys())
 
-        if document_ids:
-            qs = qs.filter(document_id__in=document_ids)
-
-        annotated = qs.annotate(distance=CosineDistance("embedding", query_embedding))
         logger.debug(
-            f"Threshold: {settings.RAG_SIMILARITY_THRESHOLD:.4f}, "
-            f"top_k: {settings.RAG_TOP_K}"
-        )
-        logger.debug(
-            f"Distances (first 20): "
-            f"{list(annotated.values_list('distance', 'content')[:20])}"
+            f"Retrieved search candidates: vector={len(vector_results)}, bm25={len(bm25_scores)}"
         )
 
-        if settings.RAG_SIMILARITY_THRESHOLD < 1.0:
-            qs_filtered = annotated.filter(
-                distance__lt=settings.RAG_SIMILARITY_THRESHOLD
-            )
-        else:
-            qs_filtered = annotated
-
-        results = list(
-            qs_filtered.select_related("document").order_by("distance")[
-                : settings.RAG_TOP_K
-            ]
+        rrf_scores = self._reciprocal_rank_fusion(
+            vector_rank_list, bm25_rank_list, k=settings.RRF_K
         )
-        logger.debug(f"After threshold filter: {len(results)} results")
 
-        return [
-            SearchResult(
-                chunk_content=chunk.content,
-                document_id=str(chunk.document_id),
-                document_filename=chunk.document.filename,
-                chunk_index=chunk.chunk_index,
-                distance=chunk.distance,
-            )
-            for chunk in results
+        sorted_ids = sorted(rrf_scores, key=rrf_scores.get, reverse=True)[
+            : settings.RAG_TOP_K
         ]
+
+        missing_ids = [cid for cid in sorted_ids if cid not in vector_map]
+        if missing_ids:
+            logger.debug(
+                f"Fetched {len(missing_ids)} BM25-exclusive chunks from DB: {missing_ids}"
+            )
+            extra_chunks = DocumentChunk.objects.filter(
+                id__in=missing_ids
+            ).select_related("document")
+            for chunk in extra_chunks:
+                vector_map[str(chunk.id)] = chunk
+
+        results = []
+        for chunk_id in sorted_ids:
+            chunk = vector_map.get(chunk_id)
+            if chunk is None:
+                continue
+            results.append(
+                SearchResult(
+                    chunk_content=chunk.content,
+                    document_id=str(chunk.document_id),
+                    document_filename=chunk.document.filename,
+                    chunk_index=chunk.chunk_index,
+                    score=rrf_scores[chunk_id],
+                )
+            )
+
+        logger.debug(
+            f"Hybrid search summary: fused={len(rrf_scores)}, returned={len(results)}"
+        )
+
+        return results

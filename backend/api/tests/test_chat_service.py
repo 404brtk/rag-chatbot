@@ -31,7 +31,7 @@ class TestChatServiceStatic:
                 document_id="abc",
                 document_filename="test.txt",
                 chunk_index=0,
-                distance=0.1,
+                score=0.1,
             )
         ]
         result = ChatService._format_rag_context(results)
@@ -337,7 +337,7 @@ class TestChatServiceGenerateReply:
         assert call_kwargs["user_context"][0]["document_filename"] == "a.txt"
         assert call_kwargs["user_context"][0]["document_id"] == "d1"
         assert call_kwargs["user_context"][0]["chunk_index"] == 0
-        assert call_kwargs["user_context"][0]["distance"] == 0.1
+        assert call_kwargs["user_context"][0]["score"] == 0.1
         assert call_kwargs["user_context"][1]["index"] == 2
         assert call_kwargs["user_context"][1]["content"] == "Info B"
 
