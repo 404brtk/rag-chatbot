@@ -101,8 +101,16 @@ class TestReciprocalRankFusion:
 class TestKeywordBm25Search:
     def test_returns_empty_for_blank_query(self, user_a, mock_embedding_service):
         service = DocumentService()
-        assert service._keyword_bm25_search(user=user_a, query_text="") == {}
-        assert service._keyword_bm25_search(user=user_a, query_text="   ") == {}
+        assert (
+            service._keyword_bm25_search(user=user_a, english_query="", polish_query="")
+            == {}
+        )
+        assert (
+            service._keyword_bm25_search(
+                user=user_a, english_query="   ", polish_query="   "
+            )
+            == {}
+        )
 
     def test_multilingual_isolation(self, user_a, mock_embedding_service):
         mock_embedding_service.embed_texts.return_value = [[0.1] * 384, [0.2] * 384]
@@ -133,11 +141,15 @@ class TestKeywordBm25Search:
         chunk_en_id = str(DocumentChunk.objects.get(document=doc_en).id)
         chunk_pl_id = str(DocumentChunk.objects.get(document=doc_pl).id)
 
-        en_results = service._keyword_bm25_search(user=user_a, query_text="fox")
+        en_results = service._keyword_bm25_search(
+            user=user_a, english_query="fox", polish_query=""
+        )
         assert chunk_en_id in en_results
         assert chunk_pl_id not in en_results
 
-        pl_results = service._keyword_bm25_search(user=user_a, query_text="lis")
+        pl_results = service._keyword_bm25_search(
+            user=user_a, english_query="", polish_query="lis"
+        )
         assert chunk_pl_id in pl_results
         assert chunk_en_id not in pl_results
 
@@ -159,7 +171,7 @@ class TestKeywordBm25Search:
         service._create_document_chunks(doc, ["python web framework"])
 
         results = service._keyword_bm25_search(
-            user=user_a, query_text="python database"
+            user=user_a, english_query="python database", polish_query=""
         )
         chunk_id = str(DocumentChunk.objects.get(document=doc).id)
         assert chunk_id in results
@@ -178,7 +190,9 @@ class TestKeywordBm25Search:
         service = DocumentService()
         service._create_document_chunks(doc, ["The runners were running fast"])
 
-        results = service._keyword_bm25_search(user=user_a, query_text="run")
+        results = service._keyword_bm25_search(
+            user=user_a, english_query="run", polish_query=""
+        )
         assert len(results) == 1
 
 

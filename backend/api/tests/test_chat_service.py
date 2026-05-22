@@ -425,6 +425,189 @@ class TestChatServiceGenerateReply:
         with pytest.raises(MissingApiKeyError, match="No API key configured"):
             await service._resolve_api_key(self.mock_user, "openai")
 
+    @patch("api.chat_service.ProviderGateway.generate", new_callable=AsyncMock)
+    @patch.object(ChatService, "_resolve_api_key", return_value="sk-chat")
+    @patch("api.chat_service.DocumentService")
+    async def test_query_refinement_success(
+        self, mock_doc_svc_cls, mock_resolve, mock_generate
+    ):
+        refinement_result = GenerationResult(
+            text='{"detected_language": "polish", "refined_english_query": "search", "refined_polish_query": "wyszukaj"}',
+            provider="openai",
+            model="gpt",
+            input_tokens=10,
+            output_tokens=5,
+            usage={},
+            model_input=[],
+        )
+        answer_result = GenerationResult(
+            text="Mocked LLM Answer.",
+            provider="openai",
+            model="gpt",
+            input_tokens=10,
+            output_tokens=5,
+            usage={},
+            model_input=[],
+        )
+        mock_generate.side_effect = [refinement_result, answer_result]
+        mock_doc_svc_cls.return_value.embedding_service.embed_query.return_value = [
+            0.1,
+            0.2,
+            0.3,
+        ]
+        mock_doc_svc_cls.return_value.search.return_value = [
+            SearchResult("Relevant info.", "doc-1", "docs.md", 0, 0.1)
+        ]
+        self.mock_repo.list_messages.return_value = []
+        self.mock_repo.append_message_pair.return_value = (
+            MagicMock(id="u-id"),
+            MagicMock(id="a-id"),
+        )
+
+        service = ChatService(repository=self.mock_repo)
+        await service.generate_reply(
+            user=self.mock_user,
+            session_id="test-session",
+            user_text="wyszukaj",
+            config=DEFAULT_CONFIG,
+            document_ids=["doc-1"],
+        )
+
+        mock_doc_svc_cls.return_value.search.assert_called_once_with(
+            user=self.mock_user,
+            query="wyszukaj",
+            query_embedding=[0.1, 0.2, 0.3],
+            refined_english_query="search",
+            refined_polish_query="wyszukaj",
+            document_ids=["doc-1"],
+        )
+
+        refine_call_kwargs = mock_generate.call_args_list[0][1]
+        assert "response_format" in refine_call_kwargs
+        fmt = refine_call_kwargs["response_format"]
+        assert fmt["type"] == "json_schema"
+        assert fmt["json_schema"]["name"] == "QueryRefinement"
+        assert fmt["json_schema"]["strict"] is True
+        schema = fmt["json_schema"]["schema"]
+        assert "title" not in schema
+        assert schema["properties"]["detected_language"]["type"] == "string"
+        assert schema["properties"]["refined_english_query"]["type"] == "string"
+        assert schema["properties"]["refined_polish_query"]["type"] == "string"
+        assert "detected_language" in schema["required"]
+        assert "refined_english_query" in schema["required"]
+        assert "refined_polish_query" in schema["required"]
+        assert schema["additionalProperties"] is False
+
+    @patch("api.chat_service.ProviderGateway.generate", new_callable=AsyncMock)
+    @patch.object(ChatService, "_resolve_api_key", return_value="sk-chat")
+    @patch("api.chat_service.DocumentService")
+    async def test_query_refinement_failure_fallback(
+        self, mock_doc_svc_cls, mock_resolve, mock_generate
+    ):
+        refinement_result = GenerationResult(
+            text="This is not JSON!",
+            provider="openai",
+            model="gpt",
+            input_tokens=10,
+            output_tokens=5,
+            usage={},
+            model_input=[],
+        )
+        answer_result = GenerationResult(
+            text="Mocked LLM Answer.",
+            provider="openai",
+            model="gpt",
+            input_tokens=10,
+            output_tokens=5,
+            usage={},
+            model_input=[],
+        )
+        mock_generate.side_effect = [refinement_result, answer_result]
+        mock_doc_svc_cls.return_value.embedding_service.embed_query.return_value = [
+            0.1,
+            0.2,
+            0.3,
+        ]
+        mock_doc_svc_cls.return_value.search.return_value = []
+        self.mock_repo.list_messages.return_value = []
+        self.mock_repo.append_message_pair.return_value = (
+            MagicMock(id="u-id"),
+            MagicMock(id="a-id"),
+        )
+
+        service = ChatService(repository=self.mock_repo)
+        await service.generate_reply(
+            user=self.mock_user,
+            session_id="test-session",
+            user_text="python",
+            config=DEFAULT_CONFIG,
+            document_ids=["doc-1"],
+        )
+
+        mock_doc_svc_cls.return_value.search.assert_called_once_with(
+            user=self.mock_user,
+            query="python",
+            query_embedding=[0.1, 0.2, 0.3],
+            refined_english_query="python",
+            refined_polish_query="python",
+            document_ids=["doc-1"],
+        )
+
+    @patch("api.chat_service.ProviderGateway.generate", new_callable=AsyncMock)
+    @patch.object(ChatService, "_resolve_api_key", return_value="sk-chat")
+    @patch("api.chat_service.DocumentService")
+    async def test_query_refinement_validation_error_fallback(
+        self, mock_doc_svc_cls, mock_resolve, mock_generate
+    ):
+        refinement_result = GenerationResult(
+            text='{"detected_language": "polish", "refined_english_query": "python"}',
+            provider="openai",
+            model="gpt",
+            input_tokens=10,
+            output_tokens=5,
+            usage={},
+            model_input=[],
+        )
+        answer_result = GenerationResult(
+            text="Mocked LLM Answer.",
+            provider="openai",
+            model="gpt",
+            input_tokens=10,
+            output_tokens=5,
+            usage={},
+            model_input=[],
+        )
+        mock_generate.side_effect = [refinement_result, answer_result]
+        mock_doc_svc_cls.return_value.embedding_service.embed_query.return_value = [
+            0.1,
+            0.2,
+            0.3,
+        ]
+        mock_doc_svc_cls.return_value.search.return_value = []
+        self.mock_repo.list_messages.return_value = []
+        self.mock_repo.append_message_pair.return_value = (
+            MagicMock(id="u-id"),
+            MagicMock(id="a-id"),
+        )
+
+        service = ChatService(repository=self.mock_repo)
+        await service.generate_reply(
+            user=self.mock_user,
+            session_id="test-session",
+            user_text="python",
+            config=DEFAULT_CONFIG,
+            document_ids=["doc-1"],
+        )
+
+        mock_doc_svc_cls.return_value.search.assert_called_once_with(
+            user=self.mock_user,
+            query="python",
+            query_embedding=[0.1, 0.2, 0.3],
+            refined_english_query="python",
+            refined_polish_query="python",
+            document_ids=["doc-1"],
+        )
+
 
 class TestChatServiceGenerateReplyStream:
     def setup_method(self):

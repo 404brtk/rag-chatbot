@@ -1,5 +1,6 @@
 import logging
 import time
+from typing import Any
 
 import httpx
 import openai
@@ -42,16 +43,25 @@ class ProviderGateway:
         api_key: str,
         config: LLMConfig,
         messages: list[StoredMessage],
+        response_format: dict[str, Any] | None = None,
     ) -> GenerationResult:
         client = self._build_client(api_key=api_key, provider=config.provider)
         try:
-            response = await client.chat.completions.create(
-                model=config.model,
-                messages=[{"role": "system", "content": config.system_prompt}]
+            kwargs = {
+                "model": config.model,
+                "messages": [{"role": "system", "content": config.system_prompt}]
                 + [{"role": m.role, "content": m.content} for m in messages],
-                max_completion_tokens=config.max_output_tokens,
-                temperature=config.temperature,
-            )
+                "temperature": config.temperature,
+            }
+            if config.provider == "llamacpp":
+                kwargs["max_tokens"] = config.max_output_tokens
+            else:
+                kwargs["max_completion_tokens"] = config.max_output_tokens
+
+            if response_format:
+                kwargs["response_format"] = response_format
+
+            response = await client.chat.completions.create(**kwargs)
         except (
             openai.RateLimitError,
             openai.APIConnectionError,
@@ -82,10 +92,14 @@ class ProviderGateway:
         api_key: str,
         config: LLMConfig,
         messages: list[StoredMessage],
+        response_format: dict[str, Any] | None = None,
     ) -> GenerationResult:
         if config.provider in {"openai", "llamacpp"}:
             return await self._generate_openai(
-                api_key=api_key, config=config, messages=messages
+                api_key=api_key,
+                config=config,
+                messages=messages,
+                response_format=response_format,
             )
         raise PermanentProviderError(f"Unsupported provider: {config.provider}")
 
@@ -98,15 +112,20 @@ class ProviderGateway:
     ):
         client = self._build_client(api_key=api_key, provider=config.provider)
         try:
-            stream = await client.chat.completions.create(
-                model=config.model,
-                messages=[{"role": "system", "content": config.system_prompt}]
+            kwargs = {
+                "model": config.model,
+                "messages": [{"role": "system", "content": config.system_prompt}]
                 + [{"role": m.role, "content": m.content} for m in messages],
-                max_completion_tokens=config.max_output_tokens,
-                temperature=config.temperature,
-                stream=True,
-                stream_options={"include_usage": True},
-            )
+                "temperature": config.temperature,
+                "stream": True,
+                "stream_options": {"include_usage": True},
+            }
+            if config.provider == "llamacpp":
+                kwargs["max_tokens"] = config.max_output_tokens
+            else:
+                kwargs["max_completion_tokens"] = config.max_output_tokens
+
+            stream = await client.chat.completions.create(**kwargs)
             async for chunk in stream:
                 if chunk.usage:
                     yield ProviderChunk(usage=chunk.usage.model_dump())

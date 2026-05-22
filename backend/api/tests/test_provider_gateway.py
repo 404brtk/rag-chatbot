@@ -41,6 +41,42 @@ class TestProviderGateway:
         assert result.text == "Hello!"
         mock_client.chat.completions.create.assert_called_once()
 
+    @patch("api.provider_gateway.AsyncOpenAI")
+    async def test_generate_passes_response_format(self, mock_openai_cls):
+        mock_client = MagicMock()
+        mock_openai_cls.return_value = mock_client
+
+        mock_response = MagicMock()
+        mock_response.choices = [MagicMock()]
+        mock_response.choices[0].message.content = "Hello!"
+        mock_response.usage.model_dump.return_value = {
+            "prompt_tokens": 5,
+            "completion_tokens": 2,
+        }
+        mock_client.chat.completions.create = AsyncMock(return_value=mock_response)
+
+        gateway = ProviderGateway()
+        response_format = {"type": "json_object"}
+        result = await gateway.generate(
+            api_key="sk-test",
+            config=DEFAULT_CONFIG,
+            messages=[StoredMessage(role="user", content="Hi")],
+            response_format=response_format,
+        )
+
+        assert result.provider == "openai"
+        assert result.text == "Hello!"
+        mock_client.chat.completions.create.assert_called_once_with(
+            model=DEFAULT_CONFIG.model,
+            messages=[
+                {"role": "system", "content": DEFAULT_CONFIG.system_prompt},
+                {"role": "user", "content": "Hi"},
+            ],
+            max_completion_tokens=DEFAULT_CONFIG.max_output_tokens,
+            temperature=DEFAULT_CONFIG.temperature,
+            response_format=response_format,
+        )
+
     async def test_raises_permanent_error_for_unsupported_provider(self):
         gateway = ProviderGateway()
         config = replace(DEFAULT_CONFIG, provider="unsupported")

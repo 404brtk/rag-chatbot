@@ -78,7 +78,8 @@ class TestRAGIntegration:
         assert response.status_code == status.HTTP_201_CREATED
         mock_document_service.search.assert_called_once()
         call_kwargs = mock_document_service.search.call_args[1]
-        assert call_kwargs["query"] == "What is in the doc?"
+        assert call_kwargs["refined_english_query"] == "What is in the doc?"
+        assert call_kwargs["refined_polish_query"] == "What is in the doc?"
         assert call_kwargs["document_ids"] is None
         call_args = mock_client.chat.completions.create.call_args[1]
         user_messages = [m for m in call_args["messages"] if m["role"] == "user"]

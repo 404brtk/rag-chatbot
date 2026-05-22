@@ -136,9 +136,11 @@ WITH lang_config(language, regconfig) AS (
     VALUES {lang_values}
 ),
 query_lexemes AS (
-    SELECT lc.language,
-           unnest(tsvector_to_array(to_tsvector(lc.regconfig, %s))) AS lexeme
-      FROM lang_config lc
+    SELECT 'english'::varchar AS language,
+           unnest(tsvector_to_array(to_tsvector('english'::regconfig, %s))) AS lexeme
+    UNION ALL
+    SELECT 'polish'::varchar AS language,
+           unnest(tsvector_to_array(to_tsvector('simple'::regconfig, %s))) AS lexeme
 ),
 query_tsquery AS (
     SELECT ql.language,
@@ -199,12 +201,14 @@ SELECT tf.chunk_id,
 
     def _keyword_bm25_search(
         self,
+        *,
         user,
-        query_text: str,
+        english_query: str,
+        polish_query: str,
         document_ids: list[str] | None = None,
         limit: int = 50,
     ) -> dict[str, float]:
-        if not query_text.strip():
+        if not english_query.strip() and not polish_query.strip():
             return {}
 
         k1 = settings.BM25_K1
@@ -234,7 +238,8 @@ SELECT tf.chunk_id,
 
         params.extend(
             [
-                query_text,
+                english_query,
+                polish_query,
                 str(user.id),
                 *([str(d) for d in document_ids] if document_ids else []),
                 total_chunks,
@@ -283,15 +288,28 @@ SELECT tf.chunk_id,
     def search(
         self,
         user,
-        query: str,
+        query: str | None = None,
         *,
+        query_embedding: list[float] | None = None,
+        refined_english_query: str | None = None,
+        refined_polish_query: str | None = None,
         document_ids: list[str] | None = None,
     ) -> list[SearchResult]:
+        if query_embedding is None:
+            if not query:
+                raise ValueError("Either query or query_embedding must be provided.")
+            query_embedding = self.embedding_service.embed_query(query)
+
+        if refined_english_query is None:
+            refined_english_query = query or ""
+
+        if refined_polish_query is None:
+            refined_polish_query = query or ""
+
         pool = settings.HYBRID_RETRIEVAL_POOL
         logger.debug(
-            f"Hybrid search started for user={user.id} query='{query}' pool={pool}"
+            f"Hybrid search started for user={user.id} query='{query or ''}' pool={pool}"
         )
-        query_embedding = self.embedding_service.embed_query(query)
 
         vector_results = self._vector_search(
             user, query_embedding, document_ids=document_ids, limit=pool
@@ -300,7 +318,11 @@ SELECT tf.chunk_id,
         vector_map = {str(chunk.id): chunk for chunk in vector_results}
 
         bm25_scores = self._keyword_bm25_search(
-            user, query, document_ids=document_ids, limit=pool
+            user=user,
+            english_query=refined_english_query,
+            polish_query=refined_polish_query,
+            document_ids=document_ids,
+            limit=pool,
         )
         bm25_rank_list = list(bm25_scores.keys())
 

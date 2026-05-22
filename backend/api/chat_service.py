@@ -1,6 +1,7 @@
 import logging
 from dataclasses import dataclass, replace
-from typing import Any
+from typing import Any, Literal
+from pydantic import BaseModel, Field, ConfigDict
 
 from asgiref.sync import sync_to_async
 from django.conf import settings
@@ -24,6 +25,16 @@ from .models import Conversation, UserApiKey
 from .repositories import AsyncDjangoMessageRepository, StoredMessage
 
 logger = logging.getLogger(__name__)
+
+
+class QueryRefinementSchema(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    detected_language: Literal["polish", "english"] = Field(
+        description="The primary language of the user's query"
+    )
+    refined_english_query: str = Field(description="Optimized query in English")
+    refined_polish_query: str = Field(description="Optimized query in Polish")
 
 
 @dataclass(frozen=True, slots=True)
@@ -70,6 +81,75 @@ class ChatService:
             )
         return "\n\n".join(chunks)
 
+    async def _refine_query(
+        self,
+        user,
+        query: str,
+        config: LLMConfig,
+        api_key: str,
+    ) -> dict[str, str]:
+        system_prompt = (
+            "You are a highly efficient search query translation and refinement assistant.\n"
+            "Your task is to analyze a raw user query, detect its primary language (Polish or English), "
+            "and output an optimized version of this query for both languages.\n\n"
+            "Follow these strict guidelines for refinement:\n"
+            '1. Language Detection: Detect if the input query is primarily in "polish" or "english".\n'
+            "2. Typos & Grammar: Correct any typos, spelling errors, or grammatical issues in both outputs.\n"
+            "3. Keyword Expansion & Synonyms:\n"
+            "   - Expand the query naturally using relevant synonyms or search keywords.\n"
+            "   - Keep the expanded query concise and highly focused on the user's search intent.\n"
+            '   - Avoid "query drift" (do not add unrelated tech terms or generic categories that shift the original meaning).\n'
+            '4. Preserve Jargon and Brands: Keep proper nouns, brand names, product models (e.g., "iPhone 15", "Kubernetes"), '
+            "and domain-specific jargon intact in both languages.\n"
+            "5. Translation:\n"
+            "   - Translate the core intent of the query accurately.\n"
+            "   - Ensure 'refined_english_query' sounds natural to native English searchers.\n"
+            "   - Ensure 'refined_polish_query' sounds natural to native Polish searchers (handling proper Polish search terms)."
+        )
+
+        refine_config = replace(
+            config,
+            system_prompt=system_prompt,
+            max_output_tokens=512,
+            temperature=0.1,
+        )
+
+        refine_message = StoredMessage(role="user", content=query)
+
+        schema_dict = QueryRefinementSchema.model_json_schema()
+        schema_dict.pop("title", None)
+        response_format = {
+            "type": "json_schema",
+            "json_schema": {
+                "name": "QueryRefinement",
+                "strict": True,
+                "schema": schema_dict,
+            },
+        }
+
+        try:
+            res = await self.gateway.generate(
+                api_key=api_key,
+                config=refine_config,
+                messages=[refine_message],
+                response_format=response_format,
+            )
+            text = res.text.strip()
+            refined_data = QueryRefinementSchema.model_validate_json(text)
+
+            return {
+                "detected_language": refined_data.detected_language,
+                "refined_english_query": refined_data.refined_english_query.strip(),
+                "refined_polish_query": refined_data.refined_polish_query.strip(),
+            }
+        except Exception as e:
+            logger.warning(f"Query refinement failed, falling back to raw query: {e}")
+            return {
+                "detected_language": "english",
+                "refined_english_query": query,
+                "refined_polish_query": query,
+            }
+
     async def _prepare_generation(
         self,
         *,
@@ -83,14 +163,46 @@ class ChatService:
         if not clean_user_text:
             raise InvalidInputError("user_text cannot be empty")
 
+        api_key = await self._resolve_api_key(user, config.provider)
+        compaction_api_key = await self._resolve_api_key(
+            user, config.compaction_provider
+        )
+
         user_message = clean_user_text
         context_chunks = None
 
         if document_ids is not None:
+            refinement = await self._refine_query(
+                user=user,
+                query=clean_user_text,
+                config=config,
+                api_key=api_key,
+            )
+            detected_language = refinement["detected_language"]
+            refined_english = refinement["refined_english_query"]
+            refined_polish = refinement["refined_polish_query"]
+
+            logger.debug(
+                f"Query refined - original='{clean_user_text}' detected_language={detected_language} "
+                f"refined_english='{refined_english}' refined_polish='{refined_polish}'"
+            )
+
+            query_embedding = await sync_to_async(
+                self.document_service.embedding_service.embed_query,
+                thread_sensitive=True,
+            )(clean_user_text)
+
             search_results = await sync_to_async(
                 self.document_service.search,
                 thread_sensitive=True,
-            )(user=user, query=clean_user_text, document_ids=document_ids or None)
+            )(
+                user=user,
+                query=clean_user_text,
+                query_embedding=query_embedding,
+                refined_english_query=refined_english,
+                refined_polish_query=refined_polish,
+                document_ids=document_ids or None,
+            )
             if search_results:
                 context_block = self._format_rag_context(search_results)
                 user_message = f"<CONTEXT>\n{context_block}\n</CONTEXT>\n\n<QUESTION>\n{clean_user_text}\n</QUESTION>"
@@ -105,11 +217,6 @@ class ChatService:
                     }
                     for i, r in enumerate(search_results, 1)
                 ]
-
-        api_key = await self._resolve_api_key(user, config.provider)
-        compaction_api_key = await self._resolve_api_key(
-            user, config.compaction_provider
-        )
 
         if config.provider == "llamacpp":
             n_ctx = await ProviderGateway.discover_llamacpp_context()
