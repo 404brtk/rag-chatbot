@@ -154,7 +154,7 @@ FERNET_KEYS = env.list("FERNET_KEYS", default=[])
 
 FILE_UPLOAD_MAX_SIZE = env.int("FILE_UPLOAD_MAX_SIZE", default=10 * 1024 * 1024)
 
-EMBEDDING_MODEL = "sentence-transformers/all-MiniLM-L6-v2"
+EMBEDDING_MODEL = "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2"  # TODO: try intfloat/multilingual-e5-small or other too
 EMBEDDING_DIMENSIONS = 384
 
 RAG_TOP_K = env.int("RAG_TOP_K", default=5)
