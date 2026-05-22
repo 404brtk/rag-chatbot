@@ -317,6 +317,12 @@ SELECT tf.chunk_id,
         vector_rank_list = [str(chunk.id) for chunk in vector_results]
         vector_map = {str(chunk.id): chunk for chunk in vector_results}
 
+        for rank, chunk in enumerate(vector_results, start=1):
+            logger.debug(
+                f"[Vector Candidate] Rank {rank}: chunk_id={chunk.id} "
+                f"distance={chunk.distance:.6f} similarity={1.0 - chunk.distance:.6f}"
+            )
+
         bm25_scores = self._keyword_bm25_search(
             user=user,
             english_query=refined_english_query,
@@ -325,6 +331,11 @@ SELECT tf.chunk_id,
             limit=pool,
         )
         bm25_rank_list = list(bm25_scores.keys())
+
+        for rank, (chunk_id, score) in enumerate(bm25_scores.items(), start=1):
+            logger.debug(
+                f"[BM25 Candidate] Rank {rank}: chunk_id={chunk_id} score={score:.6f}"
+            )
 
         logger.debug(
             f"Retrieved search candidates: vector={len(vector_results)}, bm25={len(bm25_scores)}"
@@ -362,6 +373,22 @@ SELECT tf.chunk_id,
                     chunk_index=chunk.chunk_index,
                     score=rrf_scores[chunk_id],
                 )
+            )
+
+        for rank, chunk_id in enumerate(sorted_ids, start=1):
+            v_rank = (
+                vector_rank_list.index(chunk_id) + 1
+                if chunk_id in vector_rank_list
+                else "N/A"
+            )
+            b_rank = (
+                bm25_rank_list.index(chunk_id) + 1
+                if chunk_id in bm25_rank_list
+                else "N/A"
+            )
+            logger.debug(
+                f"[Fused RRF Candidate] Rank {rank}: chunk_id={chunk_id} "
+                f"score={rrf_scores[chunk_id]:.6f} (vector_rank={v_rank}, bm25_rank={b_rank})"
             )
 
         logger.debug(
