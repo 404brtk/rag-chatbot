@@ -1,18 +1,7 @@
-from unittest.mock import patch
-
 import pytest
 
 from api.document_service import DocumentService, SearchResult
 from api.models import Document, DocumentChunk
-
-
-@pytest.fixture
-def mock_embedding_service():
-    with patch("api.document_service.EmbeddingService.get_instance") as mock:
-        instance = mock.return_value
-        instance.embed_texts.return_value = [[0.1] * 384]
-        instance.embed_query.return_value = [0.1] * 384
-        yield instance
 
 
 def _make_embedding(*values, dim=384):

@@ -1,5 +1,5 @@
 from datetime import datetime, timezone
-
+from unittest.mock import patch
 import pytest
 from cryptography.fernet import Fernet
 from django.contrib.auth import get_user_model
@@ -71,3 +71,12 @@ def api_key(user_a):
     return UserApiKey.objects.create(
         user=user_a, provider="openai", encrypted_key="sk-chat"
     )
+
+
+@pytest.fixture
+def mock_embedding_service():
+    with patch("api.document_service.EmbeddingService.get_instance") as mock:
+        instance = mock.return_value
+        instance.embed_texts.return_value = [[0.1] * 384 for _ in range(200)]
+        instance.embed_query.return_value = [0.1] * 384
+        yield instance

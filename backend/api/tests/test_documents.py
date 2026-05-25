@@ -8,15 +8,6 @@ from rest_framework import status
 from api.models import Document, DocumentChunk
 
 
-@pytest.fixture
-def mock_embedding_service():
-    with patch("api.document_service.EmbeddingService.get_instance") as mock:
-        instance = mock.return_value
-        instance.embed_texts.return_value = [[0.1] * 384, [0.2] * 384]
-        instance.embed_query.return_value = [0.1] * 384
-        yield instance
-
-
 @pytest.mark.django_db
 class TestDocumentViewSet:
     def test_upload_text_file(self, auth_client_a, user_a, mock_embedding_service):
