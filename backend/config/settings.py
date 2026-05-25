@@ -150,6 +150,8 @@ SIMPLE_JWT = {
     "AUTH_HEADER_TYPES": ("Bearer",),
 }
 
+GETDOCS_BASE_URL = env.str("GETDOCS_BASE_URL", default="http://localhost:8001")
+
 FERNET_KEYS = env.list("FERNET_KEYS", default=[])
 
 FILE_UPLOAD_MAX_SIZE = env.int("FILE_UPLOAD_MAX_SIZE", default=10 * 1024 * 1024)
