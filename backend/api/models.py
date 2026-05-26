@@ -164,6 +164,7 @@ class Document(UUIDModel):
         default=DocumentLanguage.ENGLISH,
     )
     meta = models.JSONField(default=dict, blank=True)
+    source_url = models.URLField(max_length=2000, null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
 
     def __str__(self):

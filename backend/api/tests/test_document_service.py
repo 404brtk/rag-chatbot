@@ -67,6 +67,37 @@ class TestCreateDocumentChunks:
         assert chunk.word_count == 3
         assert chunk.search_vector is not None
 
+    def test_prepends_source_url_when_present(self, user_a, mock_embedding_service):
+        mock_embedding_service.embed_texts.return_value = [[0.1] * 384]
+        document = Document.objects.create(
+            user=user_a,
+            filename="test.txt",
+            content_type="text/plain",
+            raw_text="Hello",
+            source_url="https://example.com/page",
+        )
+
+        service = DocumentService()
+        service._create_document_chunks(document, ["Hello world"])
+
+        chunk = DocumentChunk.objects.get(document=document)
+        assert chunk.content == "Source: https://example.com/page\n\nHello world"
+
+    def test_no_source_url_prefix_when_missing(self, user_a, mock_embedding_service):
+        mock_embedding_service.embed_texts.return_value = [[0.1] * 384]
+        document = Document.objects.create(
+            user=user_a,
+            filename="test.txt",
+            content_type="text/plain",
+            raw_text="Hello",
+        )
+
+        service = DocumentService()
+        service._create_document_chunks(document, ["Plain content"])
+
+        chunk = DocumentChunk.objects.get(document=document)
+        assert chunk.content == "Plain content"
+
 
 @pytest.mark.django_db
 class TestReciprocalRankFusion:

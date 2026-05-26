@@ -1,6 +1,13 @@
 from django.contrib import admin
 from django.contrib.auth.admin import UserAdmin
-from .models import User, Conversation, Document, DocumentChunk, Message, UserApiKey
+from .models import (
+    User,
+    Conversation,
+    Document,
+    DocumentChunk,
+    Message,
+    UserApiKey,
+)
 
 
 @admin.register(User)
@@ -53,9 +60,16 @@ class MessageAdmin(admin.ModelAdmin):
 
 @admin.register(Document)
 class DocumentAdmin(admin.ModelAdmin):
-    list_display = ("filename", "user", "content_type", "language", "created_at")
+    list_display = (
+        "filename",
+        "user",
+        "content_type",
+        "language",
+        "source_url",
+        "created_at",
+    )
     list_filter = ("content_type", "language")
-    search_fields = ("filename", "user__email")
+    search_fields = ("filename", "source_url", "user__email")
     list_select_related = ("user",)
     ordering = ("-created_at",)
     exclude = ("raw_text",)

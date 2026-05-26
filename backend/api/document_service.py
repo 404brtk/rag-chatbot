@@ -42,11 +42,14 @@ class DocumentService:
     def _create_document_chunks(self, document: Document, chunks: list[str]) -> None:
         if not chunks:
             return
+        source_url = document.source_url
         embeddings = self.embedding_service.embed_texts(chunks)
         chunk_objects = [
             DocumentChunk(
                 document=document,
-                content=chunk_content,
+                content=f"Source: {source_url}\n\n{chunk_content}"
+                if source_url
+                else chunk_content,
                 chunk_index=i,
                 embedding=embedding,
                 word_count=len(chunk_content.split()),
@@ -100,6 +103,7 @@ class DocumentService:
         content_type: str,
         filename: str,
         language: str = "english",
+        source_url: str | None = None,
     ) -> Document:
         if content_type not in ("text/plain", "text/markdown"):
             raise ValueError(
@@ -119,6 +123,7 @@ class DocumentService:
             raw_text=raw_text,
             language=language,
             meta=meta,
+            source_url=source_url,
         )
 
         self._create_document_chunks(document, chunks)
