@@ -143,7 +143,6 @@ async def get_docs(
             client=client,
             robots=robots,
             timeout=request.timeout,
-            max_depth=request.max_depth,
         )
         if urls:
             pages = await fetch_and_convert_urls(

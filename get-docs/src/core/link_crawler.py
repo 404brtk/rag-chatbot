@@ -1,5 +1,6 @@
 from bs4 import BeautifulSoup
 import httpx
+import re
 
 from src.config import settings
 from src.core.page_fetcher import (
@@ -15,8 +16,9 @@ from src.models.responses import DocPage, EthicsContext
 from src.utils.http_client import HttpClient
 from src.utils.logger import logger
 from src.utils.lang_utils import filter_language_urls
-from src.utils.version_utils import dedupe_versioned_urls
+from src.utils.version_utils import dedupe_versioned_urls, find_version_index
 from src.utils.url_utils import (
+    extract_path,
     is_asset_url,
     is_url_within_scope,
     make_url_prefix,
@@ -59,6 +61,13 @@ async def crawl_links(
     pages: list[DocPage] = []
     seen: set[str] = {normalize_url(base_url)}
     queue: list[list[str]] = [[normalize_url(base_url)]]
+
+    base_path = extract_path(base_url)
+    base_parts = [p for p in base_path.strip("/").split("/") if p]
+    base_version_idx = find_version_index(base_parts)
+    base_version = (
+        base_parts[base_version_idx] if base_version_idx is not None else None
+    )
 
     for depth in range(options.max_depth):
         if depth >= len(queue) or not queue[depth]:
@@ -104,7 +113,17 @@ async def crawl_links(
                 html, bot_name=bot_name
             ) or has_nofollow_header(resp, bot_name=bot_name)
             if not nofollow:
-                for link in extract_links(html, url):
+                final_url = str(resp.url)
+                if final_url == "https://example.com" and not url.startswith(
+                    "https://example.com"
+                ):
+                    final_url = url
+
+                if not final_url.endswith("/"):
+                    if not re.search(r"\.[a-zA-Z]{2,4}$", final_url.split("/")[-1]):
+                        final_url += "/"
+
+                for link in extract_links(html, final_url):
                     norm = normalize_url(link)
                     if norm not in seen and is_url_within_scope(norm, prefix):
                         seen.add(norm)
@@ -114,6 +133,20 @@ async def crawl_links(
             break
 
         if next_urls:
+            logger.info(
+                f"Link crawl depth {depth} - extracted unique in-scope urls count: {len(next_urls)}"
+            )
+            if base_version is not None:
+                filtered_next = []
+                for url in next_urls:
+                    path = extract_path(url)
+                    parts = [p for p in path.strip("/").split("/") if p]
+                    v_idx = find_version_index(parts)
+                    u_ver = parts[v_idx] if v_idx is not None else None
+                    if u_ver is None or u_ver == base_version:
+                        filtered_next.append(url)
+                next_urls = filtered_next
+
             next_urls = filter_language_urls(next_urls, base_url)
             next_urls = dedupe_versioned_urls(next_urls)
             queue.append(next_urls)

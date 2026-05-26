@@ -1,3 +1,4 @@
+import re
 from urllib.parse import (
     urljoin,
     urlparse,
@@ -139,7 +140,7 @@ def make_url_prefix(url: str) -> str:
 
     if path:
         last_segment = path.rsplit("/", 1)[-1]
-        if "." in last_segment:
+        if re.search(r"\.[a-zA-Z]{1,5}$", last_segment):
             path = path.rsplit("/", 1)[0].rstrip("/")
 
     return origin + path if path else origin

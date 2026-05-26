@@ -20,7 +20,7 @@ from src.utils.url_utils import (
     make_url_prefix,
     normalize_url,
 )
-from src.utils.version_utils import dedupe_versioned_urls
+from src.utils.version_utils import dedupe_versioned_urls, find_version_index
 
 ProgressCallback = Callable[[int, int | None], Awaitable[None]]
 
@@ -217,6 +217,25 @@ async def fetch_and_convert_urls(
     if base_url is not None:
         prefix = make_url_prefix(base_url)
         unique = [u for u in unique if is_url_within_scope(u, prefix)]
+
+        base_path = extract_path(base_url)
+        base_parts = [p for p in base_path.strip("/").split("/") if p]
+        base_version_idx = find_version_index(base_parts)
+        base_version = (
+            base_parts[base_version_idx] if base_version_idx is not None else None
+        )
+
+        if base_version is not None:
+            filtered_unique = []
+            for u in unique:
+                path = extract_path(u)
+                parts = [p for p in path.strip("/").split("/") if p]
+                v_idx = find_version_index(parts)
+                u_ver = parts[v_idx] if v_idx is not None else None
+                if u_ver is None or u_ver == base_version:
+                    filtered_unique.append(u)
+            unique = filtered_unique
+
         unique = filter_language_urls(unique, base_url)
 
     unique = dedupe_versioned_urls(unique)

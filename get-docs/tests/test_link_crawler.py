@@ -282,3 +282,37 @@ class TestCrawlLinks:
         )
 
         assert len(pages) == 2
+
+    @pytest.mark.asyncio
+    async def test_version_locking_in_link_crawler(self, mocker):
+        home = _html_with_links(
+            "Home",
+            ["/en/6.0/guide", "/en/dev/guide"],
+            body="Home Content",
+        )
+        guide_60 = html_page("Guide 6.0", "Guide 6.0 Content")
+
+        async def mock_get(url, **kwargs):
+            if url in (
+                "https://docs.example.com/en/6.0/",
+                "https://docs.example.com/en/6.0",
+            ):
+                return mock_response(text=home)
+            if url == "https://docs.example.com/en/6.0/guide":
+                return mock_response(text=guide_60)
+            return mock_response(status_code=404)
+
+        client, inner = mock_http_client(mocker)
+        inner.get = mocker.AsyncMock(side_effect=mock_get)
+
+        pages = await crawl_links(
+            base_url="https://docs.example.com/en/6.0/",
+            client=client,
+            robots=RobotsParser(""),
+            options=_request(url="https://docs.example.com/en/6.0/"),
+            ethics=EthicsContext(),
+        )
+
+        urls = [p.url for p in pages]
+        assert "https://docs.example.com/en/6.0/guide" in urls
+        assert "https://docs.example.com/en/dev/guide" not in urls

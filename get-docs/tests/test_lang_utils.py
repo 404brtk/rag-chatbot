@@ -172,3 +172,16 @@ class TestFilterLanguageUrls:
             "https://example.com/product/docs/en/guide",
             "https://example.com/product/docs/en/api",
         ]
+
+    def test_contextual_language_inheritance(self):
+        base = "https://example.com/en/6.0/"
+        urls = [
+            "https://example.com/en/6.0/contents",
+            "https://example.com/en/6.0/faq",
+            "https://example.com/fr/6.0/contents",
+        ]
+        result = filter_language_urls(urls, base)
+        assert result == [
+            "https://example.com/en/6.0/contents",
+            "https://example.com/en/6.0/faq",
+        ]

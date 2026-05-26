@@ -456,6 +456,91 @@ class TestFetchSitemapUrls:
         ]
 
     @pytest.mark.asyncio
+    async def test_filters_by_version(self, mocker):
+        xml = _urlset_xml(
+            "https://docs.djangoproject.com/en/6.0/intro",
+            "https://docs.djangoproject.com/en/dev/intro",
+            "https://docs.djangoproject.com/en/6.0/guide",
+        )
+        client, inner = mock_http_client(mocker)
+        inner.get = mocker.AsyncMock(return_value=_mock_response(text=xml))
+
+        urls = await fetch_sitemap_urls(
+            "https://docs.djangoproject.com/sitemap.xml",
+            client,
+            base_url="https://docs.djangoproject.com/en/6.0/",
+        )
+        assert urls == [
+            "https://docs.djangoproject.com/en/6.0/intro",
+            "https://docs.djangoproject.com/en/6.0/guide",
+        ]
+
+    @pytest.mark.asyncio
+    async def test_filters_sub_sitemaps_by_language(self, mocker):
+        index_xml = _index_xml(
+            "https://example.com/sitemap-en.xml",
+            "https://example.com/sitemap-es.xml",
+            "https://example.com/sitemap-other.xml",
+        )
+        en_xml = _urlset_xml("https://example.com/en/page1")
+        other_xml = _urlset_xml("https://example.com/page2")
+
+        def side_effect(url, **kw):
+            responses = {
+                "https://example.com/sitemap.xml": _mock_response(text=index_xml),
+                "https://example.com/sitemap-en.xml": _mock_response(text=en_xml),
+                "https://example.com/sitemap-other.xml": _mock_response(text=other_xml),
+            }
+            return responses.get(url, _mock_response(status_code=404))
+
+        client, inner = mock_http_client(mocker)
+        inner.get = mocker.AsyncMock(side_effect=side_effect)
+
+        urls = await fetch_sitemap_urls(
+            "https://example.com/sitemap.xml",
+            client,
+            base_url="https://example.com/en/",
+        )
+        assert sorted(urls) == [
+            "https://example.com/en/page1",
+        ]
+        called_urls = [call.args[0] for call in inner.get.call_args_list]
+        assert "https://example.com/sitemap-es.xml" not in called_urls
+
+    @pytest.mark.asyncio
+    async def test_filters_sub_sitemaps_by_language_locale_variants(self, mocker):
+        index_xml = _index_xml(
+            "https://example.com/sitemap-pt-br.xml",
+            "https://example.com/sitemap-pt.xml",
+            "https://example.com/sitemap-es.xml",
+        )
+        pt_br_xml = _urlset_xml("https://example.com/pt-br/page1")
+        pt_xml = _urlset_xml("https://example.com/pt-br/page2")
+
+        def side_effect(url, **kw):
+            responses = {
+                "https://example.com/sitemap.xml": _mock_response(text=index_xml),
+                "https://example.com/sitemap-pt-br.xml": _mock_response(text=pt_br_xml),
+                "https://example.com/sitemap-pt.xml": _mock_response(text=pt_xml),
+            }
+            return responses.get(url, _mock_response(status_code=404))
+
+        client, inner = mock_http_client(mocker)
+        inner.get = mocker.AsyncMock(side_effect=side_effect)
+
+        urls = await fetch_sitemap_urls(
+            "https://example.com/sitemap.xml",
+            client,
+            base_url="https://example.com/pt-br/",
+        )
+        assert sorted(urls) == [
+            "https://example.com/pt-br/page1",
+            "https://example.com/pt-br/page2",
+        ]
+        called_urls = [call.args[0] for call in inner.get.call_args_list]
+        assert "https://example.com/sitemap-es.xml" not in called_urls
+
+    @pytest.mark.asyncio
     async def test_multi_level_filtering(self, mocker):
         root_index = _index_xml(
             "https://example.com/docs/sitemap-index.xml",

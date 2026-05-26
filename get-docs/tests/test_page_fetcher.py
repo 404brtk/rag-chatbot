@@ -793,6 +793,42 @@ class TestProbeUrlSelection:
 
         assert len(pages) == 1
 
+    @pytest.mark.asyncio
+    async def test_version_locking_in_fetch_and_convert_urls(self, mocker):
+        urls = [
+            "https://example.com/docs/v2.0/intro",
+            "https://example.com/docs/v3.0/intro",
+            "https://example.com/docs/v2.0/guide",
+        ]
+        fetched_urls = []
+
+        async def mock_get(url, **kw):
+            fetched_urls.append(url)
+            return mock_response(
+                text=html_page("Page", f"Content for {url}"),
+                content_type="text/html; charset=utf-8",
+            )
+
+        client, inner = mock_http_client(mocker)
+        inner.get = mocker.AsyncMock(side_effect=mock_get)
+
+        pages = await fetch_and_convert_urls(
+            urls=urls,
+            client=client,
+            robots=RobotsParser(""),
+            options=GetDocsRequest(
+                url="https://example.com/docs/v2.0/", max_pages=10, delay_seconds=0
+            ),
+            source_method=SourceMethod.SITEMAP_CRAWL,
+            ethics=EthicsContext(),
+            base_url="https://example.com/docs/v2.0/",
+        )
+
+        assert len(pages) == 2
+        assert "https://example.com/docs/v2.0/intro" in fetched_urls
+        assert "https://example.com/docs/v2.0/guide" in fetched_urls
+        assert "https://example.com/docs/v3.0/intro" not in fetched_urls
+
 
 class TestFilterUrlsByRobots:
     def test_all_allowed(self):

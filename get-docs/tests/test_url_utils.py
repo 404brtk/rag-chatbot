@@ -299,6 +299,16 @@ class TestMakeUrlPrefix:
             == "https://example.com/docs/v2.0/guide"
         )
 
+    def test_version_segment_preserved(self):
+        assert (
+            make_url_prefix("https://docs.djangoproject.com/en/6.0/")
+            == "https://docs.djangoproject.com/en/6.0"
+        )
+        assert (
+            make_url_prefix("https://docs.djangoproject.com/en/6.0")
+            == "https://docs.djangoproject.com/en/6.0"
+        )
+
     def test_strips_query_and_fragment(self):
         assert (
             make_url_prefix("https://example.com/docs?lang=en#top")

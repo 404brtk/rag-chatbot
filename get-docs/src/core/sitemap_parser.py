@@ -4,6 +4,7 @@ import httpx
 
 from src.core.robots_txt_parser import RobotsParser, fetch_robots_txt
 from src.utils.http_client import HttpClient
+from src.utils.lang_utils import _has_lang_segment
 from src.utils.url_utils import (
     extract_path,
     is_url_within_scope,
@@ -179,6 +180,33 @@ async def fetch_sitemap_urls(
     if base_url:
         prefix = make_url_prefix(base_url)
         subs = [s for s in subs if _sitemap_could_contain_scope(s.loc, prefix)]
+
+        base_path = extract_path(base_url)
+        base_parts = [p for p in base_path.strip("/").split("/") if p]
+        base_lang = _has_lang_segment(base_parts)
+        if base_lang:
+            filtered_subs = []
+            for s in subs:
+                s_path = extract_path(s.loc)
+                if "." in s_path:
+                    s_path = s_path.rsplit(".", 1)[0]
+                s_parts = [
+                    p
+                    for p in s_path.replace("-", "/")
+                    .replace("_", "/")
+                    .strip("/")
+                    .split("/")
+                    if p
+                ]
+                s_lang = _has_lang_segment(s_parts)
+                if (
+                    s_lang is None
+                    or s_lang == base_lang
+                    or base_lang.startswith(s_lang + "-")
+                    or s_lang.startswith(base_lang + "-")
+                ):
+                    filtered_subs.append(s)
+            subs = filtered_subs
 
     subs = _dedupe_versioned_sitemaps(subs)
 
