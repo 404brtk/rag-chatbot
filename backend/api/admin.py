@@ -7,6 +7,7 @@ from .models import (
     DocumentChunk,
     Message,
     UserApiKey,
+    GetDocsJob,
 )
 
 
@@ -87,3 +88,24 @@ class DocumentChunkAdmin(admin.ModelAdmin):
         return obj.content[:100]
 
     content_preview.short_description = "Content"
+
+
+@admin.register(GetDocsJob)
+class GetDocsJobAdmin(admin.ModelAdmin):
+    list_display = (
+        "job_id",
+        "user",
+        "status",
+        "url",
+        "github_repo",
+        "source_method",
+        "pages_fetched",
+        "pages_total",
+        "error_message",
+        "created_at",
+        "completed_at",
+    )
+    list_filter = ("status", "source_method", "language")
+    search_fields = ("job_id", "url", "github_repo", "user__email")
+    list_select_related = ("user",)
+    ordering = ("-created_at",)
