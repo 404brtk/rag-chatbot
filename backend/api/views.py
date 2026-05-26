@@ -1,6 +1,7 @@
 import asyncio
 import json
 import logging
+import httpx
 
 from asgiref.sync import async_to_sync, sync_to_async
 from django.http import StreamingHttpResponse, JsonResponse
@@ -10,10 +11,12 @@ from django.views import View
 from django.views.decorators.csrf import csrf_exempt
 from rest_framework import exceptions, generics, mixins, permissions, viewsets, status
 from rest_framework.response import Response
+from django.db import transaction
+from django.utils import timezone
 from rest_framework_simplejwt.authentication import JWTAuthentication
 
 from .document_service import DocumentService
-from .models import Conversation, DocumentLanguage
+from .models import Conversation, DocumentLanguage, GetDocsJob
 from .pagination import (
     ConversationCursorPagination,
     MessageCursorPagination,
@@ -25,8 +28,11 @@ from .serializers import (
     DocumentSerializer,
     RegisterSerializer,
     UserApiKeySerializer,
+    GetDocsJobSerializer,
 )
 from .chat_service import ChatService
+from .get_docs_client import GetDocsClient
+from .tasks import poll_get_docs_job
 from .llm_config import (
     LLMConfig,
     InvalidInputError,
@@ -439,3 +445,66 @@ class DocumentViewSet(
         if "file" in request.FILES:
             return self._handle_file_upload(request)
         return self._handle_text_paste(request)
+
+
+class GetDocsJobViewSet(
+    mixins.CreateModelMixin, mixins.RetrieveModelMixin, viewsets.GenericViewSet
+):
+    serializer_class = GetDocsJobSerializer
+
+    def get_queryset(self):
+        return self.request.user.get_docs_jobs.all()
+
+    def create(self, request, *args, **kwargs):
+        serializer = self.get_serializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+
+        validated_data = serializer.validated_data
+        client = GetDocsClient()
+
+        try:
+            with transaction.atomic():
+                get_docs_job = serializer.save(user=request.user)
+
+                try:
+                    job_id = client.trigger_get_docs(
+                        url=validated_data.get("url"),
+                        github_repo=validated_data.get("github_repo"),
+                        max_pages=validated_data.get("max_pages"),
+                        max_depth=validated_data.get("max_depth"),
+                        delay_seconds=validated_data.get("delay_seconds"),
+                        crawl_timeout=validated_data.get("timeout"),
+                        skip_llms_full=validated_data.get("skip_llms_full"),
+                        fair_use=validated_data.get("fair_use"),
+                    )
+                except httpx.HTTPError as e:
+                    logger.exception("Failed to connect to get-docs microservice")
+                    raise TemporaryProviderError(
+                        f"Failed to trigger job on get-docs microservice: {str(e)}"
+                    )
+
+                get_docs_job.job_id = job_id
+                get_docs_job.save(update_fields=["job_id"])
+
+                def queue_task():
+                    try:
+                        poll_get_docs_job.delay(get_docs_job.id)
+                    except Exception as queue_err:
+                        logger.exception(
+                            f"Failed to queue Celery task for job {get_docs_job.id}"
+                        )
+                        GetDocsJob.objects.filter(id=get_docs_job.id).update(
+                            status=GetDocsJob.Status.FAILED,
+                            error_message=f"Broker queue error: {str(queue_err)}",
+                            completed_at=timezone.now(),
+                        )
+
+                transaction.on_commit(queue_task)
+
+        except TemporaryProviderError as e:
+            return Response(
+                {"error": str(e)}, status=status.HTTP_503_SERVICE_UNAVAILABLE
+            )
+
+        response_serializer = self.get_serializer(get_docs_job)
+        return Response(response_serializer.data, status=status.HTTP_201_CREATED)
