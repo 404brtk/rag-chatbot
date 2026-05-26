@@ -209,7 +209,7 @@ class GetDocsJob(UUIDModel):
     user = models.ForeignKey(
         User, on_delete=models.CASCADE, related_name="get_docs_jobs"
     )
-    job_id = models.CharField(max_length=255, unique=True)
+    job_id = models.CharField(max_length=255, unique=True, null=True)
     url = models.URLField(max_length=1000, null=True, blank=True)
     github_repo = models.CharField(max_length=255, null=True, blank=True)
     status = models.CharField(
