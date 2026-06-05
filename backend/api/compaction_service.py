@@ -90,17 +90,36 @@ class CompactionService:
         summarization_prompt = self._build_summarization_prompt(history)
         summary_config = self._build_summary_config(model, provider)
 
-        async for chunk in self.gateway.generate_stream(
-            api_key=api_key,
-            config=summary_config,
-            messages=[StoredMessage(role="user", content=summarization_prompt)],
-        ):
-            yield ProviderChunk(
-                text=chunk.text,
-                usage=chunk.usage,
-                provider=provider,
-                model=model,
+        prompt_tokens = self.counter.estimate_text_tokens(summarization_prompt, model)
+        system_tokens = self.counter.estimate_system_tokens(
+            summary_config.system_prompt, model
+        )
+        total_request_tokens = prompt_tokens + system_tokens
+
+        logger.debug(
+            f"Calling summarizer - provider={provider}, model={model}, "
+            f"prompt_tokens={prompt_tokens}, system_tokens={system_tokens}, "
+            f"total_request_tokens={total_request_tokens}, max_output_tokens={summary_config.max_output_tokens}"
+        )
+
+        try:
+            async for chunk in self.gateway.generate_stream(
+                api_key=api_key,
+                config=summary_config,
+                messages=[StoredMessage(role="user", content=summarization_prompt)],
+            ):
+                yield ProviderChunk(
+                    text=chunk.text,
+                    usage=chunk.usage,
+                    provider=provider,
+                    model=model,
+                )
+        except Exception as e:
+            logger.error(
+                f"Summarizer API call exception - provider={provider}, model={model}: {e}",
+                exc_info=True,
             )
+            raise
 
     async def compact(
         self,
@@ -154,7 +173,14 @@ class CompactionService:
         new_tokens = self.counter.estimate_message_tokens(new_message, config.model)
         total = system_tokens + history_tokens + new_tokens + 24
         threshold = int(config.max_input_tokens * config.compaction_threshold)
-        return total > threshold
+        decision = total > threshold
+        logger.debug(
+            f"should_compact calculation - system_tokens={system_tokens}, "
+            f"history_tokens={history_tokens}, new_tokens={new_tokens}, "
+            f"total_estimated={total}, threshold={threshold} (limit={config.max_input_tokens}, "
+            f"threshold_pct={config.compaction_threshold}), decision={decision}"
+        )
+        return decision
 
     def chunk_truncate(
         self,
@@ -164,11 +190,17 @@ class CompactionService:
         system_prompt: str,
         config: LLMConfig,
     ) -> list[StoredMessage]:
+        orig_len = len(history)
+        logger.debug(f"Starting chunk_truncate - original history length: {orig_len}")
         while len(history) > 1 and self.should_compact(
             system_prompt=system_prompt,
             history=history,
             new_message=new_message,
             config=config,
         ):
-            history = history[len(history) // 2 :]
+            half = len(history) // 2
+            history = history[half:]
+            logger.debug(
+                f"Truncated history: kept last {len(history)} of {orig_len} messages"
+            )
         return history
