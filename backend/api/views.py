@@ -21,6 +21,7 @@ from .pagination import (
     ConversationCursorPagination,
     MessageCursorPagination,
     DocumentCursorPagination,
+    GetDocsJobCursorPagination,
 )
 from .serializers import (
     ConversationSerializer,
@@ -448,9 +449,13 @@ class DocumentViewSet(
 
 
 class GetDocsJobViewSet(
-    mixins.CreateModelMixin, mixins.RetrieveModelMixin, viewsets.GenericViewSet
+    mixins.CreateModelMixin,
+    mixins.ListModelMixin,
+    mixins.RetrieveModelMixin,
+    viewsets.GenericViewSet,
 ):
     serializer_class = GetDocsJobSerializer
+    pagination_class = GetDocsJobCursorPagination
 
     def get_queryset(self):
         return self.request.user.get_docs_jobs.all()
