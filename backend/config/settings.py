@@ -155,6 +155,8 @@ GETDOCS_BASE_URL = env.str("GETDOCS_BASE_URL", default="http://localhost:8001")
 FERNET_KEYS = env.list("FERNET_KEYS", default=[])
 
 FILE_UPLOAD_MAX_SIZE = env.int("FILE_UPLOAD_MAX_SIZE", default=10 * 1024 * 1024)
+DATA_UPLOAD_MAX_MEMORY_SIZE = 10 * 1024 * 1024  # 10 MB
+FILE_UPLOAD_MAX_MEMORY_SIZE = 10 * 1024 * 1024  # 10 MB
 
 EMBEDDING_MODEL = "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2"  # TODO: try intfloat/multilingual-e5-small or other too
 EMBEDDING_DIMENSIONS = 384
