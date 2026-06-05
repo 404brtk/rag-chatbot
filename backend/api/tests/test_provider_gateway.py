@@ -347,8 +347,11 @@ class TestProviderGateway:
             "Hope it helps."
         )
         formatted = _format_message_content(content, "llamacpp")
-        assert isinstance(formatted, str)
-        assert "[Image Attachment]" in formatted
-        assert "Look at this:" in formatted
-        assert "Hope it helps." in formatted
-        assert "data:image/png;base64,abc" not in formatted
+        assert isinstance(formatted, list)
+        assert len(formatted) == 3
+        assert formatted[0] == {"type": "text", "text": "Look at this:"}
+        assert formatted[1] == {
+            "type": "image_url",
+            "image_url": {"url": "data:image/png;base64,abc"},
+        }
+        assert formatted[2] == {"type": "text", "text": "Hope it helps."}

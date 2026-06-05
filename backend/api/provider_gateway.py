@@ -64,15 +64,6 @@ def _parse_message_multimodal(content: str) -> list[dict[str, Any]]:
 def _format_message_content(content: str, provider: str) -> str | list[dict[str, Any]]:
     parts = _parse_message_multimodal(content)
 
-    if provider == "llamacpp":
-        text_runs = []
-        for part in parts:
-            if part["type"] == "text":
-                text_runs.append(part["text"])
-            elif part["type"] == "image_url":
-                text_runs.append("[Image Attachment]")
-        return "\n\n".join(text_runs)
-
     has_image = any(part["type"] == "image_url" for part in parts)
     if not has_image:
         return content
