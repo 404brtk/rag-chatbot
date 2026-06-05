@@ -173,7 +173,7 @@ class ProviderGateway:
 
         base = settings.LLAMACPP_BASE_URL
         try:
-            async with httpx.AsyncClient(timeout=5.0) as client:
+            async with httpx.AsyncClient(timeout=2.0) as client:
                 resp = await client.get(f"{base}/props")
                 resp.raise_for_status()
                 n_ctx = resp.json()["default_generation_settings"]["n_ctx"]
@@ -182,8 +182,8 @@ class ProviderGateway:
             ProviderGateway._llamacpp_context_fetched_at = now
             logger.info(f"Discovered llama.cpp context window: {n_ctx} tokens")
             return n_ctx
-        except httpx.ConnectError, httpx.HTTPError:
-            logger.exception(f"Failed to connect to llama.cpp at {base}")
+        except httpx.HTTPError:
+            logger.warning(f"llama.cpp server is offline or unreachable at {base}")
             raise TemporaryProviderError(
                 f"llama.cpp server is offline or unreachable at {base}"
             )
@@ -200,7 +200,7 @@ class ProviderGateway:
 
         base = settings.LLAMACPP_BASE_URL
         try:
-            async with httpx.AsyncClient(timeout=5.0) as client:
+            async with httpx.AsyncClient(timeout=2.0) as client:
                 resp = await client.get(f"{base}/v1/models")
                 resp.raise_for_status()
                 data = resp.json().get("data", [])
@@ -210,7 +210,7 @@ class ProviderGateway:
             logger.info(f"Discovered {len(data)} llama.cpp model(s)")
             return data
         except httpx.HTTPError:
-            logger.exception(f"Failed to connect to llama.cpp at {base}")
+            logger.warning(f"llama.cpp server is offline or unreachable at {base}")
             raise TemporaryProviderError(
                 f"llama.cpp server is offline or unreachable at {base}"
             )

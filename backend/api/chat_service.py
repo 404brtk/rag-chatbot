@@ -480,11 +480,18 @@ class ChatService:
 
     @staticmethod
     async def get_available_models() -> dict[str, list[str]]:
+        models: dict[str, list[str]] = {}
+
         openai_models = list(getattr(settings, "OPENAI_MODELS", []))
-        llamacpp_models: list[str] = []
+        if openai_models:
+            models["openai"] = openai_models
+
         try:
             raw = await ProviderGateway.discover_llamacpp_models()
             llamacpp_models = [m["id"] for m in raw]
+            if llamacpp_models:
+                models["llamacpp"] = llamacpp_models
         except Exception:
             logger.warning("Failed to discover llama.cpp models")
-        return {"openai": openai_models, "llamacpp": llamacpp_models}
+
+        return models
