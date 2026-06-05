@@ -39,6 +39,7 @@ class MessageSerializer(serializers.ModelSerializer):
             "context",
             "usage",
             "compacted",
+            "truncated",
             "is_compaction_summary",
             "created_at",
         ]
@@ -50,6 +51,7 @@ class MessageSerializer(serializers.ModelSerializer):
             "context",
             "usage",
             "compacted",
+            "truncated",
             "is_compaction_summary",
             "created_at",
         ]

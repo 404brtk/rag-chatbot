@@ -50,10 +50,17 @@ class MessageAdmin(admin.ModelAdmin):
         "provider",
         "model",
         "compacted",
+        "truncated",
         "is_compaction_summary",
         "created_at",
     )
-    list_filter = ("role", "provider", "compacted", "is_compaction_summary")
+    list_filter = (
+        "role",
+        "provider",
+        "compacted",
+        "truncated",
+        "is_compaction_summary",
+    )
     search_fields = ("content", "raw_question")
     list_select_related = ("conversation",)
     ordering = ("-created_at",)

@@ -128,7 +128,8 @@ class Message(UUIDModel):
     )
     model = models.CharField(max_length=128, null=True, blank=True)
     usage = models.JSONField(null=True, blank=True)
-    compacted = models.BooleanField(default=False, db_index=True)
+    compacted = models.BooleanField(default=False)
+    truncated = models.BooleanField(default=False)
     is_compaction_summary = models.BooleanField(default=False)
     created_at = models.DateTimeField(auto_now_add=True)
 
