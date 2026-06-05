@@ -91,8 +91,7 @@ class TestChatServiceStatic:
         models = await ChatService.get_available_models()
 
         assert "openai" in models
-        assert "llamacpp" in models
-        assert models["llamacpp"] == []
+        assert "llamacpp" not in models
 
 
 class TestChatServiceGenerateReply:
