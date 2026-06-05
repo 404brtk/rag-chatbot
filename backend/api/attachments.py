@@ -53,3 +53,12 @@ def parse_content(content: str) -> list[ContentSegment]:
         segments.append(ContentSegment(text=content))
 
     return segments
+
+
+def extract_clean_text(content: str) -> str:
+    segments = parse_content(content)
+    text_parts = []
+    for s in segments:
+        if s.text is not None:
+            text_parts.append(s.text)
+    return "".join(text_parts).strip()

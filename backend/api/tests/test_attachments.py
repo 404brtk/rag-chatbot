@@ -1,4 +1,4 @@
-from api.attachments import parse_content
+from api.attachments import parse_content, extract_clean_text
 
 
 def test_parse_content_text_only():
@@ -41,3 +41,22 @@ def test_parse_content_mixed():
     assert segments[3].attachment is not None
     assert segments[3].attachment.name == "screenshot.jpg"
     assert segments[4].text == "\n\nLet me know what you think."
+
+
+def test_extract_clean_text_text_only():
+    content = "Hello world"
+    assert extract_clean_text(content) == "Hello world"
+
+
+def test_extract_clean_text_only_attachments():
+    content = '=== Attachment: name="foo" size=1 mime="text/plain" ===\nbar\n=== End Attachment ==='
+    assert extract_clean_text(content) == ""
+
+
+def test_extract_clean_text_mixed():
+    content = (
+        "Check this out:\n\n"
+        '=== Attachment: name="foo" size=1 mime="text/plain" ===\nbar\n=== End Attachment ===\n\n'
+        "Cool right?"
+    )
+    assert extract_clean_text(content) == "Check this out:\n\n\n\nCool right?"

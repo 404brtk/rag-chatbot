@@ -18,6 +18,7 @@ from .llm_config import (
     PermanentProviderError,
 )
 from .provider_gateway import ProviderGateway
+from .attachments import extract_clean_text
 from .compaction_service import CompactionService
 from .document_service import DocumentService
 from .token_counter import TokenCounter
@@ -159,19 +160,21 @@ class ChatService:
         config: LLMConfig,
         document_ids: list[str] | None = None,
     ):
-        clean_user_text = (user_text or "").strip()
-        if not clean_user_text:
+        raw_user_text = (user_text or "").strip()
+        if not raw_user_text:
             raise InvalidInputError("user_text cannot be empty")
+
+        clean_user_text = extract_clean_text(raw_user_text)
 
         api_key = await self._resolve_api_key(user, config.provider)
         compaction_api_key = await self._resolve_api_key(
             user, config.compaction_provider
         )
 
-        user_message = clean_user_text
+        user_message = raw_user_text
         context_chunks = None
 
-        if document_ids is not None:
+        if document_ids is not None and clean_user_text:
             refinement = await self._refine_query(
                 user=user,
                 query=clean_user_text,
@@ -205,7 +208,7 @@ class ChatService:
             )
             if search_results:
                 context_block = self._format_rag_context(search_results)
-                user_message = f"<CONTEXT>\n{context_block}\n</CONTEXT>\n\n<QUESTION>\n{clean_user_text}\n</QUESTION>"
+                user_message = f"<CONTEXT>\n{context_block}\n</CONTEXT>\n\n<QUESTION>\n{raw_user_text}\n</QUESTION>"
                 context_chunks = [
                     {
                         "index": i,
