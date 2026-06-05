@@ -7,6 +7,7 @@ import openai
 from django.conf import settings
 from openai import AsyncOpenAI
 
+from .attachments import parse_content
 from .llm_config import (
     GenerationResult,
     LLMConfig,
@@ -17,6 +18,66 @@ from .llm_config import (
 from .repositories import StoredMessage
 
 logger = logging.getLogger(__name__)
+
+
+def _parse_message_multimodal(content: str) -> list[dict[str, Any]]:
+    parts: list[dict[str, Any]] = []
+
+    for segment in parse_content(content):
+        if segment.text is not None:
+            text = segment.text.strip()
+            if text:
+                parts.append({"type": "text", "text": text})
+        elif segment.attachment is not None:
+            att = segment.attachment
+            if att.mime.startswith("image/"):
+                parts.append(
+                    {
+                        "type": "image_url",
+                        "image_url": {"url": att.content.strip()},
+                    }
+                )
+            else:
+                parts.append(
+                    {
+                        "type": "text",
+                        "text": f"--- File: {att.name} ---\n{att.content}\n----------------",
+                    }
+                )
+
+    if not parts:
+        return [{"type": "text", "text": content}]
+
+    merged_parts = []
+    for part in parts:
+        if part["type"] == "text":
+            if merged_parts and merged_parts[-1]["type"] == "text":
+                merged_parts[-1]["text"] += "\n\n" + part["text"]
+            else:
+                merged_parts.append(part)
+        else:
+            merged_parts.append(part)
+
+    return merged_parts
+
+
+def _format_message_content(content: str, provider: str) -> str | list[dict[str, Any]]:
+    parts = _parse_message_multimodal(content)
+
+    if provider == "llamacpp":
+        text_runs = []
+        for part in parts:
+            if part["type"] == "text":
+                text_runs.append(part["text"])
+            elif part["type"] == "image_url":
+                text_runs.append("[Image Attachment]")
+        return "\n\n".join(text_runs)
+
+    has_image = any(part["type"] == "image_url" for part in parts)
+    if not has_image:
+        return content
+
+    return parts
 
 
 class ProviderGateway:
@@ -50,7 +111,13 @@ class ProviderGateway:
             kwargs = {
                 "model": config.model,
                 "messages": [{"role": "system", "content": config.system_prompt}]
-                + [{"role": m.role, "content": m.content} for m in messages],
+                + [
+                    {
+                        "role": m.role,
+                        "content": _format_message_content(m.content, config.provider),
+                    }
+                    for m in messages
+                ],
                 "temperature": config.temperature,
             }
             if config.provider == "llamacpp":
@@ -115,7 +182,13 @@ class ProviderGateway:
             kwargs = {
                 "model": config.model,
                 "messages": [{"role": "system", "content": config.system_prompt}]
-                + [{"role": m.role, "content": m.content} for m in messages],
+                + [
+                    {
+                        "role": m.role,
+                        "content": _format_message_content(m.content, config.provider),
+                    }
+                    for m in messages
+                ],
                 "temperature": config.temperature,
                 "stream": True,
                 "stream_options": {"include_usage": True},

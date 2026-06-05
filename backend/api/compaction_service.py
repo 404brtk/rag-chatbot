@@ -1,5 +1,6 @@
 import logging
 
+from .attachments import parse_content
 from .llm_config import (
     LLMConfig,
     PermanentProviderError,
@@ -13,6 +14,24 @@ from .token_counter import TokenCounter
 logger = logging.getLogger(__name__)
 
 
+def _clean_content_for_summary(content: str) -> str:
+    parts: list[str] = []
+
+    for segment in parse_content(content):
+        if segment.text is not None:
+            parts.append(segment.text)
+        elif segment.attachment is not None:
+            att = segment.attachment
+            if att.mime.startswith("image/"):
+                parts.append(f"[Image Attachment: {att.name}]")
+            else:
+                parts.append(
+                    f"[File Attachment: {att.name}]\n--- Content ---\n{att.content}\n---------------"
+                )
+
+    return "".join(parts)
+
+
 class CompactionService:
     def __init__(self, counter: TokenCounter, gateway: ProviderGateway) -> None:
         self.counter = counter
@@ -22,7 +41,8 @@ class CompactionService:
         lines = []
         for msg in history:
             label = "User" if msg.role == "user" else "Assistant"
-            lines.append(f"{label}: {msg.content}")
+            cleaned_content = _clean_content_for_summary(msg.content)
+            lines.append(f"{label}: {cleaned_content}")
         return "\n\n".join(lines)
 
     def _build_summarization_prompt(self, history: list[StoredMessage]) -> str:

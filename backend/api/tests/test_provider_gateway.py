@@ -5,7 +5,7 @@ import openai
 import pytest
 
 from api.repositories import StoredMessage
-from api.provider_gateway import ProviderGateway
+from api.provider_gateway import ProviderGateway, _format_message_content
 from api.llm_config import (
     ProviderChunk,
     TemporaryProviderError,
@@ -316,3 +316,39 @@ class TestProviderGateway:
             {"id": "fresh-model", "object": "model", "owned_by": "llamacpp"}
         ]
         mock_client.get.assert_called_once()
+
+    def test_format_message_content_openai_no_images(self):
+        content = "Hello there!"
+        formatted = _format_message_content(content, "openai")
+        assert formatted == content
+
+    def test_format_message_content_openai_with_images(self):
+        content = (
+            "Look at this:\n"
+            '=== Attachment: name="chart.png" size=500 mime="image/png" ===\n'
+            "data:image/png;base64,abc\n"
+            "=== End Attachment ==="
+        )
+        formatted = _format_message_content(content, "openai")
+        assert isinstance(formatted, list)
+        assert len(formatted) == 2
+        assert formatted[0] == {"type": "text", "text": "Look at this:"}
+        assert formatted[1] == {
+            "type": "image_url",
+            "image_url": {"url": "data:image/png;base64,abc"},
+        }
+
+    def test_format_message_content_llamacpp(self):
+        content = (
+            "Look at this:\n"
+            '=== Attachment: name="chart.png" size=500 mime="image/png" ===\n'
+            "data:image/png;base64,abc\n"
+            "=== End Attachment ===\n\n"
+            "Hope it helps."
+        )
+        formatted = _format_message_content(content, "llamacpp")
+        assert isinstance(formatted, str)
+        assert "[Image Attachment]" in formatted
+        assert "Look at this:" in formatted
+        assert "Hope it helps." in formatted
+        assert "data:image/png;base64,abc" not in formatted

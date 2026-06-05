@@ -2,7 +2,7 @@ from dataclasses import replace
 from unittest.mock import MagicMock
 
 
-from api.compaction_service import CompactionService
+from api.compaction_service import CompactionService, _clean_content_for_summary
 from api.token_counter import TokenCounter
 from api.llm_config import (
     ProviderChunk,
@@ -169,3 +169,20 @@ class TestCompactionService:
 
         assert len(chunks) == 1
         assert chunks[0].text == "Part"
+
+    def test_clean_content_for_summary(self):
+        content = (
+            "Here is the issue:\n"
+            '=== Attachment: name="screenshot.png" size=500 mime="image/png" ===\n'
+            "data:image/png;base64,12345\n"
+            "=== End Attachment ===\n"
+            "and code:\n"
+            '=== Attachment: name="test.py" size=20 mime="text/plain" ===\n'
+            "pass\n"
+            "=== End Attachment ==="
+        )
+        cleaned = _clean_content_for_summary(content)
+        assert "data:image/png;base64,12345" not in cleaned
+        assert "[Image Attachment: screenshot.png]" in cleaned
+        assert "[File Attachment: test.py]" in cleaned
+        assert "pass" in cleaned

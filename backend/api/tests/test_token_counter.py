@@ -1,5 +1,5 @@
 from api.token_counter import TokenCounter
-
+from api.repositories import StoredMessage
 from .conftest import _msg
 
 
@@ -54,3 +54,20 @@ class TestTokenCounter:
     def test_truncate_text_negative_limit_returns_empty(self):
         result = self.counter.truncate_text_to_max_tokens("Hello", "gpt-5.5", -5)
         assert result == ""
+
+    def test_estimate_message_tokens_with_image_heuristic(self):
+        msg = _msg("user", "Explain")
+        base_tokens = self.counter.estimate_message_tokens(msg, "gpt-5.5")
+
+        huge_base64 = "a" * 50000
+        content = (
+            "Explain\n"
+            '=== Attachment: name="img.png" size=50000 mime="image/png" ===\n'
+            f"data:image/png;base64,{huge_base64}\n"
+            "=== End Attachment ==="
+        )
+        img_msg = StoredMessage(role="user", content=content)
+        img_tokens = self.counter.estimate_message_tokens(img_msg, "gpt-5.5")
+
+        assert img_tokens < base_tokens + 250
+        assert img_tokens > base_tokens + 190
