@@ -459,7 +459,6 @@ class GetDocsJobViewSet(
         serializer = self.get_serializer(data=request.data)
         serializer.is_valid(raise_exception=True)
 
-        validated_data = serializer.validated_data
         client = GetDocsClient()
 
         try:
@@ -468,15 +467,19 @@ class GetDocsJobViewSet(
 
                 try:
                     job_id = client.trigger_get_docs(
-                        url=validated_data.get("url"),
-                        github_repo=validated_data.get("github_repo"),
-                        max_pages=validated_data.get("max_pages"),
-                        max_depth=validated_data.get("max_depth"),
-                        delay_seconds=validated_data.get("delay_seconds"),
-                        crawl_timeout=validated_data.get("timeout"),
-                        skip_llms_full=validated_data.get("skip_llms_full"),
-                        fair_use=validated_data.get("fair_use"),
+                        url=get_docs_job.url,
+                        github_repo=get_docs_job.github_repo,
+                        max_pages=get_docs_job.max_pages,
+                        max_depth=get_docs_job.max_depth,
+                        delay_seconds=get_docs_job.delay_seconds,
+                        crawl_timeout=get_docs_job.timeout,
+                        skip_llms_full=get_docs_job.skip_llms_full,
+                        fair_use=get_docs_job.fair_use,
                     )
+                except httpx.HTTPStatusError as e:
+                    error_msg = f"Failed to trigger job on get-docs microservice: Client error {e.response.status_code}. Response: {e.response.text}"
+                    logger.error(error_msg)
+                    raise TemporaryProviderError(error_msg)
                 except httpx.HTTPError as e:
                     logger.exception("Failed to connect to get-docs microservice")
                     raise TemporaryProviderError(
