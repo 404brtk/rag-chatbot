@@ -12,7 +12,7 @@ class LLMConfig:
     compaction_provider: Literal["openai", "llamacpp"]
     compaction_model: str
     max_input_tokens: int = 12_000  # TODO: adjust
-    max_output_tokens: int = 1_024  # TODO: adjust
+    max_output_tokens: int = 4_096  # TODO: adjust
     temperature: float = 0.2
     history_limit: int = 500  # TODO: adjust
     compaction_threshold: float = 0.8
