@@ -7,7 +7,7 @@ class ConversationCursorPagination(CursorPagination):
 
 
 class MessageCursorPagination(CursorPagination):
-    ordering = "created_at"
+    ordering = "-created_at"
     page_size = 50
 
 

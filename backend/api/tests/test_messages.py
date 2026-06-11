@@ -280,7 +280,7 @@ class TestMessageListing:
         results = response.data["results"]
         assert len(results) == 2
 
-    def test_messages_ordered_by_created_at_asc(self, auth_client_a, conversation_a):
+    def test_messages_ordered_by_created_at_desc(self, auth_client_a, conversation_a):
         Message.objects.create(
             conversation=conversation_a, role="user", content="first"
         )
@@ -289,8 +289,8 @@ class TestMessageListing:
         url = messages_url(conversation_a.id)
         response = auth_client_a.get(url)
         results = response.data["results"]
-        assert results[0]["content"] == "first"
-        assert results[1]["content"] == "second"
+        assert results[0]["content"] == "second"
+        assert results[1]["content"] == "first"
 
     def test_cannot_list_messages_in_other_users_conversation(
         self, auth_client_a, conversation_b
