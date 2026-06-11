@@ -330,3 +330,51 @@ class TestApplyCompaction:
             1 for m in Message.objects.filter(conversation=conversation, compacted=True)
         )
         assert compacted_count == 2
+
+
+@pytest.mark.django_db
+class TestTruncateOldestMessages:
+    def test_truncates_specified_number_of_oldest_messages(self, repo, conversation):
+        m1 = Message.objects.create(
+            conversation=conversation, role="user", content="first"
+        )
+        m2 = Message.objects.create(
+            conversation=conversation, role="ai", content="second"
+        )
+        m3 = Message.objects.create(
+            conversation=conversation, role="user", content="third"
+        )
+
+        updated_count = repo.truncate_oldest_messages(str(conversation.id), 2)
+        assert updated_count == 2
+
+        m1.refresh_from_db()
+        m2.refresh_from_db()
+        m3.refresh_from_db()
+
+        assert m1.truncated is True
+        assert m2.truncated is True
+        assert m3.truncated is False
+
+    def test_excludes_already_truncated_or_compacted_messages(self, repo, conversation):
+        Message.objects.create(
+            conversation=conversation, role="user", content="first", compacted=True
+        )
+        Message.objects.create(
+            conversation=conversation, role="ai", content="second", truncated=True
+        )
+        m3 = Message.objects.create(
+            conversation=conversation, role="user", content="third"
+        )
+        m4 = Message.objects.create(
+            conversation=conversation, role="ai", content="fourth"
+        )
+
+        updated_count = repo.truncate_oldest_messages(str(conversation.id), 1)
+        assert updated_count == 1
+
+        m3.refresh_from_db()
+        m4.refresh_from_db()
+
+        assert m3.truncated is True
+        assert m4.truncated is False

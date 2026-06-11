@@ -51,7 +51,7 @@ class DjangoMessageRepository:
         qs = self._build_base_queryset(session_id)
 
         if exclude_compacted:
-            qs = qs.filter(compacted=False)
+            qs = qs.filter(compacted=False, truncated=False)
 
         if limit is not None:
             qs = qs[:limit]
@@ -131,6 +131,18 @@ class DjangoMessageRepository:
             compacted=True
         )
 
+    def truncate_oldest_messages(self, session_id: str, count: int) -> int:
+        message_ids = list(
+            Message.objects.filter(
+                conversation_id=session_id,
+                compacted=False,
+                truncated=False,
+            )
+            .order_by("created_at")[:count]
+            .values_list("id", flat=True)
+        )
+        return Message.objects.filter(id__in=message_ids).update(truncated=True)
+
     def apply_compaction(
         self,
         *,
@@ -167,7 +179,7 @@ class AsyncDjangoMessageRepository:
         qs = self._sync_repo._build_base_queryset(session_id)
 
         if exclude_compacted:
-            qs = qs.filter(compacted=False)
+            qs = qs.filter(compacted=False, truncated=False)
 
         if limit is not None:
             qs = qs[:limit]
@@ -235,6 +247,12 @@ class AsyncDjangoMessageRepository:
             self._sync_repo.compact_messages,
             thread_sensitive=True,
         )(session)
+
+    async def truncate_oldest_messages(self, session_id: str, count: int) -> int:
+        return await sync_to_async(
+            self._sync_repo.truncate_oldest_messages,
+            thread_sensitive=True,
+        )(session_id=session_id, count=count)
 
     async def apply_compaction(
         self,
