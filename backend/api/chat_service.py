@@ -409,9 +409,7 @@ class ChatService:
                 document_ids=document_ids,
             )
 
-            if prep.compaction_tokens:
-                for token in prep.compaction_tokens:
-                    yield StreamEvent(type="token", content=token)
+            if prep.compaction_summary:
                 yield StreamEvent(
                     type="compaction_done",
                     message_id=prep.compaction_message_id,

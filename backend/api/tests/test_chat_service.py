@@ -1136,16 +1136,12 @@ class TestChatServiceCompaction:
                 )
             ]
 
-        assert len(events) == 5
-        assert events[0].type == "token"
-        assert events[0].content == "Sum"
+        assert len(events) == 3
+        assert events[0].type == "compaction_done"
+        assert events[0].message_id == "summary-id"
         assert events[1].type == "token"
-        assert events[1].content == "mary."
-        assert events[2].type == "compaction_done"
-        assert events[2].message_id == "summary-id"
-        assert events[3].type == "token"
-        assert events[3].content == "Answer"
-        assert events[4].type == "done"
+        assert events[1].content == "Answer"
+        assert events[2].type == "done"
 
         self.mock_repo.apply_compaction.assert_called_once()
         apply_call = self.mock_repo.apply_compaction.call_args[1]
@@ -1233,7 +1229,9 @@ class TestChatServiceCompaction:
     async def test_prepare_generation_adjusts_max_output_tokens_dynamically(
         self, mock_should, mock_resolve
     ):
-        config = replace(DEFAULT_CONFIG, max_input_tokens=600, max_output_tokens=500)
+        config = replace(
+            DEFAULT_CONFIG, model="gpt-4", max_input_tokens=600, max_output_tokens=500
+        )
         history = [_msg("user", "word " * 150)]
         self.mock_repo.list_messages.return_value = history
         service = ChatService(repository=self.mock_repo)
