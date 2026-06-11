@@ -153,6 +153,7 @@ class MessageViewSet(
             or request.data["model"],
             max_input_tokens=request.data.get("max_input_tokens", 12_000),
             compaction_threshold=request.data.get("compaction_threshold", 0.8),
+            compaction_enabled=request.data.get("compaction_enabled", False),
         )
         service = ChatService()
 
@@ -271,6 +272,7 @@ class MessageStreamView(View):
             or body["model"],
             max_input_tokens=body.get("max_input_tokens", 12_000),
             compaction_threshold=body.get("compaction_threshold", 0.8),
+            compaction_enabled=body.get("compaction_enabled", False),
         )
         service = ChatService()
 

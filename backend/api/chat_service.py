@@ -248,20 +248,23 @@ class ChatService:
             logger.debug(
                 f"Compaction triggered - max_input_tokens={config.max_input_tokens} threshold={config.compaction_threshold:.2f} history_len={len(history)}"
             )
+            summary = ""
             tokens: list[str] = []
             summary_usage = None
-            full_text = ""
-            async for chunk in self.compaction.compact_stream(
-                history=history,
-                config=config,
-                compaction_api_key=compaction_api_key,
-            ):
-                if chunk.text:
-                    tokens.append(chunk.text)
-                    full_text += chunk.text
-                if chunk.usage:
-                    summary_usage = chunk.usage
-            summary = full_text.strip()
+            if config.compaction_enabled:
+                full_text = ""
+                async for chunk in self.compaction.compact_stream(
+                    history=history,
+                    config=config,
+                    compaction_api_key=compaction_api_key,
+                ):
+                    if chunk.text:
+                        tokens.append(chunk.text)
+                        full_text += chunk.text
+                    if chunk.usage:
+                        summary_usage = chunk.usage
+                summary = full_text.strip()
+
             if summary:
                 compaction_msg = await self.repository.apply_compaction(
                     session=session,
@@ -297,7 +300,7 @@ class ChatService:
                         count=discarded_count,
                     )
                 logger.warning(
-                    f"Compaction summarization produced no output - fell back to chunk_truncate (kept {len(history)}/{original_count})",
+                    f"Compaction summarization produced no output or was disabled - fell back to chunk_truncate (kept {len(history)}/{original_count})",
                 )
 
         system_tokens = self.counter.estimate_system_tokens(

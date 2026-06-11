@@ -16,6 +16,7 @@ class LLMConfig:
     temperature: float = 0.2
     history_limit: int = 500  # TODO: adjust
     compaction_threshold: float = 0.8
+    compaction_enabled: bool = False
 
     def __post_init__(self):
         object.__setattr__(self, "provider", self.provider.strip())
@@ -114,6 +115,13 @@ def validate_llm_config(data: dict) -> dict | None:
     ):
         return {
             "error": "compaction_threshold must be a number between 0.0 and 1.0.",
+            "code": "invalid_config",
+        }
+
+    compaction_enabled = data.get("compaction_enabled", False)
+    if not isinstance(compaction_enabled, bool):
+        return {
+            "error": "compaction_enabled must be a boolean.",
             "code": "invalid_config",
         }
 

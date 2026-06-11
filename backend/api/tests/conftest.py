@@ -19,6 +19,7 @@ DEFAULT_CONFIG = LLMConfig(
     system_prompt="You are a helpful assistant.",
     compaction_provider="openai",
     compaction_model="gpt",
+    compaction_enabled=True,
 )
 
 

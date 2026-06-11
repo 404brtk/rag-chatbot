@@ -1242,3 +1242,32 @@ class TestChatServiceCompaction:
             config=config,
         )
         assert prep.config.max_output_tokens == 359
+
+    @patch.object(ChatService, "_resolve_api_key", return_value="sk-chat")
+    @patch.object(CompactionService, "should_compact", return_value=True)
+    async def test_prepare_generation_skips_summarization_when_compaction_disabled(
+        self, mock_should, mock_resolve
+    ):
+        config = replace(
+            DEFAULT_CONFIG,
+            compaction_enabled=False,
+            max_input_tokens=400,
+            compaction_threshold=0.5,
+        )
+        long_msg = _msg("user", "word " * 400)
+        history = [long_msg] * 6
+        self.mock_repo.list_messages.return_value = history
+        service = ChatService(repository=self.mock_repo)
+        prep = await service._prepare_generation(
+            user=self.mock_user,
+            session_id="test-session",
+            user_text="Hello",
+            config=config,
+        )
+        assert prep.compaction_summary is None
+        self.mock_repo.apply_compaction.assert_not_called()
+        self.mock_repo.truncate_oldest_messages.assert_called_once_with(
+            session_id="test-session",
+            count=5,
+        )
+        assert len(prep.messages) == 2
