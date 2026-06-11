@@ -46,6 +46,7 @@ class _GenerationPrep:
     api_key: str
     messages: list[StoredMessage]
     session: Conversation
+    config: LLMConfig
     compaction_summary: str | None = None
     compaction_message_id: str | None = None
     compaction_tokens: list[str] | None = None
@@ -289,9 +290,33 @@ class ChatService:
                     system_prompt=config.system_prompt,
                     config=config,
                 )
+                discarded_count = original_count - len(history)
+                if discarded_count > 0:
+                    await self.repository.truncate_oldest_messages(
+                        session_id=session_id,
+                        count=discarded_count,
+                    )
                 logger.warning(
                     f"Compaction summarization produced no output - fell back to chunk_truncate (kept {len(history)}/{original_count})",
                 )
+
+        system_tokens = self.counter.estimate_system_tokens(
+            config.system_prompt, config.model
+        )
+        history_tokens = sum(
+            self.counter.estimate_message_tokens(m, config.model) for m in history
+        )
+        new_msg_tokens = self.counter.estimate_message_tokens(new_msg, config.model)
+        total_prompt_tokens = system_tokens + history_tokens + new_msg_tokens + 24
+        remaining_tokens = config.max_input_tokens - total_prompt_tokens
+        dynamic_max_output = max(
+            16, min(config.max_output_tokens, remaining_tokens - 50)
+        )
+        if dynamic_max_output < config.max_output_tokens:
+            config = replace(config, max_output_tokens=dynamic_max_output)
+            logger.debug(
+                f"Dynamically adjusted max_output_tokens to {dynamic_max_output} to fit context headroom."
+            )
 
         return _GenerationPrep(
             clean_user_text=clean_user_text,
@@ -300,6 +325,7 @@ class ChatService:
             api_key=api_key,
             messages=[*history, new_msg],
             session=session,
+            config=config,
             compaction_summary=compaction_summary,
             compaction_message_id=compaction_msg_id,
             compaction_tokens=compaction_tokens,
@@ -335,7 +361,7 @@ class ChatService:
 
         try:
             result = await self.gateway.generate(
-                api_key=prep.api_key, config=config, messages=prep.messages
+                api_key=prep.api_key, config=prep.config, messages=prep.messages
             )
         except ChatServiceError:
             logger.exception(
@@ -398,8 +424,8 @@ class ChatService:
                 session=session,
                 role="user",
                 content=prep.user_message,
-                provider=config.provider,
-                model=config.model,
+                provider=prep.config.provider,
+                model=prep.config.model,
                 raw_question=prep.clean_user_text,
                 context=prep.context_chunks,
             )
@@ -407,7 +433,7 @@ class ChatService:
             assistant_text = ""
             usage_data = None
             async for chunk in self.gateway.generate_stream(
-                api_key=prep.api_key, config=config, messages=prep.messages
+                api_key=prep.api_key, config=prep.config, messages=prep.messages
             ):
                 if chunk.text:
                     assistant_text += chunk.text
@@ -418,14 +444,14 @@ class ChatService:
             if usage_data is None:
                 usage_data = {
                     "prompt_tokens": self.counter.estimate_system_tokens(
-                        config.system_prompt, config.model
+                        prep.config.system_prompt, prep.config.model
                     )
                     + sum(
-                        self.counter.estimate_message_tokens(m, config.model)
+                        self.counter.estimate_message_tokens(m, prep.config.model)
                         for m in prep.messages
                     ),
                     "completion_tokens": self.counter.estimate_text_tokens(
-                        assistant_text, config.model
+                        assistant_text, prep.config.model
                     ),
                 }
 
@@ -433,8 +459,8 @@ class ChatService:
                 session=session,
                 role="assistant",
                 content=assistant_text,
-                provider=config.provider,
-                model=config.model,
+                provider=prep.config.provider,
+                model=prep.config.model,
                 usage=usage_data,
             )
 

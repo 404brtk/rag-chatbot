@@ -55,14 +55,17 @@ class CompactionService:
             "everything that was discussed and decided."
         )
 
-    def _build_summary_config(self, model: str, provider: str) -> LLMConfig:
+    def _build_summary_config(
+        self, model: str, provider: str, max_input_tokens: int
+    ) -> LLMConfig:
+        max_output = min(1024, max_input_tokens // 4)
         return LLMConfig(
             provider=provider,
             model=model,
             system_prompt="You are a conversation summarizer.",
             compaction_provider=provider,
             compaction_model=model,
-            max_output_tokens=1_024,
+            max_output_tokens=max_output,
         )
 
     async def _call_summarizer(
@@ -71,10 +74,11 @@ class CompactionService:
         model: str,
         api_key: str,
         provider: str,
+        max_input_tokens: int,
     ) -> str | None:
         chunks: list[str] = []
         async for chunk in self._call_summarizer_stream(
-            history, model, api_key, provider
+            history, model, api_key, provider, max_input_tokens
         ):
             if chunk.text:
                 chunks.append(chunk.text)
@@ -86,9 +90,10 @@ class CompactionService:
         model: str,
         api_key: str,
         provider: str,
+        max_input_tokens: int,
     ):
         summarization_prompt = self._build_summarization_prompt(history)
-        summary_config = self._build_summary_config(model, provider)
+        summary_config = self._build_summary_config(model, provider, max_input_tokens)
 
         prompt_tokens = self.counter.estimate_text_tokens(summarization_prompt, model)
         system_tokens = self.counter.estimate_system_tokens(
@@ -133,6 +138,7 @@ class CompactionService:
                 config.compaction_model,
                 compaction_api_key,
                 config.compaction_provider,
+                max_input_tokens=config.max_input_tokens,
             )
         except (TemporaryProviderError, PermanentProviderError) as e:
             logger.warning(
@@ -152,6 +158,7 @@ class CompactionService:
                 config.compaction_model,
                 compaction_api_key,
                 config.compaction_provider,
+                max_input_tokens=config.max_input_tokens,
             ):
                 yield chunk
         except (TemporaryProviderError, PermanentProviderError) as e:
@@ -172,7 +179,13 @@ class CompactionService:
         )
         new_tokens = self.counter.estimate_message_tokens(new_message, config.model)
         total = system_tokens + history_tokens + new_tokens + 24
-        threshold = int(config.max_input_tokens * config.compaction_threshold)
+        max_summary_output = min(1024, config.max_input_tokens // 4)
+        headroom = max_summary_output + 200
+        threshold = min(
+            config.max_input_tokens - headroom,
+            int(config.max_input_tokens * config.compaction_threshold),
+        )
+        threshold = max(threshold, config.max_input_tokens // 2)
         decision = total > threshold
         logger.debug(
             f"should_compact calculation - system_tokens={system_tokens}, "

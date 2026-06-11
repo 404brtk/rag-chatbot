@@ -46,14 +46,14 @@ class TestCompactionService:
 
     def test_should_compact_exact_boundary(self):
         msg = _msg("user", "Hello world")
-        config = replace(DEFAULT_CONFIG, compaction_threshold=1.0)
+        config = DEFAULT_CONFIG
         system_tokens = self.counter.estimate_system_tokens(
             config.system_prompt, config.model
         )
         msg_tokens = self.counter.estimate_message_tokens(msg, config.model)
         total = system_tokens + msg_tokens + 24
 
-        exact_boundary = replace(config, max_input_tokens=total)
+        exact_boundary = replace(config, max_input_tokens=2 * total)
         assert not self.service.should_compact(
             system_prompt=config.system_prompt,
             history=[],
@@ -61,7 +61,7 @@ class TestCompactionService:
             config=exact_boundary,
         )
 
-        one_over = replace(config, max_input_tokens=total - 1)
+        one_over = replace(config, max_input_tokens=2 * total - 2)
         assert self.service.should_compact(
             system_prompt=config.system_prompt,
             history=[],

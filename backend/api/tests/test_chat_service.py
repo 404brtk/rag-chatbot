@@ -104,6 +104,7 @@ class TestChatServiceGenerateReply:
         self.mock_repo.apply_compaction = AsyncMock(
             return_value=MagicMock(id="summary-id")
         )
+        self.mock_repo.truncate_oldest_messages = AsyncMock()
         self.mock_user = MagicMock()
         self.mock_session = MagicMock()
         self._session_patch = patch(
@@ -618,6 +619,7 @@ class TestChatServiceGenerateReplyStream:
         self.mock_repo.apply_compaction = AsyncMock(
             return_value=MagicMock(id="summary-id")
         )
+        self.mock_repo.truncate_oldest_messages = AsyncMock()
         self.mock_user = MagicMock()
 
     async def _collect_events(self, service, **kwargs):
@@ -917,6 +919,7 @@ class TestChatServiceCompaction:
         self.mock_repo.apply_compaction = AsyncMock(
             return_value=MagicMock(id="summary-id")
         )
+        self.mock_repo.truncate_oldest_messages = AsyncMock()
         self.mock_user = MagicMock()
         self.mock_session = MagicMock()
         self.mock_session.asave = AsyncMock()
@@ -1042,6 +1045,10 @@ class TestChatServiceCompaction:
         assert prep.compaction_summary is None
         assert prep.compaction_tokens is None
         self.mock_repo.apply_compaction.assert_not_called()
+        self.mock_repo.truncate_oldest_messages.assert_called_once_with(
+            session_id="test-session",
+            count=5,
+        )
         assert len(prep.messages) == 2
         assert prep.messages[0].content.startswith("word ")
 
@@ -1220,3 +1227,20 @@ class TestChatServiceCompaction:
 
         call_config = mock_should.call_args[1]["config"]
         assert call_config.max_input_tokens == 4096
+
+    @patch.object(ChatService, "_resolve_api_key", return_value="sk-chat")
+    @patch.object(CompactionService, "should_compact", return_value=False)
+    async def test_prepare_generation_adjusts_max_output_tokens_dynamically(
+        self, mock_should, mock_resolve
+    ):
+        config = replace(DEFAULT_CONFIG, max_input_tokens=600, max_output_tokens=500)
+        history = [_msg("user", "word " * 150)]
+        self.mock_repo.list_messages.return_value = history
+        service = ChatService(repository=self.mock_repo)
+        prep = await service._prepare_generation(
+            user=self.mock_user,
+            session_id="test-session",
+            user_text="Hello",
+            config=config,
+        )
+        assert prep.config.max_output_tokens == 359
