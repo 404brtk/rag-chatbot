@@ -14,7 +14,10 @@ class TokenCounter:
 
     def estimate_text_tokens(self, text: str, model: str) -> int:
         enc = self._encoding_for_model(model)
-        return len(enc.encode(text))
+        count = len(enc.encode(text))
+        if not model.startswith(("gpt-", "text-embedding-", "claude-", "gemini-")):
+            return int(count * 1.35)
+        return count
 
     def estimate_message_tokens(self, message: StoredMessage, model: str) -> int:
         image_token_cost = 0

@@ -16,6 +16,12 @@ class TestTokenCounter:
         count = self.counter.estimate_text_tokens("Hello", "nonexistent-model-xyz")
         assert count > 0
 
+    def test_estimate_text_tokens_applies_multiplier_for_local_models(self):
+        text = "Hello, world! This is a test string."
+        gpt_count = self.counter.estimate_text_tokens(text, "gpt-4")
+        local_count = self.counter.estimate_text_tokens(text, "llama3-8b")
+        assert local_count == int(gpt_count * 1.35)
+
     def test_estimate_message_tokens_includes_overhead(self):
         msg = _msg("user", "Hello")
         text_tokens = self.counter.estimate_text_tokens("Hello", "gpt-5.5")
