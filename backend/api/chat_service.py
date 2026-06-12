@@ -18,7 +18,6 @@ from .llm_config import (
     PermanentProviderError,
 )
 from .provider_gateway import ProviderGateway
-from .attachments import extract_clean_text
 from .compaction_service import CompactionService
 from .document_service import DocumentService
 from .token_counter import TokenCounter
@@ -40,7 +39,7 @@ class QueryRefinementSchema(BaseModel):
 
 @dataclass(frozen=True, slots=True)
 class _GenerationPrep:
-    clean_user_text: str
+    raw_user_text: str
     user_message: str
     context_chunks: list[dict[str, Any]] | None
     api_key: str
@@ -160,12 +159,11 @@ class ChatService:
         user_text: str,
         config: LLMConfig,
         document_ids: list[str] | None = None,
+        attachments: list[dict] | None = None,
     ):
         raw_user_text = (user_text or "").strip()
         if not raw_user_text:
             raise InvalidInputError("user_text cannot be empty")
-
-        clean_user_text = extract_clean_text(raw_user_text)
 
         api_key = await self._resolve_api_key(user, config.provider)
         compaction_api_key = await self._resolve_api_key(
@@ -175,10 +173,10 @@ class ChatService:
         user_message = raw_user_text
         context_chunks = None
 
-        if document_ids is not None and clean_user_text:
+        if document_ids is not None and raw_user_text:
             refinement = await self._refine_query(
                 user=user,
-                query=clean_user_text,
+                query=raw_user_text,
                 config=config,
                 api_key=api_key,
             )
@@ -187,21 +185,21 @@ class ChatService:
             refined_polish = refinement["refined_polish_query"]
 
             logger.debug(
-                f"Query refined - original='{clean_user_text}' detected_language={detected_language} "
+                f"Query refined - original='{raw_user_text}' detected_language={detected_language} "
                 f"refined_english='{refined_english}' refined_polish='{refined_polish}'"
             )
 
             query_embedding = await sync_to_async(
                 self.document_service.embedding_service.embed_query,
                 thread_sensitive=True,
-            )(clean_user_text)
+            )(raw_user_text)
 
             search_results = await sync_to_async(
                 self.document_service.search,
                 thread_sensitive=True,
             )(
                 user=user,
-                query=clean_user_text,
+                query=raw_user_text,
                 query_embedding=query_embedding,
                 refined_english_query=refined_english,
                 refined_polish_query=refined_polish,
@@ -232,7 +230,25 @@ class ChatService:
         history = await self.repository.list_messages(
             session_id=session_id, limit=config.history_limit, exclude_compacted=True
         )
-        new_msg = StoredMessage(role="user", content=user_message)
+
+        stored_attachments = []
+        if attachments:
+            stored_attachments = [
+                {
+                    "id": att["id"],
+                    "name": att["name"],
+                    "size": att["size"],
+                    "mimeType": att["mimeType"],
+                    "saved_path": f"attachments/{att['id']}",
+                }
+                for att in attachments
+            ]
+
+        new_msg = StoredMessage(
+            role="user",
+            content=user_message,
+            attachments=stored_attachments,
+        )
 
         compaction_summary = None
         compaction_msg_id = None
@@ -322,7 +338,7 @@ class ChatService:
             )
 
         return _GenerationPrep(
-            clean_user_text=clean_user_text,
+            raw_user_text=raw_user_text,
             user_message=user_message,
             context_chunks=context_chunks,
             api_key=api_key,
@@ -353,6 +369,7 @@ class ChatService:
         user_text: str,
         config: LLMConfig,
         document_ids: list[str] | None = None,
+        attachments: list[dict] | None = None,
     ) -> GenerationResult:
         prep = await self._prepare_generation(
             user=user,
@@ -360,6 +377,7 @@ class ChatService:
             user_text=user_text,
             config=config,
             document_ids=document_ids,
+            attachments=attachments,
         )
 
         try:
@@ -384,8 +402,9 @@ class ChatService:
             provider=result.provider,
             model=result.model,
             usage=result.usage,
-            user_raw_question=prep.clean_user_text,
+            user_raw_question=prep.raw_user_text,
             user_context=prep.context_chunks,
+            user_attachments=attachments,
         )
 
         return replace(
@@ -402,6 +421,7 @@ class ChatService:
         user_text: str,
         config: LLMConfig,
         document_ids: list[str] | None = None,
+        attachments: list[dict] | None = None,
     ):
         try:
             prep = await self._prepare_generation(
@@ -410,6 +430,7 @@ class ChatService:
                 user_text=user_text,
                 config=config,
                 document_ids=document_ids,
+                attachments=attachments,
             )
 
             if prep.compaction_summary:
@@ -421,26 +442,31 @@ class ChatService:
 
             session = prep.session
 
-            await self.repository.append_message(
+            user_msg = await self.repository.append_message(
                 session=session,
                 role="user",
                 content=prep.user_message,
                 provider=prep.config.provider,
                 model=prep.config.model,
-                raw_question=prep.clean_user_text,
+                raw_question=prep.raw_user_text,
                 context=prep.context_chunks,
+                attachments=attachments,
             )
 
             assistant_text = ""
             usage_data = None
-            async for chunk in self.gateway.generate_stream(
-                api_key=prep.api_key, config=prep.config, messages=prep.messages
-            ):
-                if chunk.text:
-                    assistant_text += chunk.text
-                    yield StreamEvent(type="token", content=chunk.text)
-                if chunk.usage:
-                    usage_data = chunk.usage
+            try:
+                async for chunk in self.gateway.generate_stream(
+                    api_key=prep.api_key, config=prep.config, messages=prep.messages
+                ):
+                    if chunk.text:
+                        assistant_text += chunk.text
+                        yield StreamEvent(type="token", content=chunk.text)
+                    if chunk.usage:
+                        usage_data = chunk.usage
+            except Exception:
+                await user_msg.adelete()
+                raise
 
             if usage_data is None:
                 usage_data = {
@@ -467,7 +493,7 @@ class ChatService:
 
             title = None
             if not session.title:
-                title = self._compute_title(prep.clean_user_text)
+                title = self._compute_title(prep.raw_user_text)
                 session.title = title
 
             session.last_message_at = timezone.now()

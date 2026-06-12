@@ -1,3 +1,5 @@
+from unittest.mock import patch
+
 from api.token_counter import TokenCounter
 from api.repositories import StoredMessage
 from .conftest import _msg
@@ -18,7 +20,7 @@ class TestTokenCounter:
 
     def test_estimate_text_tokens_applies_multiplier_for_local_models(self):
         text = "Hello, world! This is a test string."
-        gpt_count = self.counter.estimate_text_tokens(text, "gpt-4")
+        gpt_count = self.counter.estimate_text_tokens(text, "gpt-5")
         local_count = self.counter.estimate_text_tokens(text, "llama3-8b")
         assert local_count == int(gpt_count * 1.35)
 
@@ -65,15 +67,59 @@ class TestTokenCounter:
         msg = _msg("user", "Explain")
         base_tokens = self.counter.estimate_message_tokens(msg, "gpt-5.5")
 
-        huge_base64 = "a" * 50000
-        content = (
-            "Explain\n"
-            '=== Attachment: name="img.png" size=50000 mime="image/png" ===\n'
-            f"data:image/png;base64,{huge_base64}\n"
-            "=== End Attachment ==="
+        img_msg = StoredMessage(
+            role="user",
+            content="Explain",
+            attachments=[
+                {
+                    "id": "img.png",
+                    "name": "img.png",
+                    "size": 50000,
+                    "mimeType": "image/png",
+                }
+            ],
         )
-        img_msg = StoredMessage(role="user", content=content)
         img_tokens = self.counter.estimate_message_tokens(img_msg, "gpt-5.5")
 
-        assert img_tokens < base_tokens + 250
-        assert img_tokens > base_tokens + 190
+        assert img_tokens == base_tokens + 200
+
+    @patch("api.token_counter.load_text_attachment")
+    def test_estimate_message_tokens_with_text_attachment(self, mock_load):
+        mock_load.return_value = "hello from file"
+        msg = StoredMessage(
+            role="user",
+            content="Check this file:",
+            attachments=[
+                {
+                    "id": "file.txt",
+                    "name": "file.txt",
+                    "size": 100,
+                    "mimeType": "text/plain",
+                }
+            ],
+        )
+        tokens = self.counter.estimate_message_tokens(msg, "gpt-5")
+        mock_load.assert_called_once_with("file.txt")
+        expected_text = "Check this file:\n--- File: file.txt ---\nhello from file\n----------------"
+        expected_tokens = 3 + self.counter.estimate_text_tokens(expected_text, "gpt-5")
+        assert tokens == expected_tokens
+
+    @patch("api.token_counter.load_text_attachment")
+    def test_estimate_message_tokens_with_text_attachment_fallback(self, mock_load):
+        mock_load.return_value = ""
+        msg = StoredMessage(
+            role="user",
+            content="Check this file:",
+            attachments=[
+                {
+                    "id": "file.txt",
+                    "name": "file.txt",
+                    "size": 100,
+                    "mimeType": "text/plain",
+                }
+            ],
+        )
+        tokens = self.counter.estimate_message_tokens(msg, "gpt-5")
+        expected_text = "Check this file:\n--- File: file.txt ---\nSize: 100 bytes\n----------------"
+        expected_tokens = 3 + self.counter.estimate_text_tokens(expected_text, "gpt-5")
+        assert tokens == expected_tokens

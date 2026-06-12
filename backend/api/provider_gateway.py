@@ -1,4 +1,6 @@
+import base64
 import logging
+import os
 import time
 from typing import Any
 
@@ -7,7 +9,7 @@ import openai
 from django.conf import settings
 from openai import AsyncOpenAI
 
-from .attachments import parse_content
+
 from .llm_config import (
     GenerationResult,
     LLMConfig,
@@ -16,57 +18,54 @@ from .llm_config import (
     TemporaryProviderError,
 )
 from .repositories import StoredMessage
+from .attachments import is_safe_attachment_path, load_text_attachment
 
 logger = logging.getLogger(__name__)
 
 
-def _parse_message_multimodal(content: str) -> list[dict[str, Any]]:
-    parts: list[dict[str, Any]] = []
+def _format_message_content(m: StoredMessage) -> str | list[dict[str, Any]]:
+    if not m.attachments:
+        return m.content
 
-    for segment in parse_content(content):
-        if segment.text is not None:
-            text = segment.text.strip()
-            if text:
-                parts.append({"type": "text", "text": text})
-        elif segment.attachment is not None:
-            att = segment.attachment
-            if att.mime.startswith("image/"):
+    parts: list[dict[str, Any]] = [{"type": "text", "text": m.content}]
+
+    for att in m.attachments:
+        filename = att.get("id", "")
+        if not is_safe_attachment_path(filename):
+            continue
+
+        mime = att.get("mimeType", "")
+        if mime.startswith("image/"):
+            local_path = os.path.join(settings.MEDIA_ROOT, "attachments", filename)
+            if os.path.exists(local_path):
+                with open(local_path, "rb") as image_file:
+                    encoded_string = base64.b64encode(image_file.read()).decode("utf-8")
+                data_url = f"data:{mime};base64,{encoded_string}"
+            else:
+                data_url = f"{settings.MEDIA_URL}attachments/{filename}"
+
+            parts.append(
+                {
+                    "type": "image_url",
+                    "image_url": {"url": data_url},
+                }
+            )
+        else:
+            file_content = load_text_attachment(filename)
+            if file_content:
                 parts.append(
                     {
-                        "type": "image_url",
-                        "image_url": {"url": att.content.strip()},
+                        "type": "text",
+                        "text": f"--- File: {att['name']} ---\n{file_content}\n----------------",
                     }
                 )
             else:
                 parts.append(
                     {
                         "type": "text",
-                        "text": f"--- File: {att.name} ---\n{att.content}\n----------------",
+                        "text": f"--- File: {att['name']} ---\nSize: {att['size']} bytes\n----------------",
                     }
                 )
-
-    if not parts:
-        return [{"type": "text", "text": content}]
-
-    merged_parts = []
-    for part in parts:
-        if part["type"] == "text":
-            if merged_parts and merged_parts[-1]["type"] == "text":
-                merged_parts[-1]["text"] += "\n\n" + part["text"]
-            else:
-                merged_parts.append(part)
-        else:
-            merged_parts.append(part)
-
-    return merged_parts
-
-
-def _format_message_content(content: str, provider: str) -> str | list[dict[str, Any]]:
-    parts = _parse_message_multimodal(content)
-
-    has_image = any(part["type"] == "image_url" for part in parts)
-    if not has_image:
-        return content
 
     return parts
 
@@ -105,7 +104,7 @@ class ProviderGateway:
                 + [
                     {
                         "role": m.role,
-                        "content": _format_message_content(m.content, config.provider),
+                        "content": _format_message_content(m),
                     }
                     for m in messages
                 ],
@@ -176,7 +175,7 @@ class ProviderGateway:
                 + [
                     {
                         "role": m.role,
-                        "content": _format_message_content(m.content, config.provider),
+                        "content": _format_message_content(m),
                     }
                     for m in messages
                 ],

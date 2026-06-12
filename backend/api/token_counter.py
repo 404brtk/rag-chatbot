@@ -1,7 +1,7 @@
 import tiktoken
 
-from .attachments import parse_content
 from .repositories import StoredMessage
+from .attachments import load_text_attachment
 
 
 class TokenCounter:
@@ -21,19 +21,24 @@ class TokenCounter:
 
     def estimate_message_tokens(self, message: StoredMessage, model: str) -> int:
         image_token_cost = 0
-        parts: list[str] = []
+        parts: list[str] = [message.content]
 
-        for segment in parse_content(message.content):
-            if segment.text is not None:
-                parts.append(segment.text)
-            elif segment.attachment is not None:
-                att = segment.attachment
-                if att.mime.startswith("image/"):
+        if message.attachments:
+            for att in message.attachments:
+                mime = att.get("mimeType", "")
+                if mime.startswith("image/"):
                     image_token_cost += 200
                 else:
-                    parts.append(
-                        f"--- File: {att.name} ---\n{att.content}\n----------------"
-                    )
+                    filename = att.get("id", "")
+                    file_content = load_text_attachment(filename)
+                    if file_content:
+                        parts.append(
+                            f"\n--- File: {att['name']} ---\n{file_content}\n----------------"
+                        )
+                    else:
+                        parts.append(
+                            f"\n--- File: {att['name']} ---\nSize: {att['size']} bytes\n----------------"
+                        )
 
         text_to_encode = "".join(parts)
         return 3 + self.estimate_text_tokens(text_to_encode, model) + image_token_cost

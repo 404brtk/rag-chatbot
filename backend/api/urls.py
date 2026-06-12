@@ -10,6 +10,7 @@ from .views import (
     UserApiKeyViewSet,
     ModelListView,
     GetDocsJobViewSet,
+    AttachmentUploadView,
 )
 
 router = DefaultRouter()
@@ -25,6 +26,7 @@ urlpatterns = [
     path("health/", HealthView.as_view(), name="health"),
     path("register/", RegisterView.as_view(), name="register"),
     path("models/", ModelListView.as_view(), name="models"),
+    path("attachments/", AttachmentUploadView.as_view(), name="attachment-upload"),
     path("", include(router.urls)),
     path(
         "conversations/<uuid:conversation_pk>/messages/",

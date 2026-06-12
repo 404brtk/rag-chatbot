@@ -318,40 +318,121 @@ class TestProviderGateway:
         mock_client.get.assert_called_once()
 
     def test_format_message_content_openai_no_images(self):
-        content = "Hello there!"
-        formatted = _format_message_content(content, "openai")
-        assert formatted == content
+        msg = StoredMessage(role="user", content="Hello there!")
+        formatted = _format_message_content(msg)
+        assert formatted == "Hello there!"
 
-    def test_format_message_content_openai_with_images(self):
-        content = (
-            "Look at this:\n"
-            '=== Attachment: name="chart.png" size=500 mime="image/png" ===\n'
-            "data:image/png;base64,abc\n"
-            "=== End Attachment ==="
+    @patch("os.path.exists", return_value=True)
+    @patch("builtins.open")
+    def test_format_message_content_openai_with_images(self, mock_open, mock_exists):
+        mock_file = MagicMock()
+        mock_file.read.return_value = b"abc"
+        mock_open.return_value.__enter__.return_value = mock_file
+
+        msg = StoredMessage(
+            role="user",
+            content="Look at this:",
+            attachments=[
+                {
+                    "id": "chart.png",
+                    "name": "chart.png",
+                    "size": 500,
+                    "mimeType": "image/png",
+                }
+            ],
         )
-        formatted = _format_message_content(content, "openai")
+        formatted = _format_message_content(msg)
         assert isinstance(formatted, list)
         assert len(formatted) == 2
         assert formatted[0] == {"type": "text", "text": "Look at this:"}
         assert formatted[1] == {
             "type": "image_url",
-            "image_url": {"url": "data:image/png;base64,abc"},
+            "image_url": {"url": "data:image/png;base64,YWJj"},
         }
 
-    def test_format_message_content_llamacpp(self):
-        content = (
-            "Look at this:\n"
-            '=== Attachment: name="chart.png" size=500 mime="image/png" ===\n'
-            "data:image/png;base64,abc\n"
-            "=== End Attachment ===\n\n"
-            "Hope it helps."
+    @patch("os.path.exists", return_value=True)
+    @patch("builtins.open")
+    def test_format_message_content_llamacpp(self, mock_open, mock_exists):
+        mock_file = MagicMock()
+        mock_file.read.return_value = b"abc"
+        mock_open.return_value.__enter__.return_value = mock_file
+
+        msg = StoredMessage(
+            role="user",
+            content="Look at this:\nHope it helps.",
+            attachments=[
+                {
+                    "id": "chart.png",
+                    "name": "chart.png",
+                    "size": 500,
+                    "mimeType": "image/png",
+                }
+            ],
         )
-        formatted = _format_message_content(content, "llamacpp")
+        formatted = _format_message_content(msg)
         assert isinstance(formatted, list)
-        assert len(formatted) == 3
+        assert len(formatted) == 2
+        assert formatted[0] == {"type": "text", "text": "Look at this:\nHope it helps."}
+        assert formatted[1] == {
+            "type": "image_url",
+            "image_url": {"url": "data:image/png;base64,YWJj"},
+        }
+
+    @patch("os.path.exists", return_value=False)
+    def test_format_message_content_resolves_local_media_url_fallback(
+        self, mock_exists
+    ):
+        msg = StoredMessage(
+            role="user",
+            content="Look at this:",
+            attachments=[
+                {
+                    "id": "chart-uuid.png",
+                    "name": "chart.png",
+                    "size": 500,
+                    "mimeType": "image/png",
+                }
+            ],
+        )
+        formatted = _format_message_content(msg)
+        assert isinstance(formatted, list)
+        assert len(formatted) == 2
         assert formatted[0] == {"type": "text", "text": "Look at this:"}
         assert formatted[1] == {
             "type": "image_url",
-            "image_url": {"url": "data:image/png;base64,abc"},
+            "image_url": {"url": "/media/attachments/chart-uuid.png"},
         }
-        assert formatted[2] == {"type": "text", "text": "Hope it helps."}
+
+    def test_format_message_content_prevents_path_traversal(self):
+        msg = StoredMessage(
+            role="user",
+            content="Look at this:",
+            attachments=[
+                {
+                    "id": "../etc/passwd",
+                    "name": "passwd",
+                    "size": 500,
+                    "mimeType": "text/plain",
+                },
+                {
+                    "id": "/absolute/path/file.txt",
+                    "name": "absolute",
+                    "size": 500,
+                    "mimeType": "text/plain",
+                },
+                {
+                    "id": "safe-file.txt",
+                    "name": "safe",
+                    "size": 500,
+                    "mimeType": "text/plain",
+                },
+            ],
+        )
+        with patch(
+            "api.provider_gateway.load_text_attachment", return_value="safe content"
+        ) as mock_load:
+            formatted = _format_message_content(msg)
+            mock_load.assert_called_once_with("safe-file.txt")
+
+        assert isinstance(formatted, list)
+        assert len(formatted) == 2

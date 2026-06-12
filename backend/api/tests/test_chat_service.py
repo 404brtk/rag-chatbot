@@ -614,7 +614,9 @@ class TestChatServiceGenerateReplyStream:
         self.mock_repo = MagicMock()
         self.mock_repo.list_messages = AsyncMock(return_value=[])
         self.mock_repo.append_message = AsyncMock(
-            side_effect=lambda **kwargs: MagicMock(id=f"msg-{kwargs['role']}")
+            side_effect=lambda **kwargs: MagicMock(
+                id=f"msg-{kwargs['role']}", adelete=AsyncMock()
+            )
         )
         self.mock_repo.apply_compaction = AsyncMock(
             return_value=MagicMock(id="summary-id")
@@ -908,13 +910,44 @@ class TestChatServiceGenerateReplyStream:
         assert events[0].error_code == "internal_error"
         assert events[0].error_message == "Internal server error"
 
+    @pytest.mark.django_db(transaction=True)
+    @patch("api.chat_service.ProviderGateway.generate_stream")
+    @patch.object(ChatService, "_resolve_api_key", return_value="sk-chat")
+    async def test_deletes_user_message_on_stream_failure(
+        self, mock_resolve, mock_stream, user_a
+    ):
+        async def gen():
+            raise TemporaryProviderError("boom")
+            yield
+
+        mock_stream.return_value = gen()
+        conversation = await Conversation.objects.acreate(user=user_a)
+
+        mock_user_msg = AsyncMock()
+        self.mock_repo.append_message = AsyncMock(return_value=mock_user_msg)
+
+        service = ChatService(repository=self.mock_repo)
+        events = await self._collect_events(
+            service,
+            user=user_a,
+            session_id=str(conversation.id),
+            user_text="Hello",
+            config=DEFAULT_CONFIG,
+        )
+
+        assert len(events) == 1
+        assert events[0].type == "error"
+        mock_user_msg.adelete.assert_called_once()
+
 
 class TestChatServiceCompaction:
     def setup_method(self):
         self.mock_repo = MagicMock()
         self.mock_repo.list_messages = AsyncMock(return_value=[])
         self.mock_repo.append_message = AsyncMock(
-            side_effect=lambda **kwargs: MagicMock(id=f"msg-{kwargs['role']}")
+            side_effect=lambda **kwargs: MagicMock(
+                id=f"msg-{kwargs['role']}", adelete=AsyncMock()
+            )
         )
         self.mock_repo.apply_compaction = AsyncMock(
             return_value=MagicMock(id="summary-id")

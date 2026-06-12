@@ -1,62 +1,45 @@
-from api.attachments import parse_content, extract_clean_text
+from unittest.mock import patch
+
+import pytest
+from django.core.files.uploadedfile import SimpleUploadedFile
+from django.urls import reverse
+from rest_framework import status
 
 
-def test_parse_content_text_only():
-    content = "Hello, world! How are you?"
-    segments = parse_content(content)
-    assert len(segments) == 1
-    assert segments[0].text == content
-    assert segments[0].attachment is None
+@pytest.mark.django_db
+class TestAttachmentUploadView:
+    def test_upload_requires_auth(self, client):
+        url = reverse("attachment-upload")
+        file = SimpleUploadedFile(
+            "test.png", b"fake image content", content_type="image/png"
+        )
+        response = client.post(url, {"file": file}, format="multipart")
+        assert response.status_code == status.HTTP_401_UNAUTHORIZED
 
+    def test_upload_success(self, auth_client_a):
+        url = reverse("attachment-upload")
+        file = SimpleUploadedFile(
+            "test.png", b"fake image content", content_type="image/png"
+        )
 
-def test_parse_content_single_image():
-    content = '=== Attachment: name="avatar.png" size=1024 mime="image/png" ===\ndata:image/png;base64,abcdefg\n=== End Attachment ==='
-    segments = parse_content(content)
-    assert len(segments) == 1
-    assert segments[0].text is None
-    assert segments[0].attachment is not None
+        with patch("api.views.save_local_attachment") as mock_save:
+            mock_save.return_value = {
+                "id": "uuid-name.png",
+                "name": "test.png",
+                "size": 18,
+                "mimeType": "image/png",
+                "saved_path": "attachments/uuid-name.png",
+            }
+            response = auth_client_a.post(url, {"file": file}, format="multipart")
 
-    att = segments[0].attachment
-    assert att.name == "avatar.png"
-    assert att.size == 1024
-    assert att.mime == "image/png"
-    assert att.content == "data:image/png;base64,abcdefg"
+        assert response.status_code == status.HTTP_201_CREATED
+        data = response.json()
+        assert data["name"] == "test.png"
+        assert data["id"] == "uuid-name.png"
+        assert "media/attachments/uuid-name.png" in data["url"]
 
-
-def test_parse_content_mixed():
-    content = (
-        "Check this out:\n\n"
-        '=== Attachment: name="code.py" size=45 mime="text/x-python" ===\nprint("hello")\n=== End Attachment ===\n\n'
-        "and this screenshot:\n\n"
-        '=== Attachment: name="screenshot.jpg" size=1200 mime="image/jpeg" ===\ndata:image/jpeg;base64,xyz\n=== End Attachment ===\n\n'
-        "Let me know what you think."
-    )
-    segments = parse_content(content)
-
-    assert len(segments) == 5
-    assert segments[0].text == "Check this out:\n\n"
-    assert segments[1].attachment is not None
-    assert segments[1].attachment.name == "code.py"
-    assert segments[2].text == "\n\nand this screenshot:\n\n"
-    assert segments[3].attachment is not None
-    assert segments[3].attachment.name == "screenshot.jpg"
-    assert segments[4].text == "\n\nLet me know what you think."
-
-
-def test_extract_clean_text_text_only():
-    content = "Hello world"
-    assert extract_clean_text(content) == "Hello world"
-
-
-def test_extract_clean_text_only_attachments():
-    content = '=== Attachment: name="foo" size=1 mime="text/plain" ===\nbar\n=== End Attachment ==='
-    assert extract_clean_text(content) == ""
-
-
-def test_extract_clean_text_mixed():
-    content = (
-        "Check this out:\n\n"
-        '=== Attachment: name="foo" size=1 mime="text/plain" ===\nbar\n=== End Attachment ===\n\n'
-        "Cool right?"
-    )
-    assert extract_clean_text(content) == "Check this out:\n\n\n\nCool right?"
+    def test_upload_missing_file(self, auth_client_a):
+        url = reverse("attachment-upload")
+        response = auth_client_a.post(url, {}, format="multipart")
+        assert response.status_code == status.HTTP_400_BAD_REQUEST
+        assert response.json()["error"] == "No file uploaded"

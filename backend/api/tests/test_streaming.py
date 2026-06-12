@@ -197,3 +197,43 @@ class TestMessageStreamView:
         assert events[0]["type"] == "token"
         assert events[1]["type"] == "error"
         assert "temporarily unavailable" in events[1]["message"]
+
+    def test_invalid_attachments_returns_400(self, auth_client_a, user_a):
+        conv = Conversation.objects.create(user=user_a)
+        response = auth_client_a.post(
+            stream_url(conv.id),
+            data=json.dumps(
+                {
+                    "content": "Hello",
+                    "provider": "openai",
+                    "model": "gpt",
+                    "attachments": "not-a-list",
+                }
+            ),
+            content_type="application/json",
+        )
+        assert response.status_code == 400
+        body = b"".join(list(response))
+        payload = json.loads(body.decode().removeprefix("data: "))
+        assert payload["type"] == "error"
+        assert payload["code"] == "invalid_attachments"
+
+    def test_attachments_missing_required_keys_returns_400(self, auth_client_a, user_a):
+        conv = Conversation.objects.create(user=user_a)
+        response = auth_client_a.post(
+            stream_url(conv.id),
+            data=json.dumps(
+                {
+                    "content": "Hello",
+                    "provider": "openai",
+                    "model": "gpt",
+                    "attachments": [{"id": "uuid", "name": "file.txt", "size": 100}],
+                }
+            ),
+            content_type="application/json",
+        )
+        assert response.status_code == 400
+        body = b"".join(list(response))
+        payload = json.loads(body.decode().removeprefix("data: "))
+        assert payload["type"] == "error"
+        assert payload["code"] == "invalid_attachments"

@@ -267,6 +267,54 @@ class TestMessageCreation:
         conv.refresh_from_db()
         assert conv.title == ""
 
+    def test_create_message_invalid_attachments_list_returns_400(
+        self, auth_client_a, conversation_a
+    ):
+        url = messages_url(conversation_a.id)
+        response = auth_client_a.post(
+            url,
+            {
+                "content": "Hello",
+                "provider": "openai",
+                "model": "gpt",
+                "attachments": "not-a-list",
+            },
+        )
+        assert response.status_code == status.HTTP_400_BAD_REQUEST
+        assert "attachments" in response.data
+
+    def test_create_message_attachments_missing_required_keys_returns_400(
+        self, auth_client_a, conversation_a
+    ):
+        url = messages_url(conversation_a.id)
+        response = auth_client_a.post(
+            url,
+            {
+                "content": "Hello",
+                "provider": "openai",
+                "model": "gpt",
+                "attachments": [{"id": "uuid", "name": "file.txt", "size": 100}],
+            },
+        )
+        assert response.status_code == status.HTTP_400_BAD_REQUEST
+        assert "attachments" in response.data
+
+    def test_create_message_attachments_non_dict_element_returns_400(
+        self, auth_client_a, conversation_a
+    ):
+        url = messages_url(conversation_a.id)
+        response = auth_client_a.post(
+            url,
+            {
+                "content": "Hello",
+                "provider": "openai",
+                "model": "gpt",
+                "attachments": ["not-a-dict"],
+            },
+        )
+        assert response.status_code == status.HTTP_400_BAD_REQUEST
+        assert "attachments" in response.data
+
 
 @pytest.mark.django_db
 class TestMessageListing:

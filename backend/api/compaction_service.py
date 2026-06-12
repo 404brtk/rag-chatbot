@@ -1,6 +1,5 @@
 import logging
 
-from .attachments import parse_content
 from .llm_config import (
     LLMConfig,
     PermanentProviderError,
@@ -10,24 +9,29 @@ from .llm_config import (
 from .provider_gateway import ProviderGateway
 from .repositories import StoredMessage
 from .token_counter import TokenCounter
+from .attachments import load_text_attachment
 
 logger = logging.getLogger(__name__)
 
 
-def _clean_content_for_summary(content: str) -> str:
-    parts: list[str] = []
+def _clean_content_for_summary(msg: StoredMessage) -> str:
+    parts: list[str] = [msg.content]
 
-    for segment in parse_content(content):
-        if segment.text is not None:
-            parts.append(segment.text)
-        elif segment.attachment is not None:
-            att = segment.attachment
-            if att.mime.startswith("image/"):
-                parts.append(f"[Image Attachment: {att.name}]")
+    if msg.attachments:
+        for att in msg.attachments:
+            mime = att.get("mimeType", "")
+            if mime.startswith("image/"):
+                parts.append(f"\n[Image Attachment: {att['name']}]")
             else:
-                parts.append(
-                    f"[File Attachment: {att.name}]\n--- Content ---\n{att.content}\n---------------"
-                )
+                filename = att.get("id", "")
+                file_content = load_text_attachment(filename)
+
+                if file_content:
+                    parts.append(
+                        f"\n[File Attachment: {att['name']}]\n--- Content ---\n{file_content}\n---------------"
+                    )
+                else:
+                    parts.append(f"\n[File Attachment: {att['name']}]")
 
     return "".join(parts)
 
@@ -41,7 +45,7 @@ class CompactionService:
         lines = []
         for msg in history:
             label = "User" if msg.role == "user" else "Assistant"
-            cleaned_content = _clean_content_for_summary(msg.content)
+            cleaned_content = _clean_content_for_summary(msg)
             lines.append(f"{label}: {cleaned_content}")
         return "\n\n".join(lines)
 

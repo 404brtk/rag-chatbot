@@ -1,15 +1,18 @@
 import asyncio
 import json
 import logging
+from typing import Any
 import httpx
 
 from asgiref.sync import async_to_sync, sync_to_async
+from django.conf import settings
 from django.http import StreamingHttpResponse, JsonResponse
 from django.shortcuts import get_object_or_404, aget_object_or_404
 from django.utils.decorators import method_decorator
 from django.views import View
 from django.views.decorators.csrf import csrf_exempt
 from rest_framework import exceptions, generics, mixins, permissions, viewsets, status
+from rest_framework.views import APIView
 from rest_framework.response import Response
 from django.db import transaction
 from django.utils import timezone
@@ -17,6 +20,7 @@ from rest_framework_simplejwt.authentication import JWTAuthentication
 
 from .document_service import DocumentService
 from .models import Conversation, DocumentLanguage, GetDocsJob
+from .attachments import save_local_attachment
 from .pagination import (
     ConversationCursorPagination,
     MessageCursorPagination,
@@ -65,6 +69,20 @@ def _sse_error(message: str, code: str | None = None) -> list[str]:
     if code:
         payload["code"] = code
     return [f"data: {json.dumps(payload)}\n\n"]
+
+
+def validate_attachments(attachments: Any) -> str | None:
+    if attachments is None:
+        return None
+    if not isinstance(attachments, list):
+        return "Attachments must be a list."
+    for idx, att in enumerate(attachments):
+        if not isinstance(att, dict):
+            return f"Attachment at index {idx} is not a dictionary."
+        for field in ("id", "name", "size", "mimeType"):
+            if field not in att:
+                return f"Attachment at index {idx} is missing required field '{field}'."
+    return None
 
 
 class HealthView(View):
@@ -131,6 +149,14 @@ class MessageViewSet(
             )
 
         document_ids = request.data.get("document_ids")
+        attachments = request.data.get("attachments", [])
+
+        att_error = validate_attachments(attachments)
+        if att_error:
+            return Response(
+                {"attachments": [att_error]},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
 
         if document_ids is not None:
             if not isinstance(document_ids, list):
@@ -164,6 +190,7 @@ class MessageViewSet(
                 user_text=user_text,
                 config=config,
                 document_ids=document_ids,
+                attachments=attachments,
             )
         except MissingApiKeyError as e:
             return Response(
@@ -254,6 +281,16 @@ class MessageStreamView(View):
                 status=400,
             )
 
+        attachments = body.get("attachments", [])
+
+        att_error = validate_attachments(attachments)
+        if att_error:
+            return StreamingHttpResponse(
+                _sse_error(att_error, "invalid_attachments"),
+                content_type="text/event-stream",
+                status=400,
+            )
+
         validation_error = validate_llm_config(body)
         if validation_error:
             return StreamingHttpResponse(
@@ -284,6 +321,7 @@ class MessageStreamView(View):
                     user_text=user_text,
                     config=config,
                     document_ids=document_ids,
+                    attachments=attachments,
                 ):
                     payload = {"type": event.type}
                     if event.type == "token":
@@ -518,3 +556,30 @@ class GetDocsJobViewSet(
 
         response_serializer = self.get_serializer(get_docs_job)
         return Response(response_serializer.data, status=status.HTTP_201_CREATED)
+
+
+class AttachmentUploadView(APIView):
+    permission_classes = [permissions.IsAuthenticated]
+
+    def post(self, request):
+        if "file" not in request.FILES:
+            return Response(
+                {"error": "No file uploaded"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        attachment_data = save_local_attachment(request.FILES["file"])
+        url = request.build_absolute_uri(
+            f"{settings.MEDIA_URL}{attachment_data['saved_path']}"
+        )
+
+        return Response(
+            {
+                "id": attachment_data["id"],
+                "name": attachment_data["name"],
+                "size": attachment_data["size"],
+                "mimeType": attachment_data["mimeType"],
+                "url": url,
+            },
+            status=status.HTTP_201_CREATED,
+        )

@@ -1,64 +1,40 @@
-import re
-from dataclasses import dataclass
+import os
+import uuid
+from django.conf import settings
+from django.core.files.storage import default_storage
 
 
-_ATTACHMENT_PATTERN = re.compile(
-    r'=== Attachment:\s*name="([^"]*)"\s*size=(\d+)\s*mime="([^"]*)"\s*===\n([\s\S]*?)\n=== End Attachment ==='
-)
+def save_local_attachment(file) -> dict:
+    ext = os.path.splitext(file.name)[1]
+    unique_name = f"{uuid.uuid4()}{ext}"
+    saved_path = default_storage.save(f"attachments/{unique_name}", file)
+    return {
+        "id": unique_name,
+        "name": file.name,
+        "size": file.size,
+        "mimeType": file.content_type,
+        "saved_path": saved_path,
+    }
 
 
-@dataclass
-class Attachment:
-    name: str
-    size: int
-    mime: str
-    content: str
+def is_safe_attachment_path(filename: str) -> bool:
+    if not filename:
+        return False
+    if "/" in filename or "\\" in filename or ".." in filename:
+        return False
+    if os.path.basename(filename) != filename:
+        return False
+    return True
 
 
-@dataclass
-class ContentSegment:
-    text: str | None = None
-    attachment: Attachment | None = None
-
-
-def parse_content(content: str) -> list[ContentSegment]:
-    segments: list[ContentSegment] = []
-    last_idx = 0
-
-    for match in _ATTACHMENT_PATTERN.finditer(content):
-        start, end = match.span()
-        text_before = content[last_idx:start]
-        if text_before:
-            segments.append(ContentSegment(text=text_before))
-
-        name, size_str, mime, file_content = match.groups()
-        segments.append(
-            ContentSegment(
-                attachment=Attachment(
-                    name=name,
-                    size=int(size_str),
-                    mime=mime,
-                    content=file_content,
-                )
-            )
-        )
-
-        last_idx = end
-
-    text_remaining = content[last_idx:]
-    if text_remaining:
-        segments.append(ContentSegment(text=text_remaining))
-
-    if not segments:
-        segments.append(ContentSegment(text=content))
-
-    return segments
-
-
-def extract_clean_text(content: str) -> str:
-    segments = parse_content(content)
-    text_parts = []
-    for s in segments:
-        if s.text is not None:
-            text_parts.append(s.text)
-    return "".join(text_parts).strip()
+def load_text_attachment(filename: str) -> str:
+    if not is_safe_attachment_path(filename):
+        return ""
+    local_path = os.path.join(settings.MEDIA_ROOT, "attachments", filename)
+    if os.path.exists(local_path):
+        try:
+            with open(local_path, "r", encoding="utf-8", errors="ignore") as f:
+                return f.read(1024 * 100)
+        except Exception:
+            pass
+    return ""

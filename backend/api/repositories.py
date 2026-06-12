@@ -5,7 +5,7 @@ from asgiref.sync import sync_to_async
 from django.db import transaction
 from django.utils import timezone
 
-from .models import Message, Conversation
+from .models import Message, Conversation, MessageAttachment
 
 
 @dataclass(frozen=True, slots=True)
@@ -14,6 +14,7 @@ class StoredMessage:
     content: str
     created_at: datetime | None = None
     is_compaction_summary: bool = False
+    attachments: list[dict] | None = None
 
 
 class DjangoMessageRepository:
@@ -29,17 +30,6 @@ class DjangoMessageRepository:
             )
             .order_by("-created_at")
         )
-
-    def _rows_to_stored_messages(self, rows) -> list[StoredMessage]:
-        return [
-            StoredMessage(
-                role="assistant" if row.role == Message.Role.AI else row.role,
-                content=row.content,
-                created_at=row.created_at,
-                is_compaction_summary=row.is_compaction_summary,
-            )
-            for row in rows
-        ]
 
     def list_messages(
         self,
@@ -59,7 +49,30 @@ class DjangoMessageRepository:
         rows = list(qs)
         rows.reverse()
 
-        return self._rows_to_stored_messages(rows)
+        attachments_by_message = {}
+        if rows:
+            attachments = MessageAttachment.objects.filter(message__in=rows)
+            for att in attachments:
+                attachments_by_message.setdefault(att.message_id, []).append(
+                    {
+                        "id": att.file_id,
+                        "name": att.name,
+                        "size": att.size,
+                        "mimeType": att.mime_type,
+                        "saved_path": att.saved_path,
+                    }
+                )
+
+        return [
+            StoredMessage(
+                role="assistant" if row.role == Message.Role.AI else row.role,
+                content=row.content,
+                created_at=row.created_at,
+                is_compaction_summary=row.is_compaction_summary,
+                attachments=attachments_by_message.get(row.id, []),
+            )
+            for row in rows
+        ]
 
     def append_message(
         self,
@@ -73,10 +86,11 @@ class DjangoMessageRepository:
         model: str | None = None,
         usage: dict | None = None,
         is_compaction_summary: bool = False,
+        attachments: list[dict] | None = None,
     ) -> Message:
         db_role = Message.Role.AI if role == "assistant" else Message.Role.USER
 
-        return Message.objects.create(
+        msg = Message.objects.create(
             conversation=session,
             role=db_role,
             content=content,
@@ -87,6 +101,22 @@ class DjangoMessageRepository:
             usage=usage,
             is_compaction_summary=is_compaction_summary,
         )
+
+        if attachments:
+            attachment_objs = [
+                MessageAttachment(
+                    message=msg,
+                    file_id=att["id"],
+                    name=att["name"],
+                    size=att["size"],
+                    mime_type=att["mimeType"],
+                    saved_path=f"attachments/{att['id']}",
+                )
+                for att in attachments
+            ]
+            MessageAttachment.objects.bulk_create(attachment_objs)
+
+        return msg
 
     def append_message_pair(
         self,
@@ -99,6 +129,7 @@ class DjangoMessageRepository:
         provider: str,
         model: str,
         usage: dict | None,
+        user_attachments: list[dict] | None = None,
     ) -> tuple[Message, Message]:
         now = timezone.now()
         with transaction.atomic():
@@ -112,6 +143,7 @@ class DjangoMessageRepository:
                 context=user_context,
                 provider=provider,
                 model=model,
+                attachments=user_attachments,
             )
             assistant_msg = self.append_message(
                 session=session,
@@ -187,7 +219,30 @@ class AsyncDjangoMessageRepository:
         rows = [row async for row in qs]
         rows.reverse()
 
-        return self._sync_repo._rows_to_stored_messages(rows)
+        attachments_by_message = {}
+        if rows:
+            attachments_qs = MessageAttachment.objects.filter(message__in=rows)
+            async for att in attachments_qs:
+                attachments_by_message.setdefault(att.message_id, []).append(
+                    {
+                        "id": att.file_id,
+                        "name": att.name,
+                        "size": att.size,
+                        "mimeType": att.mime_type,
+                        "saved_path": att.saved_path,
+                    }
+                )
+
+        return [
+            StoredMessage(
+                role="assistant" if row.role == Message.Role.AI else row.role,
+                content=row.content,
+                created_at=row.created_at,
+                is_compaction_summary=row.is_compaction_summary,
+                attachments=attachments_by_message.get(row.id, []),
+            )
+            for row in rows
+        ]
 
     async def append_message(
         self,
@@ -201,10 +256,11 @@ class AsyncDjangoMessageRepository:
         model: str | None = None,
         usage: dict | None = None,
         is_compaction_summary: bool = False,
+        attachments: list[dict] | None = None,
     ) -> Message:
         db_role = Message.Role.AI if role == "assistant" else Message.Role.USER
 
-        return await Message.objects.acreate(
+        msg = await Message.objects.acreate(
             conversation=session,
             role=db_role,
             content=content,
@@ -215,6 +271,22 @@ class AsyncDjangoMessageRepository:
             usage=usage,
             is_compaction_summary=is_compaction_summary,
         )
+
+        if attachments:
+            attachment_objs = [
+                MessageAttachment(
+                    message=msg,
+                    file_id=att["id"],
+                    name=att["name"],
+                    size=att["size"],
+                    mime_type=att["mimeType"],
+                    saved_path=f"attachments/{att['id']}",
+                )
+                for att in attachments
+            ]
+            await MessageAttachment.objects.abulk_create(attachment_objs)
+
+        return msg
 
     async def append_message_pair(
         self,
@@ -227,6 +299,7 @@ class AsyncDjangoMessageRepository:
         provider: str,
         model: str,
         usage: dict | None,
+        user_attachments: list[dict] | None = None,
     ) -> tuple[Message, Message]:
         return await sync_to_async(
             self._sync_repo.append_message_pair,
@@ -240,6 +313,7 @@ class AsyncDjangoMessageRepository:
             provider=provider,
             model=model,
             usage=usage,
+            user_attachments=user_attachments,
         )
 
     async def compact_messages(self, session: Conversation) -> int:
