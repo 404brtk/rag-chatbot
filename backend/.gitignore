@@ -20,3 +20,5 @@ wheels/
 
 # macOS
 .DS_Store
+
+media/
