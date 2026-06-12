@@ -1,7 +1,15 @@
 from django.contrib.auth import get_user_model
 from django.contrib.auth.password_validation import validate_password
+from django.conf import settings
 from rest_framework import serializers
-from .models import Conversation, Document, Message, UserApiKey, GetDocsJob
+from .models import (
+    Conversation,
+    Document,
+    Message,
+    UserApiKey,
+    GetDocsJob,
+    MessageAttachment,
+)
 
 User = get_user_model()
 
@@ -26,7 +34,32 @@ class RegisterSerializer(serializers.ModelSerializer):
         return User.objects.create_user(**validated_data)
 
 
+class MessageAttachmentSerializer(serializers.ModelSerializer):
+    id = serializers.CharField(source="file_id")
+    mimeType = serializers.CharField(source="mime_type")
+    url = serializers.SerializerMethodField()
+    kind = serializers.SerializerMethodField()
+
+    class Meta:
+        model = MessageAttachment
+        fields = ["id", "name", "size", "mimeType", "url", "kind"]
+
+    def get_url(self, obj):
+        request = self.context.get("request")
+        url_path = f"{settings.MEDIA_URL}{obj.saved_path}"
+        if request is not None:
+            return request.build_absolute_uri(url_path)
+        return url_path
+
+    def get_kind(self, obj):
+        if obj.mime_type.startswith("image/"):
+            return "image"
+        return "document"
+
+
 class MessageSerializer(serializers.ModelSerializer):
+    attachments = MessageAttachmentSerializer(many=True, read_only=True)
+
     class Meta:
         model = Message
         fields = [
@@ -42,6 +75,7 @@ class MessageSerializer(serializers.ModelSerializer):
             "truncated",
             "is_compaction_summary",
             "created_at",
+            "attachments",
         ]
         read_only_fields = [
             "id",
@@ -54,6 +88,7 @@ class MessageSerializer(serializers.ModelSerializer):
             "truncated",
             "is_compaction_summary",
             "created_at",
+            "attachments",
         ]
 
 

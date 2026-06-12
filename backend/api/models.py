@@ -1,10 +1,13 @@
 import uuid
-from django.db import models
+from django.db import models, transaction
 from django.contrib.auth.models import AbstractUser, BaseUserManager
 from django.contrib.postgres.indexes import GinIndex
 from django.contrib.postgres.search import SearchVectorField
 from django.utils import timezone
 from pgvector.django import HnswIndex, VectorField
+from django.db.models.signals import post_delete
+from django.dispatch import receiver
+from django.core.files.storage import default_storage
 
 from django.conf import settings
 from .fields import EncryptedTextField
@@ -141,6 +144,30 @@ class Message(UUIDModel):
 
     def __str__(self):
         return f"{self.role}: {self.content[:50]}"
+
+
+class MessageAttachment(UUIDModel):
+    message = models.ForeignKey(
+        Message, on_delete=models.CASCADE, related_name="attachments"
+    )
+    file_id = models.CharField(max_length=255)
+    name = models.CharField(max_length=255)
+    size = models.BigIntegerField()
+    mime_type = models.CharField(max_length=127)
+    saved_path = models.CharField(max_length=512)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["created_at"]
+
+    def __str__(self):
+        return f"{self.name} ({self.file_id})"
+
+
+@receiver(post_delete, sender=MessageAttachment)
+def delete_message_attachment_file(sender, instance, **kwargs):
+    if instance.saved_path:
+        transaction.on_commit(lambda: default_storage.delete(instance.saved_path))
 
 
 class DocumentLanguage(models.TextChoices):

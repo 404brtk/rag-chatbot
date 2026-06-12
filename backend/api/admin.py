@@ -8,6 +8,7 @@ from .models import (
     Message,
     UserApiKey,
     GetDocsJob,
+    MessageAttachment,
 )
 
 
@@ -42,6 +43,11 @@ class ConversationAdmin(admin.ModelAdmin):
     ordering = ("-last_message_at",)
 
 
+class MessageAttachmentInline(admin.TabularInline):
+    model = MessageAttachment
+    extra = 0
+
+
 @admin.register(Message)
 class MessageAdmin(admin.ModelAdmin):
     list_display = (
@@ -63,6 +69,16 @@ class MessageAdmin(admin.ModelAdmin):
     )
     search_fields = ("content", "raw_question")
     list_select_related = ("conversation",)
+    ordering = ("-created_at",)
+    inlines = [MessageAttachmentInline]
+
+
+@admin.register(MessageAttachment)
+class MessageAttachmentAdmin(admin.ModelAdmin):
+    list_display = ("name", "message", "file_id", "mime_type", "size", "created_at")
+    list_filter = ("mime_type",)
+    search_fields = ("name", "file_id", "message__content")
+    list_select_related = ("message",)
     ordering = ("-created_at",)
 
 
