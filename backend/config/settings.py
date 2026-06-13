@@ -53,7 +53,9 @@ INSTALLED_APPS = [
     "rest_framework",
     "rest_framework_simplejwt",
     "rest_framework_simplejwt.token_blacklist",
-    "api",
+    "accounts",
+    "chat",
+    "documents",
 ]
 
 MIDDLEWARE = [
@@ -134,7 +136,7 @@ STATIC_URL = "static/"
 MEDIA_URL = "media/"
 MEDIA_ROOT = BASE_DIR / "media"
 
-AUTH_USER_MODEL = "api.User"
+AUTH_USER_MODEL = "accounts.User"
 
 REST_FRAMEWORK = {
     "DEFAULT_AUTHENTICATION_CLASSES": (
