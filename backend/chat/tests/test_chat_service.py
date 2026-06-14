@@ -153,6 +153,29 @@ class TestChatServiceGenerateReply:
 
     @patch("chat.chat_service.ProviderGateway.generate", new_callable=AsyncMock)
     @patch.object(ChatService, "_resolve_api_key", return_value="sk-chat")
+    @patch.object(ChatService, "_cleanup_attachments")
+    async def test_cleanup_attachments_called_on_generate_error(
+        self, mock_cleanup, mock_resolve, mock_generate
+    ):
+        mock_generate.side_effect = Exception("Generate failed")
+        self.mock_repo.list_messages.return_value = []
+        attachments = [
+            {"id": "file.txt", "name": "file.txt", "size": 10, "mimeType": "text/plain"}
+        ]
+
+        service = ChatService(repository=self.mock_repo)
+        with pytest.raises(Exception, match="Generate failed"):
+            await service.generate_reply(
+                user=self.mock_user,
+                session_id="test-session",
+                user_text="Hello",
+                config=DEFAULT_CONFIG,
+                attachments=attachments,
+            )
+        mock_cleanup.assert_called_once_with(attachments)
+
+    @patch("chat.chat_service.ProviderGateway.generate", new_callable=AsyncMock)
+    @patch.object(ChatService, "_resolve_api_key", return_value="sk-chat")
     async def test_strips_whitespace_from_user_text(self, mock_resolve, mock_generate):
         mock_generate.return_value = GenerationResult(
             text="Hi!",
@@ -1058,13 +1081,13 @@ class TestChatServiceCompaction:
 
         mock_compact_stream = MagicMock(return_value=_empty_gen())
         with patch.object(CompactionService, "compact_stream", mock_compact_stream):
-            long_msg = _msg("user", "word " * 400)
+            long_msg = _msg("user", "word " * 120)
             history = [long_msg] * 6
             self.mock_repo.list_messages.return_value = history
             service = ChatService(repository=self.mock_repo)
             config = replace(
                 DEFAULT_CONFIG,
-                max_input_tokens=400,
+                max_input_tokens=600,
                 compaction_threshold=0.5,
             )
             prep = await service._prepare_generation(
@@ -1283,10 +1306,10 @@ class TestChatServiceCompaction:
         config = replace(
             DEFAULT_CONFIG,
             compaction_enabled=False,
-            max_input_tokens=400,
+            max_input_tokens=600,
             compaction_threshold=0.5,
         )
-        long_msg = _msg("user", "word " * 400)
+        long_msg = _msg("user", "word " * 120)
         history = [long_msg] * 6
         self.mock_repo.list_messages.return_value = history
         service = ChatService(repository=self.mock_repo)
@@ -1303,3 +1326,45 @@ class TestChatServiceCompaction:
             count=5,
         )
         assert len(prep.messages) == 2
+
+
+class TestChatServiceCleanupAttachments:
+    @patch("chat.chat_service.default_storage.delete")
+    def test_cleanup_attachments_success(self, mock_delete):
+        attachments = [
+            {
+                "id": "file1.txt",
+                "name": "file1.txt",
+                "size": 100,
+                "mimeType": "text/plain",
+            },
+            {
+                "id": "file2.png",
+                "name": "file2.png",
+                "size": 200,
+                "mimeType": "image/png",
+            },
+        ]
+        ChatService._cleanup_attachments(attachments)
+        assert mock_delete.call_count == 2
+        mock_delete.assert_any_call("attachments/file1.txt")
+        mock_delete.assert_any_call("attachments/file2.png")
+
+    @patch("chat.chat_service.default_storage.delete")
+    def test_cleanup_attachments_unsafe_path(self, mock_delete):
+        attachments = [
+            {
+                "id": "../file1.txt",
+                "name": "file1.txt",
+                "size": 100,
+                "mimeType": "text/plain",
+            },
+        ]
+        ChatService._cleanup_attachments(attachments)
+        mock_delete.assert_not_called()
+
+    @patch("chat.chat_service.default_storage.delete")
+    def test_cleanup_attachments_empty(self, mock_delete):
+        ChatService._cleanup_attachments([])
+        ChatService._cleanup_attachments(None)
+        mock_delete.assert_not_called()

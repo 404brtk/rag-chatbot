@@ -6,6 +6,9 @@ from pydantic import BaseModel, Field, ConfigDict
 from asgiref.sync import sync_to_async
 from django.conf import settings
 from django.utils import timezone
+from django.core.files.storage import default_storage
+
+from .attachments import is_safe_attachment_path
 
 from core.exceptions import (
     ChatServiceError,
@@ -84,6 +87,18 @@ class ChatService:
                 f"{result.chunk_content}"
             )
         return "\n\n".join(chunks)
+
+    @staticmethod
+    def _cleanup_attachments(attachments: list[dict] | None) -> None:
+        if not attachments:
+            return
+        for att in attachments:
+            filename = att.get("id")
+            if filename and is_safe_attachment_path(filename):
+                try:
+                    default_storage.delete(f"attachments/{filename}")
+                except Exception:
+                    pass
 
     async def _refine_query(
         self,
@@ -331,6 +346,14 @@ class ChatService:
         new_msg_tokens = self.counter.estimate_message_tokens(new_msg, config.model)
         total_prompt_tokens = system_tokens + history_tokens + new_msg_tokens + 24
         remaining_tokens = config.max_input_tokens - total_prompt_tokens
+
+        if remaining_tokens < 100:
+            raise InvalidInputError(
+                f"The message is too long for the model's context window. "
+                f"Estimated prompt tokens: {total_prompt_tokens}, limit: {config.max_input_tokens}. "
+                f"Please reduce your message length or attachment size."
+            )
+
         dynamic_max_output = max(
             16, min(config.max_output_tokens, remaining_tokens - 50)
         )
@@ -374,47 +397,49 @@ class ChatService:
         document_ids: list[str] | None = None,
         attachments: list[dict] | None = None,
     ) -> GenerationResult:
-        prep = await self._prepare_generation(
-            user=user,
-            session_id=session_id,
-            user_text=user_text,
-            config=config,
-            document_ids=document_ids,
-            attachments=attachments,
-        )
-
         try:
+            prep = await self._prepare_generation(
+                user=user,
+                session_id=session_id,
+                user_text=user_text,
+                config=config,
+                document_ids=document_ids,
+                attachments=attachments,
+            )
+
             result = await self.gateway.generate(
                 api_key=prep.api_key, config=prep.config, messages=prep.messages
             )
-        except ChatServiceError:
-            logger.exception(
-                "LLM generation failed",
-                extra={
-                    "session_id": str(session_id),
-                    "provider": config.provider,
-                    "model": config.model,
-                },
+
+            user_msg, assistant_msg = await self.repository.append_message_pair(
+                session_id=session_id,
+                user_content=prep.user_message,
+                assistant_content=result.text,
+                provider=result.provider,
+                model=result.model,
+                usage=result.usage,
+                user_raw_question=prep.raw_user_text,
+                user_context=prep.context_chunks,
+                user_attachments=attachments,
             )
+
+            return replace(
+                result,
+                user_message_id=str(user_msg.id),
+                assistant_message_id=str(assistant_msg.id),
+            )
+        except Exception as e:
+            self._cleanup_attachments(attachments)
+            if not isinstance(e, ChatServiceError):
+                logger.exception(
+                    "Unexpected error in generate_reply",
+                    extra={
+                        "session_id": str(session_id),
+                        "provider": config.provider,
+                        "model": config.model,
+                    },
+                )
             raise
-
-        user_msg, assistant_msg = await self.repository.append_message_pair(
-            session_id=session_id,
-            user_content=prep.user_message,
-            assistant_content=result.text,
-            provider=result.provider,
-            model=result.model,
-            usage=result.usage,
-            user_raw_question=prep.raw_user_text,
-            user_context=prep.context_chunks,
-            user_attachments=attachments,
-        )
-
-        return replace(
-            result,
-            user_message_id=str(user_msg.id),
-            assistant_message_id=str(assistant_msg.id),
-        )
 
     async def generate_reply_stream(
         self,
@@ -518,6 +543,7 @@ class ChatService:
             )
 
         except ChatServiceError as e:
+            self._cleanup_attachments(attachments)
             code_map = {
                 InvalidInputError: "invalid_input",
                 MissingApiKeyError: "missing_api_key",
@@ -530,6 +556,7 @@ class ChatService:
                 error_code=code_map.get(type(e), "unknown"),
             )
         except Exception:
+            self._cleanup_attachments(attachments)
             logger.exception("Unexpected error in generate_reply_stream")
             yield StreamEvent(
                 type="error",
