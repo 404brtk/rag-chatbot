@@ -28,7 +28,7 @@ default-groups = ["dev", "embeddings"]
 
 [tool.pytest.ini_options]
 DJANGO_SETTINGS_MODULE = "config.settings"
-testpaths = ["api/tests"]
+testpaths = ["accounts/tests", "chat/tests", "documents/tests"]
 python_files = ["tests.py", "test_*.py", "*_tests.py"]
 asyncio_mode = "auto"
 filterwarnings = [
