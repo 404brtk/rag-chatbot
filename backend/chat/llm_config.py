@@ -6,10 +6,10 @@ from .repositories import StoredMessage
 
 @dataclass(frozen=True, slots=True)
 class LLMConfig:
-    provider: Literal["openai", "llamacpp"]
+    provider: Literal["openai", "llamacpp", "gemini"]
     model: str
     system_prompt: str
-    compaction_provider: Literal["openai", "llamacpp"]
+    compaction_provider: Literal["openai", "llamacpp", "gemini"]
     compaction_model: str
     max_input_tokens: int = 12_000  # TODO: adjust
     max_output_tokens: int = 4_096  # TODO: adjust
@@ -28,7 +28,7 @@ class LLMConfig:
         object.__setattr__(self, "compaction_model", self.compaction_model.strip())
 
 
-SUPPORTED_PROVIDERS = {"openai", "llamacpp"}
+SUPPORTED_PROVIDERS = ["openai", "llamacpp", "gemini"]
 
 
 def validate_llm_config(data: dict) -> dict | None:
@@ -51,7 +51,7 @@ def validate_llm_config(data: dict) -> dict | None:
         }
     if provider not in SUPPORTED_PROVIDERS:
         return {
-            "error": f"Unsupported provider: {provider}. Supported: {', '.join(sorted(SUPPORTED_PROVIDERS))}.",
+            "error": f"Unsupported provider: {provider}. Supported: {', '.join(SUPPORTED_PROVIDERS)}.",
             "code": "invalid_config",
         }
 
@@ -90,7 +90,7 @@ def validate_llm_config(data: dict) -> dict | None:
         compaction_provider = compaction_provider.strip()
         if compaction_provider and compaction_provider not in SUPPORTED_PROVIDERS:
             return {
-                "error": f"Unsupported compaction provider: {compaction_provider}. Supported: {', '.join(sorted(SUPPORTED_PROVIDERS))}.",
+                "error": f"Unsupported compaction provider: {compaction_provider}. Supported: {', '.join(SUPPORTED_PROVIDERS)}.",
                 "code": "invalid_config",
             }
 

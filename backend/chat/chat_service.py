@@ -632,6 +632,10 @@ class ChatService:
         if openai_models:
             models["openai"] = openai_models
 
+        gemini_models = list(getattr(settings, "GEMINI_MODELS", []))
+        if gemini_models:
+            models["gemini"] = gemini_models
+
         try:
             raw = await ProviderGateway.discover_llamacpp_models()
             llamacpp_models = [m["id"] for m in raw]

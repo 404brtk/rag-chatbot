@@ -175,6 +175,9 @@ HYBRID_RETRIEVAL_POOL = 50
 LLAMACPP_BASE_URL = env.str("LLAMACPP_BASE_URL", default="http://localhost:8080")
 
 OPENAI_MODELS = env.list("OPENAI_MODELS", default=["gpt-5.4-mini"])
+GEMINI_MODELS = env.list(
+    "GEMINI_MODELS", default=["gemini-3.1-flash-lite", "gemini-3-flash-preview"]
+)
 
 CORS_ALLOWED_ORIGINS = env.list("CORS_ALLOWED_ORIGINS", default=[])
 CORS_ALLOW_ALL_ORIGINS = DEBUG

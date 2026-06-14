@@ -5,9 +5,14 @@ import openai
 import pytest
 
 from chat.repositories import StoredMessage
-from chat.provider_gateway import ProviderGateway, _format_message_content
+from chat.provider_gateway import (
+    ProviderGateway,
+    _build_openai_messages,
+    _build_gemini_messages,
+)
 from chat.llm_config import ProviderChunk
 from core.exceptions import TemporaryProviderError, PermanentProviderError
+from google.genai.errors import APIError, ClientError
 
 from conftest import DEFAULT_CONFIG
 
@@ -314,122 +319,422 @@ class TestProviderGateway:
         ]
         mock_client.get.assert_called_once()
 
-    def test_format_message_content_openai_no_images(self):
-        msg = StoredMessage(role="user", content="Hello there!")
-        formatted = _format_message_content(msg)
-        assert formatted == "Hello there!"
+    def test_build_openai_messages_no_attachments(self):
+        msgs = [StoredMessage(role="user", content="Hello there!")]
+        result = _build_openai_messages(msgs)
+        assert result == [{"role": "user", "content": "Hello there!"}]
 
     @patch("os.path.exists", return_value=True)
     @patch("builtins.open")
-    def test_format_message_content_openai_with_images(self, mock_open, mock_exists):
+    def test_build_openai_messages_with_images(self, mock_open, mock_exists):
         mock_file = MagicMock()
         mock_file.read.return_value = b"abc"
         mock_open.return_value.__enter__.return_value = mock_file
 
-        msg = StoredMessage(
-            role="user",
-            content="Look at this:",
-            attachments=[
-                {
-                    "id": "chart.png",
-                    "name": "chart.png",
-                    "size": 500,
-                    "mimeType": "image/png",
-                }
-            ],
-        )
-        formatted = _format_message_content(msg)
-        assert isinstance(formatted, list)
-        assert len(formatted) == 2
-        assert formatted[0] == {"type": "text", "text": "Look at this:"}
-        assert formatted[1] == {
-            "type": "image_url",
-            "image_url": {"url": "data:image/png;base64,YWJj"},
-        }
+        msgs = [
+            StoredMessage(
+                role="user",
+                content="Look at this:",
+                attachments=[
+                    {
+                        "id": "chart.png",
+                        "name": "chart.png",
+                        "size": 500,
+                        "mimeType": "image/png",
+                    }
+                ],
+            )
+        ]
+        result = _build_openai_messages(msgs)
+        assert result == [
+            {
+                "role": "user",
+                "content": [
+                    {"type": "text", "text": "Look at this:"},
+                    {
+                        "type": "image_url",
+                        "image_url": {"url": "data:image/png;base64,YWJj"},
+                    },
+                ],
+            }
+        ]
 
     @patch("os.path.exists", return_value=True)
     @patch("builtins.open")
-    def test_format_message_content_llamacpp(self, mock_open, mock_exists):
+    def test_build_openai_messages_multiline_text(self, mock_open, mock_exists):
         mock_file = MagicMock()
         mock_file.read.return_value = b"abc"
         mock_open.return_value.__enter__.return_value = mock_file
 
-        msg = StoredMessage(
-            role="user",
-            content="Look at this:\nHope it helps.",
-            attachments=[
-                {
-                    "id": "chart.png",
-                    "name": "chart.png",
-                    "size": 500,
-                    "mimeType": "image/png",
-                }
-            ],
-        )
-        formatted = _format_message_content(msg)
-        assert isinstance(formatted, list)
-        assert len(formatted) == 2
-        assert formatted[0] == {"type": "text", "text": "Look at this:\nHope it helps."}
-        assert formatted[1] == {
-            "type": "image_url",
-            "image_url": {"url": "data:image/png;base64,YWJj"},
-        }
+        msgs = [
+            StoredMessage(
+                role="user",
+                content="Look at this:\nHope it helps.",
+                attachments=[
+                    {
+                        "id": "chart.png",
+                        "name": "chart.png",
+                        "size": 500,
+                        "mimeType": "image/png",
+                    }
+                ],
+            )
+        ]
+        result = _build_openai_messages(msgs)
+        assert result == [
+            {
+                "role": "user",
+                "content": [
+                    {"type": "text", "text": "Look at this:\nHope it helps."},
+                    {
+                        "type": "image_url",
+                        "image_url": {"url": "data:image/png;base64,YWJj"},
+                    },
+                ],
+            }
+        ]
 
     @patch("os.path.exists", return_value=False)
-    def test_format_message_content_resolves_local_media_url_fallback(
-        self, mock_exists
-    ):
-        msg = StoredMessage(
-            role="user",
-            content="Look at this:",
-            attachments=[
-                {
-                    "id": "chart-uuid.png",
-                    "name": "chart.png",
-                    "size": 500,
-                    "mimeType": "image/png",
-                }
-            ],
-        )
-        formatted = _format_message_content(msg)
-        assert isinstance(formatted, list)
-        assert len(formatted) == 2
-        assert formatted[0] == {"type": "text", "text": "Look at this:"}
-        assert formatted[1] == {
-            "type": "image_url",
-            "image_url": {"url": "/media/attachments/chart-uuid.png"},
-        }
+    def test_build_openai_messages_media_url_fallback(self, mock_exists):
+        msgs = [
+            StoredMessage(
+                role="user",
+                content="Look at this:",
+                attachments=[
+                    {
+                        "id": "chart-uuid.png",
+                        "name": "chart.png",
+                        "size": 500,
+                        "mimeType": "image/png",
+                    }
+                ],
+            )
+        ]
+        result = _build_openai_messages(msgs)
+        assert result == [
+            {
+                "role": "user",
+                "content": [
+                    {"type": "text", "text": "Look at this:"},
+                    {
+                        "type": "image_url",
+                        "image_url": {"url": "/media/attachments/chart-uuid.png"},
+                    },
+                ],
+            }
+        ]
 
-    def test_format_message_content_prevents_path_traversal(self):
-        msg = StoredMessage(
-            role="user",
-            content="Look at this:",
-            attachments=[
-                {
-                    "id": "../etc/passwd",
-                    "name": "passwd",
-                    "size": 500,
-                    "mimeType": "text/plain",
-                },
-                {
-                    "id": "/absolute/path/file.txt",
-                    "name": "absolute",
-                    "size": 500,
-                    "mimeType": "text/plain",
-                },
-                {
-                    "id": "safe-file.txt",
-                    "name": "safe",
-                    "size": 500,
-                    "mimeType": "text/plain",
-                },
-            ],
-        )
+    def test_build_openai_messages_prevents_path_traversal(self):
+        msgs = [
+            StoredMessage(
+                role="user",
+                content="Look at this:",
+                attachments=[
+                    {
+                        "id": "../etc/passwd",
+                        "name": "passwd",
+                        "size": 500,
+                        "mimeType": "text/plain",
+                    },
+                    {
+                        "id": "/absolute/path/file.txt",
+                        "name": "absolute",
+                        "size": 500,
+                        "mimeType": "text/plain",
+                    },
+                    {
+                        "id": "safe-file.txt",
+                        "name": "safe",
+                        "size": 500,
+                        "mimeType": "text/plain",
+                    },
+                ],
+            )
+        ]
         with patch(
             "chat.provider_gateway.load_text_attachment", return_value="safe content"
         ) as mock_load:
-            formatted = _format_message_content(msg)
+            result = _build_openai_messages(msgs)
             mock_load.assert_called_once_with("safe-file.txt")
 
-        assert isinstance(formatted, list)
-        assert len(formatted) == 2
+        assert result == [
+            {
+                "role": "user",
+                "content": [
+                    {"type": "text", "text": "Look at this:"},
+                    {
+                        "type": "text",
+                        "text": "--- File: safe ---\nsafe content\n----------------",
+                    },
+                ],
+            }
+        ]
+
+    @patch("chat.provider_gateway.genai.Client")
+    async def test_routes_to_gemini_for_gemini_provider(self, mock_genai_client_cls):
+        mock_client = MagicMock()
+        mock_genai_client_cls.return_value = mock_client
+
+        mock_response = MagicMock()
+        mock_response.text = "Hello from Gemini!"
+        mock_response.usage_metadata.prompt_token_count = 8
+        mock_response.usage_metadata.candidates_token_count = 4
+        mock_response.usage_metadata.total_token_count = 12
+
+        mock_client.aio.models.generate_content = AsyncMock(return_value=mock_response)
+
+        config = replace(
+            DEFAULT_CONFIG, provider="gemini", model="gemini-3.1-flash-lite"
+        )
+
+        gateway = ProviderGateway()
+        result = await gateway.generate(
+            api_key="gemini-key",
+            config=config,
+            messages=[StoredMessage(role="user", content="Hi")],
+        )
+
+        assert result.provider == "gemini"
+        assert result.model == "gemini-3.1-flash-lite"
+        assert result.text == "Hello from Gemini!"
+        assert result.input_tokens == 8
+        assert result.output_tokens == 4
+        mock_client.aio.models.generate_content.assert_called_once()
+
+    @patch("chat.provider_gateway.genai.Client")
+    async def test_gemini_stream_yields_tokens_and_usage(self, mock_genai_client_cls):
+        mock_client = MagicMock()
+        mock_genai_client_cls.return_value = mock_client
+
+        chunk_a = MagicMock()
+        chunk_a.text = "Hello"
+        chunk_a.usage_metadata = None
+
+        chunk_b = MagicMock()
+        chunk_b.text = " Gemini"
+        chunk_b.usage_metadata = MagicMock()
+        chunk_b.usage_metadata.prompt_token_count = 6
+        chunk_b.usage_metadata.candidates_token_count = 2
+        chunk_b.usage_metadata.total_token_count = 8
+
+        async def fake_stream():
+            for chunk in [chunk_a, chunk_b]:
+                yield chunk
+
+        mock_client.aio.models.generate_content_stream = AsyncMock(
+            return_value=fake_stream()
+        )
+
+        config = replace(
+            DEFAULT_CONFIG, provider="gemini", model="gemini-3.1-flash-lite"
+        )
+
+        gateway = ProviderGateway()
+        chunks = [
+            c
+            async for c in gateway.generate_stream(
+                api_key="gemini-key",
+                config=config,
+                messages=[StoredMessage(role="user", content="Hi")],
+            )
+        ]
+
+        text_chunks = [c for c in chunks if c.text]
+        usage_chunks = [c for c in chunks if c.usage]
+        assert len(text_chunks) == 2
+        assert text_chunks[0] == ProviderChunk(text="Hello")
+        assert text_chunks[1].text == " Gemini"
+        assert len(usage_chunks) == 1
+        assert usage_chunks[0].usage["prompt_tokens"] == 6
+
+    def test_build_gemini_messages_no_attachments(self):
+        msgs = [StoredMessage(role="user", content="Hello there!")]
+        result = _build_gemini_messages(msgs)
+        assert result == [{"role": "user", "parts": [{"text": "Hello there!"}]}]
+
+    def test_build_gemini_messages_role_mapping(self):
+        msgs = [
+            StoredMessage(role="user", content="Hi"),
+            StoredMessage(role="ai", content="Hello"),
+        ]
+        result = _build_gemini_messages(msgs)
+        assert result == [
+            {"role": "user", "parts": [{"text": "Hi"}]},
+            {"role": "model", "parts": [{"text": "Hello"}]},
+        ]
+
+    @patch("os.path.exists", return_value=True)
+    @patch("builtins.open")
+    def test_build_gemini_messages_with_images(self, mock_open, mock_exists):
+        mock_file = MagicMock()
+        mock_file.read.return_value = b"abc"
+        mock_open.return_value.__enter__.return_value = mock_file
+
+        msgs = [
+            StoredMessage(
+                role="user",
+                content="Look at this:",
+                attachments=[
+                    {
+                        "id": "chart.png",
+                        "name": "chart.png",
+                        "size": 500,
+                        "mimeType": "image/png",
+                    }
+                ],
+            )
+        ]
+        result = _build_gemini_messages(msgs)
+        assert result == [
+            {
+                "role": "user",
+                "parts": [
+                    {"text": "Look at this:"},
+                    {
+                        "inline_data": {
+                            "mime_type": "image/png",
+                            "data": b"abc",
+                        }
+                    },
+                ],
+            }
+        ]
+
+    def test_build_gemini_messages_prevents_path_traversal(self):
+        msgs = [
+            StoredMessage(
+                role="user",
+                content="Look at this:",
+                attachments=[
+                    {
+                        "id": "../etc/passwd",
+                        "name": "passwd",
+                        "size": 500,
+                        "mimeType": "text/plain",
+                    },
+                    {
+                        "id": "/absolute/path/file.txt",
+                        "name": "absolute",
+                        "size": 500,
+                        "mimeType": "text/plain",
+                    },
+                    {
+                        "id": "safe-file.txt",
+                        "name": "safe",
+                        "size": 500,
+                        "mimeType": "text/plain",
+                    },
+                ],
+            )
+        ]
+        with patch(
+            "chat.provider_gateway.load_text_attachment", return_value="safe content"
+        ) as mock_load:
+            result = _build_gemini_messages(msgs)
+            mock_load.assert_called_once_with("safe-file.txt")
+
+        assert result == [
+            {
+                "role": "user",
+                "parts": [
+                    {"text": "Look at this:"},
+                    {"text": "--- File: safe ---\nsafe content\n----------------"},
+                ],
+            }
+        ]
+
+    @patch("chat.provider_gateway.genai.Client")
+    async def test_routes_to_gemini_passes_response_format(self, mock_genai_client_cls):
+        mock_client = MagicMock()
+        mock_genai_client_cls.return_value = mock_client
+
+        mock_response = MagicMock()
+        mock_response.text = '{"success": true}'
+        mock_response.usage_metadata.prompt_token_count = 8
+        mock_response.usage_metadata.candidates_token_count = 4
+        mock_response.usage_metadata.total_token_count = 12
+
+        mock_client.aio.models.generate_content = AsyncMock(return_value=mock_response)
+
+        config = replace(
+            DEFAULT_CONFIG, provider="gemini", model="gemini-3.1-flash-lite"
+        )
+
+        gateway = ProviderGateway()
+        response_format = {
+            "type": "json_object",
+            "json_schema": {
+                "schema": {
+                    "type": "OBJECT",
+                    "properties": {"success": {"type": "BOOLEAN"}},
+                }
+            },
+        }
+        result = await gateway.generate(
+            api_key="gemini-key",
+            config=config,
+            messages=[StoredMessage(role="user", content="Hi")],
+            response_format=response_format,
+        )
+
+        assert result.text == '{"success": true}'
+        args, kwargs = mock_client.aio.models.generate_content.call_args
+        gen_config = kwargs["config"]
+        assert gen_config.response_mime_type == "application/json"
+        assert gen_config.response_schema == {
+            "type": "OBJECT",
+            "properties": {"success": {"type": "BOOLEAN"}},
+        }
+
+    @pytest.mark.parametrize(
+        "error_class,expected_exception,code",
+        [
+            (ClientError, PermanentProviderError, 400),
+            (APIError, TemporaryProviderError, 500),
+            (ValueError, TemporaryProviderError, None),
+        ],
+    )
+    @patch("chat.provider_gateway.genai.Client")
+    async def test_maps_gemini_errors(
+        self, mock_genai_client_cls, error_class, expected_exception, code
+    ):
+        mock_client = MagicMock()
+        mock_genai_client_cls.return_value = mock_client
+        if code is not None:
+            err = error_class(code=code, response_json={"message": "Gemini error"})
+        else:
+            err = error_class("Gemini error")
+        mock_client.aio.models.generate_content.side_effect = err
+
+        config = replace(
+            DEFAULT_CONFIG, provider="gemini", model="gemini-3.1-flash-lite"
+        )
+
+        gateway = ProviderGateway()
+        with pytest.raises(expected_exception):
+            await gateway.generate(
+                api_key="gemini-key",
+                config=config,
+                messages=[StoredMessage(role="user", content="Hi")],
+            )
+
+    @patch("chat.provider_gateway.genai.Client")
+    async def test_gemini_stream_maps_errors(self, mock_genai_client_cls):
+        mock_client = MagicMock()
+        mock_genai_client_cls.return_value = mock_client
+        mock_client.aio.models.generate_content_stream.side_effect = ClientError(
+            code=400, response_json={"message": "Gemini error"}
+        )
+
+        config = replace(
+            DEFAULT_CONFIG, provider="gemini", model="gemini-3.1-flash-lite"
+        )
+
+        gateway = ProviderGateway()
+        with pytest.raises(PermanentProviderError):
+            async for _ in gateway.generate_stream(
+                api_key="gemini-key",
+                config=config,
+                messages=[StoredMessage(role="user", content="Hi")],
+            ):
+                pass

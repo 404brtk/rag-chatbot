@@ -4,6 +4,9 @@ import os
 import time
 from typing import Any
 
+from google import genai
+from google.genai import types
+from google.genai.errors import APIError, ClientError
 import httpx
 import openai
 from django.conf import settings
@@ -21,51 +24,90 @@ from .attachments import is_safe_attachment_path, load_text_attachment
 logger = logging.getLogger(__name__)
 
 
-def _format_message_content(m: StoredMessage) -> str | list[dict[str, Any]]:
-    if not m.attachments:
-        return m.content
-
-    parts: list[dict[str, Any]] = [{"type": "text", "text": m.content}]
-
-    for att in m.attachments:
-        filename = att.get("id", "")
-        if not is_safe_attachment_path(filename):
-            continue
-
-        mime = att.get("mimeType", "")
-        if mime.startswith("image/"):
-            local_path = os.path.join(settings.MEDIA_ROOT, "attachments", filename)
-            if os.path.exists(local_path):
-                with open(local_path, "rb") as image_file:
-                    encoded_string = base64.b64encode(image_file.read()).decode("utf-8")
-                data_url = f"data:{mime};base64,{encoded_string}"
-            else:
-                data_url = f"{settings.MEDIA_URL}attachments/{filename}"
-
-            parts.append(
-                {
-                    "type": "image_url",
-                    "image_url": {"url": data_url},
-                }
-            )
+def _build_openai_messages(messages: list[StoredMessage]) -> list[dict[str, Any]]:
+    result = []
+    for m in messages:
+        if not m.attachments:
+            content: str | list[dict[str, Any]] = m.content
         else:
-            file_content = load_text_attachment(filename)
-            if file_content:
-                parts.append(
-                    {
-                        "type": "text",
-                        "text": f"--- File: {att['name']} ---\n{file_content}\n----------------",
-                    }
-                )
-            else:
-                parts.append(
-                    {
-                        "type": "text",
-                        "text": f"--- File: {att['name']} ---\nSize: {att['size']} bytes\n----------------",
-                    }
-                )
+            parts: list[dict[str, Any]] = [{"type": "text", "text": m.content}]
+            for att in m.attachments:
+                filename = att.get("id", "")
+                if not is_safe_attachment_path(filename):
+                    continue
+                mime = att.get("mimeType", "")
+                if mime.startswith("image/"):
+                    local_path = os.path.join(
+                        settings.MEDIA_ROOT, "attachments", filename
+                    )
+                    if os.path.exists(local_path):
+                        with open(local_path, "rb") as image_file:
+                            encoded_string = base64.b64encode(image_file.read()).decode(
+                                "utf-8"
+                            )
+                        data_url = f"data:{mime};base64,{encoded_string}"
+                    else:
+                        data_url = f"{settings.MEDIA_URL}attachments/{filename}"
+                    parts.append({"type": "image_url", "image_url": {"url": data_url}})
+                else:
+                    file_content = load_text_attachment(filename)
+                    if file_content:
+                        parts.append(
+                            {
+                                "type": "text",
+                                "text": f"--- File: {att['name']} ---\n{file_content}\n----------------",
+                            }
+                        )
+                    else:
+                        parts.append(
+                            {
+                                "type": "text",
+                                "text": f"--- File: {att['name']} ---\nSize: {att['size']} bytes\n----------------",
+                            }
+                        )
+            content = parts
+        result.append({"role": m.role, "content": content})
+    return result
 
-    return parts
+
+def _build_gemini_messages(messages: list[StoredMessage]) -> list[dict[str, Any]]:
+    contents = []
+    for m in messages:
+        role = "model" if m.role == "ai" else "user"
+        parts: list[dict[str, Any]] = [{"text": m.content}]
+        for att in m.attachments or []:
+            filename = att.get("id", "")
+            if not is_safe_attachment_path(filename):
+                continue
+            mime = att.get("mimeType", "")
+            if mime.startswith("image/"):
+                local_path = os.path.join(settings.MEDIA_ROOT, "attachments", filename)
+                if os.path.exists(local_path):
+                    with open(local_path, "rb") as image_file:
+                        parts.append(
+                            {
+                                "inline_data": {
+                                    "mime_type": mime,
+                                    "data": image_file.read(),
+                                }
+                            }
+                        )
+            else:
+                file_content = load_text_attachment(filename)
+                if file_content:
+                    parts.append(
+                        {
+                            "text": f"--- File: {att['name']} ---\n{file_content}\n----------------"
+                        }
+                    )
+                else:
+                    parts.append(
+                        {
+                            "text": f"--- File: {att['name']} ---\nSize: {att['size']} bytes\n----------------"
+                        }
+                    )
+        contents.append({"role": role, "parts": parts})
+    return contents
 
 
 class ProviderGateway:
@@ -98,13 +140,9 @@ class ProviderGateway:
         try:
             kwargs = {
                 "model": config.model,
-                "messages": [{"role": "system", "content": config.system_prompt}]
-                + [
-                    {
-                        "role": m.role,
-                        "content": _format_message_content(m),
-                    }
-                    for m in messages
+                "messages": [
+                    {"role": "system", "content": config.system_prompt},
+                    *_build_openai_messages(messages),
                 ],
                 "temperature": config.temperature,
             }
@@ -141,6 +179,65 @@ class ProviderGateway:
             model_input=list(messages),
         )
 
+    async def _generate_gemini(
+        self,
+        *,
+        api_key: str,
+        config: LLMConfig,
+        messages: list[StoredMessage],
+        response_format: dict[str, Any] | None = None,
+    ) -> GenerationResult:
+        client = genai.Client(api_key=api_key)
+        contents = _build_gemini_messages(messages)
+
+        gen_config = types.GenerateContentConfig(
+            system_instruction=config.system_prompt,
+            temperature=config.temperature,
+            max_output_tokens=config.max_output_tokens,
+        )
+        if response_format:
+            gen_config.response_mime_type = "application/json"
+            if (
+                "json_schema" in response_format
+                and "schema" in response_format["json_schema"]
+            ):
+                gen_config.response_schema = response_format["json_schema"]["schema"]
+
+        try:
+            response = await client.aio.models.generate_content(
+                model=config.model,
+                contents=contents,
+                config=gen_config,
+            )
+        except Exception as e:
+            if isinstance(e, ClientError):
+                raise PermanentProviderError(str(e)) from e
+            if isinstance(e, APIError):
+                raise TemporaryProviderError(str(e)) from e
+            raise TemporaryProviderError(str(e)) from e
+
+        usage_dict = {}
+        input_tokens = None
+        output_tokens = None
+        if response.usage_metadata:
+            usage_dict = {
+                "prompt_tokens": response.usage_metadata.prompt_token_count,
+                "completion_tokens": response.usage_metadata.candidates_token_count,
+                "total_tokens": response.usage_metadata.total_token_count,
+            }
+            input_tokens = response.usage_metadata.prompt_token_count
+            output_tokens = response.usage_metadata.candidates_token_count
+
+        return GenerationResult(
+            text=response.text or "",
+            provider=config.provider,
+            model=config.model,
+            input_tokens=input_tokens,
+            output_tokens=output_tokens,
+            usage=usage_dict,
+            model_input=list(messages),
+        )
+
     async def generate(
         self,
         *,
@@ -151,6 +248,13 @@ class ProviderGateway:
     ) -> GenerationResult:
         if config.provider in {"openai", "llamacpp"}:
             return await self._generate_openai(
+                api_key=api_key,
+                config=config,
+                messages=messages,
+                response_format=response_format,
+            )
+        if config.provider == "gemini":
+            return await self._generate_gemini(
                 api_key=api_key,
                 config=config,
                 messages=messages,
@@ -169,13 +273,9 @@ class ProviderGateway:
         try:
             kwargs = {
                 "model": config.model,
-                "messages": [{"role": "system", "content": config.system_prompt}]
-                + [
-                    {
-                        "role": m.role,
-                        "content": _format_message_content(m),
-                    }
-                    for m in messages
+                "messages": [
+                    {"role": "system", "content": config.system_prompt},
+                    *_build_openai_messages(messages),
                 ],
                 "temperature": config.temperature,
                 "stream": True,
@@ -207,6 +307,47 @@ class ProviderGateway:
         except openai.BadRequestError as e:
             raise PermanentProviderError(str(e)) from e
 
+    async def _generate_gemini_stream(
+        self,
+        *,
+        api_key: str,
+        config: LLMConfig,
+        messages: list[StoredMessage],
+    ):
+        client = genai.Client(api_key=api_key)
+        contents = _build_gemini_messages(messages)
+
+        gen_config = types.GenerateContentConfig(
+            system_instruction=config.system_prompt,
+            temperature=config.temperature,
+            max_output_tokens=config.max_output_tokens,
+        )
+
+        try:
+            response_stream = await client.aio.models.generate_content_stream(
+                model=config.model,
+                contents=contents,
+                config=gen_config,
+            )
+            async for chunk in response_stream:
+                if chunk.usage_metadata:
+                    yield ProviderChunk(
+                        usage={
+                            "prompt_tokens": chunk.usage_metadata.prompt_token_count,
+                            "completion_tokens": chunk.usage_metadata.candidates_token_count,
+                            "total_tokens": chunk.usage_metadata.total_token_count,
+                        }
+                    )
+                text = chunk.text
+                if text is not None:
+                    yield ProviderChunk(text=text)
+        except Exception as e:
+            if isinstance(e, ClientError):
+                raise PermanentProviderError(str(e)) from e
+            if isinstance(e, APIError):
+                raise TemporaryProviderError(str(e)) from e
+            raise TemporaryProviderError(str(e)) from e
+
     async def generate_stream(
         self,
         *,
@@ -216,6 +357,12 @@ class ProviderGateway:
     ):
         if config.provider in {"openai", "llamacpp"}:
             async for chunk in self._generate_openai_stream(
+                api_key=api_key, config=config, messages=messages
+            ):
+                yield chunk
+            return
+        if config.provider == "gemini":
+            async for chunk in self._generate_gemini_stream(
                 api_key=api_key, config=config, messages=messages
             ):
                 yield chunk
