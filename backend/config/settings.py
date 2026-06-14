@@ -201,7 +201,22 @@ LOGGING = {
         },
     },
     "loggers": {
-        "api": {
+        "accounts": {
+            "handlers": ["console"],
+            "level": "DEBUG" if DEBUG else "WARNING",
+            "propagate": False,
+        },
+        "chat": {
+            "handlers": ["console"],
+            "level": "DEBUG" if DEBUG else "WARNING",
+            "propagate": False,
+        },
+        "documents": {
+            "handlers": ["console"],
+            "level": "DEBUG" if DEBUG else "WARNING",
+            "propagate": False,
+        },
+        "core": {
             "handlers": ["console"],
             "level": "DEBUG" if DEBUG else "WARNING",
             "propagate": False,
