@@ -1,3 +1,4 @@
+import asyncio
 from dataclasses import replace
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -960,6 +961,95 @@ class TestChatServiceGenerateReplyStream:
         assert len(events) == 1
         assert events[0].type == "error"
         mock_user_msg.adelete.assert_called_once()
+
+    @pytest.mark.django_db(transaction=True)
+    @patch.object(ChatService, "_prepare_generation")
+    async def test_stream_cancelled_during_prep_writes_both_messages(
+        self, mock_prep, user_a
+    ):
+        mock_prep.side_effect = asyncio.CancelledError()
+        conversation = await Conversation.objects.acreate(user=user_a)
+
+        service = ChatService(repository=self.mock_repo)
+        with pytest.raises(asyncio.CancelledError):
+            await self._collect_events(
+                service,
+                user=user_a,
+                session_id=str(conversation.id),
+                user_text="Hello",
+                config=DEFAULT_CONFIG,
+            )
+
+        assert self.mock_repo.append_message.call_count == 2
+        user_call = self.mock_repo.append_message.call_args_list[0][1]
+        assert user_call["role"] == "user"
+        assert user_call["content"] == "Hello"
+
+        assistant_call = self.mock_repo.append_message.call_args_list[1][1]
+        assert assistant_call["role"] == "assistant"
+        assert assistant_call["content"] == "*Generation stopped.*"
+
+    @pytest.mark.django_db(transaction=True)
+    @patch("chat.chat_service.ProviderGateway.generate_stream")
+    @patch.object(ChatService, "_resolve_api_key", return_value="sk-chat")
+    async def test_stream_cancelled_before_tokens_writes_placeholder(
+        self, mock_resolve, mock_stream, user_a
+    ):
+        async def gen():
+            raise asyncio.CancelledError()
+            yield
+
+        mock_stream.return_value = gen()
+        conversation = await Conversation.objects.acreate(user=user_a)
+
+        service = ChatService(repository=self.mock_repo)
+        with pytest.raises(asyncio.CancelledError):
+            await self._collect_events(
+                service,
+                user=user_a,
+                session_id=str(conversation.id),
+                user_text="Hello",
+                config=DEFAULT_CONFIG,
+            )
+
+        assert self.mock_repo.append_message.call_count == 2
+        user_call = self.mock_repo.append_message.call_args_list[0][1]
+        assert user_call["role"] == "user"
+
+        assistant_call = self.mock_repo.append_message.call_args_list[1][1]
+        assert assistant_call["role"] == "assistant"
+        assert assistant_call["content"] == "*Generation stopped.*"
+
+    @pytest.mark.django_db(transaction=True)
+    @patch("chat.chat_service.ProviderGateway.generate_stream")
+    @patch.object(ChatService, "_resolve_api_key", return_value="sk-chat")
+    async def test_stream_cancelled_after_tokens_writes_partial(
+        self, mock_resolve, mock_stream, user_a
+    ):
+        async def gen():
+            yield ProviderChunk(text="Partial reply")
+            raise asyncio.CancelledError()
+
+        mock_stream.return_value = gen()
+        conversation = await Conversation.objects.acreate(user=user_a)
+
+        service = ChatService(repository=self.mock_repo)
+        with pytest.raises(asyncio.CancelledError):
+            await self._collect_events(
+                service,
+                user=user_a,
+                session_id=str(conversation.id),
+                user_text="Hello",
+                config=DEFAULT_CONFIG,
+            )
+
+        assert self.mock_repo.append_message.call_count == 2
+        user_call = self.mock_repo.append_message.call_args_list[0][1]
+        assert user_call["role"] == "user"
+
+        assistant_call = self.mock_repo.append_message.call_args_list[1][1]
+        assert assistant_call["role"] == "assistant"
+        assert assistant_call["content"] == "Partial reply"
 
 
 class TestChatServiceCompaction:

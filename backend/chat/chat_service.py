@@ -1,3 +1,4 @@
+import asyncio
 import logging
 from dataclasses import dataclass, replace
 from typing import Any, Literal
@@ -451,6 +452,11 @@ class ChatService:
         document_ids: list[str] | None = None,
         attachments: list[dict] | None = None,
     ):
+        session = None
+        user_msg = None
+        assistant_text = ""
+        usage_data = None
+        prep = None
         try:
             prep = await self._prepare_generation(
                 user=user,
@@ -481,8 +487,6 @@ class ChatService:
                 attachments=attachments,
             )
 
-            assistant_text = ""
-            usage_data = None
             try:
                 async for chunk in self.gateway.generate_stream(
                     api_key=prep.api_key, config=prep.config, messages=prep.messages
@@ -541,6 +545,62 @@ class ChatService:
                     {"role": m.role, "content": m.content} for m in prep.messages
                 ],
             )
+
+        except asyncio.CancelledError:
+            if not session:
+                try:
+                    session = await Conversation.objects.aget(id=session_id)
+                except Exception:
+                    pass
+            if session:
+                if not user_msg:
+                    try:
+                        user_msg = await self.repository.append_message(
+                            session=session,
+                            role="user",
+                            content=user_text,
+                            provider=config.provider,
+                            model=config.model,
+                            raw_question=user_text,
+                            attachments=attachments,
+                        )
+                    except Exception:
+                        pass
+                if user_msg:
+                    if not assistant_text:
+                        assistant_text = "*Generation stopped.*"
+                    if usage_data is None:
+                        try:
+                            usage_data = {
+                                "prompt_tokens": self.counter.estimate_system_tokens(
+                                    config.system_prompt, config.model
+                                )
+                                + sum(
+                                    self.counter.estimate_message_tokens(
+                                        m, config.model
+                                    )
+                                    for m in (prep.messages if prep else [])
+                                ),
+                                "completion_tokens": self.counter.estimate_text_tokens(
+                                    assistant_text, config.model
+                                ),
+                            }
+                        except Exception:
+                            usage_data = {"prompt_tokens": 0, "completion_tokens": 0}
+                    try:
+                        await self.repository.append_message(
+                            session=session,
+                            role="assistant",
+                            content=assistant_text,
+                            provider=config.provider,
+                            model=config.model,
+                            usage=usage_data,
+                        )
+                        session.last_message_at = timezone.now()
+                        await session.asave(update_fields=["last_message_at"])
+                    except Exception:
+                        pass
+            raise
 
         except ChatServiceError as e:
             self._cleanup_attachments(attachments)
