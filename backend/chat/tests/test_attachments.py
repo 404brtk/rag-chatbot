@@ -1,6 +1,6 @@
 import io
 import os
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 import pytest
 from django.conf import settings
@@ -89,46 +89,31 @@ def test_load_text_attachment_large_txt(temp_media_root):
     assert content == expected_content
 
 
-@patch("chat.attachments.pymupdf.open")
-@patch("chat.attachments.pymupdf4llm.to_markdown")
-def test_load_text_attachment_pdf_small(
-    mock_to_markdown, mock_pdf_open, temp_media_root
-):
+@patch("chat.attachments.extract_pdf_to_markdown")
+def test_load_text_attachment_pdf_small(mock_extract_pdf, temp_media_root):
     file_path = temp_media_root / "doc.pdf"
     file_path.write_bytes(b"dummy pdf bytes")
 
-    mock_doc = MagicMock()
-    mock_pdf_open.return_value = mock_doc
-    mock_to_markdown.return_value = "# Header\nSome content"
+    mock_extract_pdf.return_value = "# Header\nSome content"
 
     content = load_text_attachment("doc.pdf")
 
-    mock_pdf_open.assert_called_once_with(str(file_path))
-    mock_to_markdown.assert_called_once_with(mock_doc, show_progress=False)
-    mock_doc.close.assert_called_once()
+    mock_extract_pdf.assert_called_once_with(str(file_path))
     assert content == "# Header\nSome content"
 
 
-@patch("chat.attachments.pymupdf.open")
-@patch("chat.attachments.pymupdf4llm.to_markdown")
-def test_load_text_attachment_pdf_large(
-    mock_to_markdown, mock_pdf_open, temp_media_root
-):
+@patch("chat.attachments.extract_pdf_to_markdown")
+def test_load_text_attachment_pdf_large(mock_extract_pdf, temp_media_root):
     file_path = temp_media_root / "large.pdf"
     file_path.write_bytes(b"dummy pdf bytes")
 
-    mock_doc = MagicMock()
-    mock_pdf_open.return_value = mock_doc
-
     limit = 1024 * 100
     large_md = "# Header\n" + "x" * (limit + 100)
-    mock_to_markdown.return_value = large_md
+    mock_extract_pdf.return_value = large_md
 
     content = load_text_attachment("large.pdf")
 
-    mock_pdf_open.assert_called_once_with(str(file_path))
-    mock_to_markdown.assert_called_once_with(mock_doc, show_progress=False)
-    mock_doc.close.assert_called_once()
+    mock_extract_pdf.assert_called_once_with(str(file_path))
 
     expected_content = large_md[:limit] + "\n[WARNING: File truncated to 100KB limit]"
     assert content == expected_content

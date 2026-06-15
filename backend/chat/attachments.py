@@ -4,10 +4,10 @@ import io
 from django.conf import settings
 from django.core.files.storage import default_storage
 from django.core.files.uploadedfile import InMemoryUploadedFile
-import pymupdf
-import pymupdf4llm
 from PIL import Image
 from rest_framework.exceptions import ValidationError
+
+from documents.chunking import extract_pdf_to_markdown
 
 
 def optimize_uploaded_image(
@@ -86,17 +86,12 @@ def load_text_attachment(filename: str) -> str:
 
     try:
         if filename.lower().endswith(".pdf"):
-            doc = pymupdf.open(local_path)
-            try:
-                markdown_text = pymupdf4llm.to_markdown(doc, show_progress=False)
-                if len(markdown_text) > limit:
-                    return (
-                        markdown_text[:limit]
-                        + "\n[WARNING: File truncated to 100KB limit]"
-                    )
-                return markdown_text
-            finally:
-                doc.close()
+            markdown_text = extract_pdf_to_markdown(local_path)
+            if len(markdown_text) > limit:
+                return (
+                    markdown_text[:limit] + "\n[WARNING: File truncated to 100KB limit]"
+                )
+            return markdown_text
         else:
             with open(local_path, "r", encoding="utf-8", errors="ignore") as f:
                 content = f.read(limit)

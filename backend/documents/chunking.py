@@ -27,8 +27,11 @@ class Block:
     content: str
 
 
-def _extract_pdf(file_bytes: bytes) -> str:
-    doc = pymupdf.open(stream=file_bytes, filetype="pdf")
+def extract_pdf_to_markdown(file_source: str | bytes) -> str:
+    if isinstance(file_source, bytes):
+        doc = pymupdf.open(stream=file_source, filetype="pdf")
+    else:
+        doc = pymupdf.open(file_source)
     try:
         return pymupdf4llm.to_markdown(doc, show_progress=False)
     finally:
@@ -40,7 +43,7 @@ def extract_text(file_bytes: bytes, content_type: str) -> str:
         return file_bytes.decode("utf-8")
 
     if content_type == "application/pdf":
-        return _extract_pdf(file_bytes)
+        return extract_pdf_to_markdown(file_bytes)
 
     raise ValueError(f"Unsupported content type: {content_type}")
 

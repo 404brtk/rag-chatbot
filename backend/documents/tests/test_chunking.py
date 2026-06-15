@@ -31,7 +31,7 @@ class TestExtractText:
         with pytest.raises(ValueError, match="Unsupported content type"):
             extract_text(b"data", "application/octet-stream")
 
-    @patch("documents.chunking._extract_pdf", return_value="PDF text")
+    @patch("documents.chunking.extract_pdf_to_markdown", return_value="PDF text")
     def test_extracts_pdf(self, mock_extract):
         assert extract_text(b"fake pdf bytes", "application/pdf") == "PDF text"
         mock_extract.assert_called_once_with(b"fake pdf bytes")
