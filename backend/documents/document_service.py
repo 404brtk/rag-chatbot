@@ -1,5 +1,7 @@
 import logging
+import asyncio
 from dataclasses import dataclass
+from asgiref.sync import sync_to_async
 
 from django.conf import settings
 from django.contrib.postgres.search import SearchVector
@@ -263,7 +265,7 @@ SELECT tf.chunk_id,
 
         return {str(row[0]): float(row[1]) for row in rows}
 
-    def _vector_search(
+    async def _vector_search(
         self,
         user,
         query_embedding: list[float],
@@ -273,11 +275,14 @@ SELECT tf.chunk_id,
         qs = DocumentChunk.objects.filter(document__user=user)
         if document_ids:
             qs = qs.filter(document_id__in=document_ids)
-        return list(
-            qs.annotate(distance=CosineDistance("embedding", query_embedding))
+        return [
+            chunk
+            async for chunk in qs.annotate(
+                distance=CosineDistance("embedding", query_embedding)
+            )
             .select_related("document")
             .order_by("distance")[:limit]
-        )
+        ]
 
     @staticmethod
     def _reciprocal_rank_fusion(
@@ -290,7 +295,7 @@ SELECT tf.chunk_id,
                 scores[chunk_id] = scores.get(chunk_id, 0.0) + 1.0 / (k + rank)
         return scores
 
-    def search(
+    async def search(
         self,
         user,
         query: str | None = None,
@@ -303,7 +308,9 @@ SELECT tf.chunk_id,
         if query_embedding is None:
             if not query:
                 raise ValueError("Either query or query_embedding must be provided.")
-            query_embedding = self.embedding_service.embed_query(query)
+            query_embedding = await asyncio.to_thread(
+                self.embedding_service.embed_query, query
+            )
 
         if refined_english_query is None:
             refined_english_query = query or ""
@@ -316,9 +323,18 @@ SELECT tf.chunk_id,
             f"Hybrid search started for user={user.id} query='{query or ''}' pool={pool}"
         )
 
-        vector_results = self._vector_search(
+        vector_task = self._vector_search(
             user, query_embedding, document_ids=document_ids, limit=pool
         )
+        bm25_task = sync_to_async(self._keyword_bm25_search, thread_sensitive=False)(
+            user=user,
+            english_query=refined_english_query,
+            polish_query=refined_polish_query,
+            document_ids=document_ids,
+            limit=pool,
+        )
+
+        vector_results, bm25_scores = await asyncio.gather(vector_task, bm25_task)
         vector_rank_list = [str(chunk.id) for chunk in vector_results]
         vector_map = {str(chunk.id): chunk for chunk in vector_results}
 
@@ -328,13 +344,6 @@ SELECT tf.chunk_id,
                 f"distance={chunk.distance:.6f} similarity={1.0 - chunk.distance:.6f}"
             )
 
-        bm25_scores = self._keyword_bm25_search(
-            user=user,
-            english_query=refined_english_query,
-            polish_query=refined_polish_query,
-            document_ids=document_ids,
-            limit=pool,
-        )
         bm25_rank_list = list(bm25_scores.keys())
 
         for rank, (chunk_id, score) in enumerate(bm25_scores.items(), start=1):
@@ -359,9 +368,12 @@ SELECT tf.chunk_id,
             logger.debug(
                 f"Fetched {len(missing_ids)} BM25-exclusive chunks from DB: {missing_ids}"
             )
-            extra_chunks = DocumentChunk.objects.filter(
-                id__in=missing_ids
-            ).select_related("document")
+            extra_chunks = [
+                chunk
+                async for chunk in DocumentChunk.objects.filter(
+                    id__in=missing_ids
+                ).select_related("document")
+            ]
             for chunk in extra_chunks:
                 vector_map[str(chunk.id)] = chunk
 

@@ -10,7 +10,7 @@ from chat.models import Conversation
 def mock_document_service():
     with patch("chat.chat_service.DocumentService") as mock:
         instance = mock.return_value
-        instance.search.return_value = []
+        instance.search = AsyncMock(return_value=[])
         yield instance
 
 

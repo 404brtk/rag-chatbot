@@ -281,9 +281,9 @@ class TestChatServiceGenerateReply:
     async def test_injects_context_tags_when_search_has_results(
         self, mock_doc_svc_cls, mock_resolve, mock_generate
     ):
-        mock_doc_svc_cls.return_value.search.return_value = [
-            SearchResult("Relevant info.", "doc-1", "docs.md", 0, 0.1)
-        ]
+        mock_doc_svc_cls.return_value.search = AsyncMock(
+            return_value=[SearchResult("Relevant info.", "doc-1", "docs.md", 0, 0.1)]
+        )
         mock_generate.return_value = GenerationResult(
             text="Answer.",
             provider="openai",
@@ -324,10 +324,12 @@ class TestChatServiceGenerateReply:
     async def test_includes_context_chunks_and_raw_question_on_user_message(
         self, mock_doc_svc_cls, mock_resolve, mock_generate
     ):
-        mock_doc_svc_cls.return_value.search.return_value = [
-            SearchResult("Info A", "d1", "a.txt", 0, 0.1),
-            SearchResult("Info B", "d2", "b.txt", 3, 0.2),
-        ]
+        mock_doc_svc_cls.return_value.search = AsyncMock(
+            return_value=[
+                SearchResult("Info A", "d1", "a.txt", 0, 0.1),
+                SearchResult("Info B", "d2", "b.txt", 3, 0.2),
+            ]
+        )
         mock_generate.return_value = GenerationResult(
             text="Answer.",
             provider="openai",
@@ -405,7 +407,7 @@ class TestChatServiceGenerateReply:
     async def test_skips_context_injection_when_search_returns_no_results(
         self, mock_doc_svc_cls, mock_resolve, mock_generate
     ):
-        mock_doc_svc_cls.return_value.search.return_value = []
+        mock_doc_svc_cls.return_value.search = AsyncMock(return_value=[])
         mock_generate.return_value = GenerationResult(
             text="Answer.",
             provider="openai",
@@ -473,14 +475,9 @@ class TestChatServiceGenerateReply:
             model_input=[],
         )
         mock_generate.side_effect = [refinement_result, answer_result]
-        mock_doc_svc_cls.return_value.embedding_service.embed_query.return_value = [
-            0.1,
-            0.2,
-            0.3,
-        ]
-        mock_doc_svc_cls.return_value.search.return_value = [
-            SearchResult("Relevant info.", "doc-1", "docs.md", 0, 0.1)
-        ]
+        mock_doc_svc_cls.return_value.search = AsyncMock(
+            return_value=[SearchResult("Relevant info.", "doc-1", "docs.md", 0, 0.1)]
+        )
         self.mock_repo.list_messages.return_value = []
         self.mock_repo.append_message_pair.return_value = (
             MagicMock(id="u-id"),
@@ -499,7 +496,6 @@ class TestChatServiceGenerateReply:
         mock_doc_svc_cls.return_value.search.assert_called_once_with(
             user=self.mock_user,
             query="wyszukaj",
-            query_embedding=[0.1, 0.2, 0.3],
             refined_english_query="search",
             refined_polish_query="wyszukaj",
             document_ids=["doc-1"],
@@ -546,12 +542,7 @@ class TestChatServiceGenerateReply:
             model_input=[],
         )
         mock_generate.side_effect = [refinement_result, answer_result]
-        mock_doc_svc_cls.return_value.embedding_service.embed_query.return_value = [
-            0.1,
-            0.2,
-            0.3,
-        ]
-        mock_doc_svc_cls.return_value.search.return_value = []
+        mock_doc_svc_cls.return_value.search = AsyncMock(return_value=[])
         self.mock_repo.list_messages.return_value = []
         self.mock_repo.append_message_pair.return_value = (
             MagicMock(id="u-id"),
@@ -570,7 +561,6 @@ class TestChatServiceGenerateReply:
         mock_doc_svc_cls.return_value.search.assert_called_once_with(
             user=self.mock_user,
             query="python",
-            query_embedding=[0.1, 0.2, 0.3],
             refined_english_query="python",
             refined_polish_query="python",
             document_ids=["doc-1"],
@@ -601,12 +591,7 @@ class TestChatServiceGenerateReply:
             model_input=[],
         )
         mock_generate.side_effect = [refinement_result, answer_result]
-        mock_doc_svc_cls.return_value.embedding_service.embed_query.return_value = [
-            0.1,
-            0.2,
-            0.3,
-        ]
-        mock_doc_svc_cls.return_value.search.return_value = []
+        mock_doc_svc_cls.return_value.search = AsyncMock(return_value=[])
         self.mock_repo.list_messages.return_value = []
         self.mock_repo.append_message_pair.return_value = (
             MagicMock(id="u-id"),
@@ -625,7 +610,6 @@ class TestChatServiceGenerateReply:
         mock_doc_svc_cls.return_value.search.assert_called_once_with(
             user=self.mock_user,
             query="python",
-            query_embedding=[0.1, 0.2, 0.3],
             refined_english_query="python",
             refined_polish_query="python",
             document_ids=["doc-1"],

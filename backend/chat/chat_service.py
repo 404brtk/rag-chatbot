@@ -4,7 +4,6 @@ from dataclasses import dataclass, replace
 from typing import Any, Literal
 from pydantic import BaseModel, Field, ConfigDict
 
-from asgiref.sync import sync_to_async
 from django.conf import settings
 from django.utils import timezone
 from django.core.files.storage import default_storage
@@ -208,18 +207,9 @@ class ChatService:
                 f"refined_english='{refined_english}' refined_polish='{refined_polish}'"
             )
 
-            query_embedding = await sync_to_async(
-                self.document_service.embedding_service.embed_query,
-                thread_sensitive=True,
-            )(raw_user_text)
-
-            search_results = await sync_to_async(
-                self.document_service.search,
-                thread_sensitive=True,
-            )(
+            search_results = await self.document_service.search(
                 user=user,
                 query=raw_user_text,
-                query_embedding=query_embedding,
                 refined_english_query=refined_english,
                 refined_polish_query=refined_polish,
                 document_ids=document_ids or None,

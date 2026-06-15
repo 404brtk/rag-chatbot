@@ -1,4 +1,5 @@
 import pytest
+from asgiref.sync import sync_to_async
 
 from documents.document_service import DocumentService, SearchResult
 from documents.models import Document, DocumentChunk
@@ -216,23 +217,23 @@ class TestKeywordBm25Search:
         assert len(results) == 1
 
 
-@pytest.mark.django_db
+@pytest.mark.django_db(transaction=True)
 class TestSearch:
-    def test_returns_ordered_search_results(self, user_a, mock_embedding_service):
+    async def test_returns_ordered_search_results(self, user_a, mock_embedding_service):
         mock_embedding_service.embed_query.return_value = _make_embedding(1.0)
-        document = Document.objects.create(
+        document = await Document.objects.acreate(
             user=user_a,
             filename="test.txt",
             content_type="text/plain",
             raw_text="Hello world python code",
         )
-        DocumentChunk.objects.create(
+        await DocumentChunk.objects.acreate(
             document=document,
             content="python code example",
             chunk_index=0,
             embedding=_make_embedding(1.0),
         )
-        DocumentChunk.objects.create(
+        await DocumentChunk.objects.acreate(
             document=document,
             content="irrelevant text",
             chunk_index=1,
@@ -240,7 +241,7 @@ class TestSearch:
         )
 
         service = DocumentService()
-        results = service.search(user=user_a, query="python")
+        results = await service.search(user=user_a, query="python")
 
         assert len(results) == 2
         assert all(isinstance(r, SearchResult) for r in results)
@@ -252,27 +253,27 @@ class TestSearch:
         assert results[0].document_filename == "test.txt"
         assert results[0].chunk_index == 0
 
-    def test_filters_by_document_ids(self, user_a, mock_embedding_service):
+    async def test_filters_by_document_ids(self, user_a, mock_embedding_service):
         mock_embedding_service.embed_query.return_value = _make_embedding(1.0)
-        doc_a = Document.objects.create(
+        doc_a = await Document.objects.acreate(
             user=user_a,
             filename="a.txt",
             content_type="text/plain",
             raw_text="doc a",
         )
-        doc_b = Document.objects.create(
+        doc_b = await Document.objects.acreate(
             user=user_a,
             filename="b.txt",
             content_type="text/plain",
             raw_text="doc b",
         )
-        DocumentChunk.objects.create(
+        await DocumentChunk.objects.acreate(
             document=doc_a,
             content="content a",
             chunk_index=0,
             embedding=_make_embedding(1.0),
         )
-        DocumentChunk.objects.create(
+        await DocumentChunk.objects.acreate(
             document=doc_b,
             content="content b",
             chunk_index=0,
@@ -280,22 +281,22 @@ class TestSearch:
         )
 
         service = DocumentService()
-        results = service.search(
+        results = await service.search(
             user=user_a, query="test", document_ids=[str(doc_a.id)]
         )
 
         assert len(results) == 1
         assert results[0].chunk_content == "content a"
 
-    def test_isolates_by_user(self, user_a, user_b, mock_embedding_service):
+    async def test_isolates_by_user(self, user_a, user_b, mock_embedding_service):
         mock_embedding_service.embed_query.return_value = _make_embedding(1.0)
-        doc = Document.objects.create(
+        doc = await Document.objects.acreate(
             user=user_a,
             filename="secret.txt",
             content_type="text/plain",
             raw_text="secret",
         )
-        DocumentChunk.objects.create(
+        await DocumentChunk.objects.acreate(
             document=doc,
             content="secret content",
             chunk_index=0,
@@ -303,15 +304,17 @@ class TestSearch:
         )
 
         service = DocumentService()
-        results = service.search(user=user_b, query="secret")
+        results = await service.search(user=user_b, query="secret")
 
         assert len(results) == 0
 
-    def test_bm25_only_results_included_via_rrf(self, user_a, mock_embedding_service):
+    async def test_bm25_only_results_included_via_rrf(
+        self, user_a, mock_embedding_service
+    ):
         mock_embedding_service.embed_texts.return_value = [[0.1] * 384]
         mock_embedding_service.embed_query.return_value = _make_embedding(0.0, 0.0, 1.0)
 
-        doc = Document.objects.create(
+        doc = await Document.objects.acreate(
             user=user_a,
             filename="test.txt",
             content_type="text/plain",
@@ -319,9 +322,11 @@ class TestSearch:
             language="english",
         )
         service = DocumentService()
-        service._create_document_chunks(doc, ["django framework tutorial"])
+        await sync_to_async(service._create_document_chunks)(
+            doc, ["django framework tutorial"]
+        )
 
-        results = service.search(user=user_a, query="django")
+        results = await service.search(user=user_a, query="django")
 
         assert len(results) == 1
         assert results[0].chunk_content == "django framework tutorial"
