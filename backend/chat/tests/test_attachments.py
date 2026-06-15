@@ -1,11 +1,16 @@
+import io
+import os
 from unittest.mock import MagicMock, patch
 
 import pytest
+from django.conf import settings
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.urls import reverse
+from PIL import Image
 from rest_framework import status
+from rest_framework.exceptions import ValidationError
 
-from chat.attachments import load_text_attachment
+from chat.attachments import load_text_attachment, save_local_attachment
 
 
 @pytest.mark.django_db
@@ -127,3 +132,77 @@ def test_load_text_attachment_pdf_large(
 
     expected_content = large_md[:limit] + "\n[WARNING: File truncated to 100KB limit]"
     assert content == expected_content
+
+
+def generate_test_image(
+    width: int, height: int, color=(255, 0, 0), format: str = "PNG"
+) -> bytes:
+    img = Image.new("RGB", (width, height), color)
+    buf = io.BytesIO()
+    img.save(buf, format=format)
+    buf.seek(0)
+    return buf.getvalue()
+
+
+class TestImageOptimization:
+    def test_bypasses_non_image_files(self, temp_media_root):
+        file = SimpleUploadedFile("test.txt", b"hello world", content_type="text/plain")
+        res = save_local_attachment(file)
+
+        assert res["name"] == "test.txt"
+        assert res["mimeType"] == "text/plain"
+        assert res["size"] == 11
+        assert os.path.exists(os.path.join(settings.MEDIA_ROOT, res["saved_path"]))
+
+    def test_rejects_tiny_images(self, temp_media_root):
+        img_bytes = generate_test_image(150, 150)
+        file = SimpleUploadedFile("tiny.png", img_bytes, content_type="image/png")
+
+        with pytest.raises(ValidationError) as exc_info:
+            save_local_attachment(file)
+
+        assert "shortest edge (150px) is below the minimum limit of 200px" in str(
+            exc_info.value
+        )
+
+    def test_optimizes_small_valid_image(self, temp_media_root):
+        img_bytes = generate_test_image(300, 400, format="PNG")
+        file = SimpleUploadedFile("photo.png", img_bytes, content_type="image/png")
+
+        res = save_local_attachment(file)
+
+        assert res["name"] == "photo.jpg"
+        assert res["mimeType"] == "image/jpeg"
+
+        local_path = os.path.join(settings.MEDIA_ROOT, res["saved_path"])
+        assert os.path.exists(local_path)
+        with Image.open(local_path) as saved_img:
+            assert saved_img.format == "JPEG"
+            assert saved_img.size == (300, 400)
+
+    def test_resizes_large_image(self, temp_media_root):
+        img_bytes = generate_test_image(3000, 1500, format="PNG")
+        file = SimpleUploadedFile("large.png", img_bytes, content_type="image/png")
+
+        res = save_local_attachment(file)
+
+        assert res["name"] == "large.jpg"
+        assert res["mimeType"] == "image/jpeg"
+
+        local_path = os.path.join(settings.MEDIA_ROOT, res["saved_path"])
+        assert os.path.exists(local_path)
+        with Image.open(local_path) as saved_img:
+            assert saved_img.format == "JPEG"
+            assert saved_img.size == (2048, 1024)
+
+    def test_graceful_fallback_for_corrupted_image(self, temp_media_root):
+        file = SimpleUploadedFile(
+            "broken.png", b"corrupted bytes", content_type="image/png"
+        )
+
+        res = save_local_attachment(file)
+
+        assert res["name"] == "broken.png"
+        assert res["mimeType"] == "image/png"
+        assert res["size"] == 15
+        assert os.path.exists(os.path.join(settings.MEDIA_ROOT, res["saved_path"]))

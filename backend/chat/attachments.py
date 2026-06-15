@@ -1,12 +1,58 @@
 import os
 import uuid
+import io
 from django.conf import settings
 from django.core.files.storage import default_storage
+from django.core.files.uploadedfile import InMemoryUploadedFile
 import pymupdf
 import pymupdf4llm
+from PIL import Image
+from rest_framework.exceptions import ValidationError
+
+
+def optimize_uploaded_image(
+    file, max_longest_side: int = 2048, quality: int = 85
+) -> InMemoryUploadedFile:
+    if not file.content_type.startswith("image/"):
+        return file
+
+    try:
+        img = Image.open(file)
+    except Exception:
+        return file
+
+    width, height = img.size
+    shortest_edge = min(width, height)
+    if shortest_edge < 200:
+        raise ValidationError(
+            f"Image shortest edge ({shortest_edge}px) is below the minimum limit of 200px."
+        )
+
+    img.thumbnail((max_longest_side, max_longest_side), Image.Resampling.LANCZOS)
+
+    if img.mode != "RGB":
+        img = img.convert("RGB")
+
+    output = io.BytesIO()
+    img.save(output, format="JPEG", quality=quality, optimize=True)
+    output.seek(0)
+
+    name_without_ext = os.path.splitext(file.name)[0]
+    new_filename = f"{name_without_ext}.jpg"
+
+    return InMemoryUploadedFile(
+        file=output,
+        field_name=file.field_name,
+        name=new_filename,
+        content_type="image/jpeg",
+        size=output.getbuffer().nbytes,
+        charset=file.charset,
+    )
 
 
 def save_local_attachment(file) -> dict:
+    file = optimize_uploaded_image(file)
+
     ext = os.path.splitext(file.name)[1]
     unique_name = f"{uuid.uuid4()}{ext}"
     saved_path = default_storage.save(f"attachments/{unique_name}", file)

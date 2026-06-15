@@ -16,6 +16,7 @@ dependencies = [
     "httpx>=0.28.1",
     "openai>=2.34.0",
     "pgvector>=0.4.2",
+    "pillow>=12.2.0",
     "psycopg[binary]>=3.3.3",
     "pymupdf4llm>=1.27.2.3",
     "pyyaml>=6.0.3",
