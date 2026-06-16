@@ -31,8 +31,26 @@ class SearchResult:
 
 
 class DocumentService:
+    _polish_config_verified = None
+
     def __init__(self):
         self.embedding_service = EmbeddingService.get_instance()
+
+    @classmethod
+    def get_language_config(cls, language: str) -> str:
+        if language == "polish":
+            if cls._polish_config_verified is None:
+                try:
+                    with connection.cursor() as cursor:
+                        cursor.execute(
+                            "SELECT EXISTS (SELECT 1 FROM pg_ts_config WHERE cfgname = 'polish');"
+                        )
+                        exists = cursor.fetchone()[0]
+                        cls._polish_config_verified = "polish" if exists else "simple"
+                except Exception:
+                    return "simple"
+            return cls._polish_config_verified
+        return PG_REGCONFIG.get(language, "simple")
 
     def _chunk_for_content_type(
         self, raw_text: str, content_type: str
@@ -61,7 +79,7 @@ class DocumentService:
         DocumentChunk.objects.bulk_create(chunk_objects)
         DocumentChunk.objects.filter(document=document).update(
             search_vector=SearchVector(
-                "content", config=PG_REGCONFIG[document.language]
+                "content", config=self.get_language_config(document.language)
             )
         )
 
@@ -132,11 +150,10 @@ class DocumentService:
 
         return document
 
-    @staticmethod
-    def _build_bm25_sql(doc_filter: str) -> str:
+    def _build_bm25_sql(self, doc_filter: str) -> str:
         lang_values = ", ".join(
-            f"('{lang}'::varchar, '{config}'::regconfig)"
-            for lang, config in PG_REGCONFIG.items()
+            f"('{lang}'::varchar, '{self.get_language_config(lang)}'::regconfig)"
+            for lang in PG_REGCONFIG.keys()
         )
         return f"""
 WITH lang_config(language, regconfig) AS (

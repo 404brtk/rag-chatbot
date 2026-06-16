@@ -13,7 +13,7 @@ class DocumentLanguage(models.TextChoices):
 
 PG_REGCONFIG: dict[str, str] = {
     DocumentLanguage.ENGLISH: "english",
-    DocumentLanguage.POLISH: "simple",
+    DocumentLanguage.POLISH: "polish",
 }
 
 

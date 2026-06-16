@@ -1,3 +1,4 @@
+from unittest.mock import patch
 import pytest
 from asgiref.sync import sync_to_async
 
@@ -330,3 +331,39 @@ class TestSearch:
 
         assert len(results) == 1
         assert results[0].chunk_content == "django framework tutorial"
+
+
+@pytest.mark.django_db
+class TestGetLanguageConfig:
+    @pytest.fixture(autouse=True)
+    def reset_cache(self):
+        DocumentService._polish_config_verified = None
+        yield
+        DocumentService._polish_config_verified = None
+
+    def test_english_returns_english(self):
+        assert DocumentService.get_language_config("english") == "english"
+
+    def test_unknown_language_defaults_to_simple(self):
+        assert DocumentService.get_language_config("spanish") == "simple"
+
+    def test_polish_exists_in_db(self):
+        with patch("django.db.connection.cursor") as mock_cursor_context:
+            mock_cursor = mock_cursor_context.return_value.__enter__.return_value
+            mock_cursor.fetchone.return_value = (True,)
+
+            assert DocumentService.get_language_config("polish") == "polish"
+            assert DocumentService._polish_config_verified == "polish"
+
+    def test_polish_does_not_exist_in_db(self):
+        with patch("django.db.connection.cursor") as mock_cursor_context:
+            mock_cursor = mock_cursor_context.return_value.__enter__.return_value
+            mock_cursor.fetchone.return_value = (False,)
+
+            assert DocumentService.get_language_config("polish") == "simple"
+            assert DocumentService._polish_config_verified == "simple"
+
+    def test_polish_db_exception_falls_back_to_simple(self):
+        with patch("django.db.connection.cursor", side_effect=Exception("DB Down")):
+            assert DocumentService.get_language_config("polish") == "simple"
+            assert DocumentService._polish_config_verified is None
