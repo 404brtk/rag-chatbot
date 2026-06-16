@@ -3,6 +3,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import openai
 import pytest
+from pydantic import BaseModel, Field
 
 from chat.repositories import StoredMessage
 from chat.provider_gateway import (
@@ -15,6 +16,11 @@ from core.exceptions import TemporaryProviderError, PermanentProviderError
 from google.genai.errors import APIError, ClientError
 
 from conftest import DEFAULT_CONFIG
+
+
+class _TestResponseSchema(BaseModel):
+    model_config = {"extra": "forbid"}
+    success: bool = Field(description="Success flag")
 
 
 class TestProviderGateway:
@@ -44,13 +50,13 @@ class TestProviderGateway:
         mock_client.chat.completions.create.assert_called_once()
 
     @patch("chat.provider_gateway.AsyncOpenAI")
-    async def test_generate_passes_response_format(self, mock_openai_cls):
+    async def test_generate_passes_response_schema(self, mock_openai_cls):
         mock_client = MagicMock()
         mock_openai_cls.return_value = mock_client
 
         mock_response = MagicMock()
         mock_response.choices = [MagicMock()]
-        mock_response.choices[0].message.content = "Hello!"
+        mock_response.choices[0].message.content = '{"success": true}'
         mock_response.usage.model_dump.return_value = {
             "prompt_tokens": 5,
             "completion_tokens": 2,
@@ -58,25 +64,27 @@ class TestProviderGateway:
         mock_client.chat.completions.create = AsyncMock(return_value=mock_response)
 
         gateway = ProviderGateway()
-        response_format = {"type": "json_object"}
         result = await gateway.generate(
             api_key="sk-test",
             config=DEFAULT_CONFIG,
             messages=[StoredMessage(role="user", content="Hi")],
-            response_format=response_format,
+            response_schema=_TestResponseSchema,
         )
 
         assert result.provider == "openai"
-        assert result.text == "Hello!"
-        mock_client.chat.completions.create.assert_called_once_with(
-            model=DEFAULT_CONFIG.model,
-            messages=[
-                {"role": "system", "content": DEFAULT_CONFIG.system_prompt},
-                {"role": "user", "content": "Hi"},
-            ],
-            max_completion_tokens=DEFAULT_CONFIG.max_output_tokens,
-            temperature=DEFAULT_CONFIG.temperature,
-            response_format=response_format,
+        assert result.text == '{"success": true}'
+        mock_client.chat.completions.create.assert_called_once()
+        call_kwargs = mock_client.chat.completions.create.call_args[1]
+        fmt = call_kwargs["response_format"]
+        assert fmt["type"] == "json_schema"
+        assert fmt["json_schema"]["name"] == "_TestResponseSchema"
+        assert fmt["json_schema"]["strict"] is True
+        assert "title" not in fmt["json_schema"]["schema"]
+        assert fmt["json_schema"]["schema"]["type"] == "object"
+        assert fmt["json_schema"]["schema"]["required"] == ["success"]
+        assert fmt["json_schema"]["schema"]["additionalProperties"] is False
+        assert (
+            fmt["json_schema"]["schema"]["properties"]["success"]["type"] == "boolean"
         )
 
     async def test_raises_permanent_error_for_unsupported_provider(self):
@@ -644,7 +652,7 @@ class TestProviderGateway:
         ]
 
     @patch("chat.provider_gateway.genai.Client")
-    async def test_routes_to_gemini_passes_response_format(self, mock_genai_client_cls):
+    async def test_routes_to_gemini_passes_response_schema(self, mock_genai_client_cls):
         mock_client = MagicMock()
         mock_genai_client_cls.return_value = mock_client
 
@@ -661,30 +669,25 @@ class TestProviderGateway:
         )
 
         gateway = ProviderGateway()
-        response_format = {
-            "type": "json_object",
-            "json_schema": {
-                "schema": {
-                    "type": "OBJECT",
-                    "properties": {"success": {"type": "BOOLEAN"}},
-                }
-            },
-        }
         result = await gateway.generate(
             api_key="gemini-key",
             config=config,
             messages=[StoredMessage(role="user", content="Hi")],
-            response_format=response_format,
+            response_schema=_TestResponseSchema,
         )
 
         assert result.text == '{"success": true}'
         args, kwargs = mock_client.aio.models.generate_content.call_args
         gen_config = kwargs["config"]
         assert gen_config.response_mime_type == "application/json"
-        assert gen_config.response_schema == {
-            "type": "OBJECT",
-            "properties": {"success": {"type": "BOOLEAN"}},
-        }
+        assert "title" not in gen_config.response_json_schema
+        assert gen_config.response_json_schema["type"] == "object"
+        assert gen_config.response_json_schema["required"] == ["success"]
+        assert gen_config.response_json_schema["additionalProperties"] is False
+        assert (
+            gen_config.response_json_schema["properties"]["success"]["type"]
+            == "boolean"
+        )
 
     @pytest.mark.parametrize(
         "error_class,expected_exception,code",

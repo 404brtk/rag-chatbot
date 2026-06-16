@@ -11,6 +11,7 @@ import httpx
 import openai
 from django.conf import settings
 from openai import AsyncOpenAI
+from pydantic import BaseModel
 
 from core.exceptions import TemporaryProviderError, PermanentProviderError
 from .llm_config import (
@@ -134,7 +135,7 @@ class ProviderGateway:
         api_key: str,
         config: LLMConfig,
         messages: list[StoredMessage],
-        response_format: dict[str, Any] | None = None,
+        response_schema: type[BaseModel] | None = None,
     ) -> GenerationResult:
         client = self._build_client(api_key=api_key, provider=config.provider)
         try:
@@ -151,8 +152,17 @@ class ProviderGateway:
             else:
                 kwargs["max_completion_tokens"] = config.max_output_tokens
 
-            if response_format:
-                kwargs["response_format"] = response_format
+            if response_schema:
+                schema_dict = response_schema.model_json_schema()
+                schema_dict.pop("title", None)
+                kwargs["response_format"] = {
+                    "type": "json_schema",
+                    "json_schema": {
+                        "name": response_schema.__name__,
+                        "strict": True,
+                        "schema": schema_dict,
+                    },
+                }
 
             response = await client.chat.completions.create(**kwargs)
         except (
@@ -185,7 +195,7 @@ class ProviderGateway:
         api_key: str,
         config: LLMConfig,
         messages: list[StoredMessage],
-        response_format: dict[str, Any] | None = None,
+        response_schema: type[BaseModel] | None = None,
     ) -> GenerationResult:
         client = genai.Client(api_key=api_key)
         contents = _build_gemini_messages(messages)
@@ -195,13 +205,11 @@ class ProviderGateway:
             temperature=config.temperature,
             max_output_tokens=config.max_output_tokens,
         )
-        if response_format:
+        if response_schema:
+            schema_dict = response_schema.model_json_schema()
+            schema_dict.pop("title", None)
             gen_config.response_mime_type = "application/json"
-            if (
-                "json_schema" in response_format
-                and "schema" in response_format["json_schema"]
-            ):
-                gen_config.response_schema = response_format["json_schema"]["schema"]
+            gen_config.response_json_schema = schema_dict
 
         try:
             response = await client.aio.models.generate_content(
@@ -244,21 +252,21 @@ class ProviderGateway:
         api_key: str,
         config: LLMConfig,
         messages: list[StoredMessage],
-        response_format: dict[str, Any] | None = None,
+        response_schema: type[BaseModel] | None = None,
     ) -> GenerationResult:
         if config.provider in {"openai", "llamacpp"}:
             return await self._generate_openai(
                 api_key=api_key,
                 config=config,
                 messages=messages,
-                response_format=response_format,
+                response_schema=response_schema,
             )
         if config.provider == "gemini":
             return await self._generate_gemini(
                 api_key=api_key,
                 config=config,
                 messages=messages,
-                response_format=response_format,
+                response_schema=response_schema,
             )
         raise PermanentProviderError(f"Unsupported provider: {config.provider}")
 

@@ -8,7 +8,7 @@ import pytest
 from accounts.models import UserApiKey
 from chat.models import Conversation
 from chat.repositories import StoredMessage
-from chat.chat_service import ChatService
+from chat.chat_service import ChatService, QueryRefinementSchema
 from chat.compaction_service import CompactionService
 from chat.provider_gateway import ProviderGateway
 from chat.llm_config import GenerationResult, ProviderChunk, StreamEvent
@@ -502,20 +502,13 @@ class TestChatServiceGenerateReply:
         )
 
         refine_call_kwargs = mock_generate.call_args_list[0][1]
-        assert "response_format" in refine_call_kwargs
-        fmt = refine_call_kwargs["response_format"]
-        assert fmt["type"] == "json_schema"
-        assert fmt["json_schema"]["name"] == "QueryRefinement"
-        assert fmt["json_schema"]["strict"] is True
-        schema = fmt["json_schema"]["schema"]
-        assert "title" not in schema
-        assert schema["properties"]["detected_language"]["type"] == "string"
-        assert schema["properties"]["refined_english_query"]["type"] == "string"
-        assert schema["properties"]["refined_polish_query"]["type"] == "string"
-        assert "detected_language" in schema["required"]
-        assert "refined_english_query" in schema["required"]
-        assert "refined_polish_query" in schema["required"]
-        assert schema["additionalProperties"] is False
+        assert "response_schema" in refine_call_kwargs
+        assert refine_call_kwargs["response_schema"] is QueryRefinementSchema
+
+        refine_config = refine_call_kwargs["config"]
+        assert refine_config.temperature == 0.1
+        assert refine_config.max_output_tokens == 512
+        assert refine_config.system_prompt != DEFAULT_CONFIG.system_prompt
 
     @patch("chat.chat_service.ProviderGateway.generate", new_callable=AsyncMock)
     @patch.object(ChatService, "_resolve_api_key", return_value="sk-chat")

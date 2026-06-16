@@ -135,23 +135,12 @@ class ChatService:
 
         refine_message = StoredMessage(role="user", content=query)
 
-        schema_dict = QueryRefinementSchema.model_json_schema()
-        schema_dict.pop("title", None)
-        response_format = {
-            "type": "json_schema",
-            "json_schema": {
-                "name": "QueryRefinement",
-                "strict": True,
-                "schema": schema_dict,
-            },
-        }
-
         try:
             res = await self.gateway.generate(
                 api_key=api_key,
                 config=refine_config,
                 messages=[refine_message],
-                response_format=response_format,
+                response_schema=QueryRefinementSchema,
             )
             text = res.text.strip()
             refined_data = QueryRefinementSchema.model_validate_json(text)
