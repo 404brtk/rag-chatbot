@@ -206,6 +206,8 @@ class CompactionService:
         system_prompt: str,
         config: LLMConfig,
     ) -> list[StoredMessage]:
+        if not history:
+            return history
         orig_len = len(history)
         logger.debug(f"Starting chunk_truncate - original history length: {orig_len}")
         while len(history) > 1 and self.should_compact(

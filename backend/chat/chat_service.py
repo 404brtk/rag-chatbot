@@ -257,7 +257,7 @@ class ChatService:
         compaction_tokens = None
         compaction_usage = None
 
-        if session.mode == Conversation.Mode.SIDE_BY_SIDE:
+        if session.mode == Conversation.Mode.SIDE_BY_SIDE and history:
             logger.debug(
                 f"Side-by-side mode - evaluating in-memory truncation (history_len={len(history)}, variant={variant})"
             )
