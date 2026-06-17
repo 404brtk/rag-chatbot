@@ -61,9 +61,16 @@ class DocumentService:
 
     def _create_document_chunks(self, document: Document, chunks: list[str]) -> None:
         if not chunks:
+            logger.warning(
+                f"No chunks to embed/save for document '{document.filename}'"
+            )
             return
         source_url = document.source_url
+        logger.debug(
+            f"Generating embeddings for {len(chunks)} chunks of document '{document.filename}' (ID: {document.id})..."
+        )
         embeddings = self.embedding_service.embed_texts(chunks)
+        logger.debug("Generated embeddings. Storing chunks in database...")
         chunk_objects = [
             DocumentChunk(
                 document=document,
@@ -77,6 +84,7 @@ class DocumentService:
             for i, (chunk_content, embedding) in enumerate(zip(chunks, embeddings))
         ]
         DocumentChunk.objects.bulk_create(chunk_objects)
+        logger.debug("Updating search vectors for search indexing...")
         DocumentChunk.objects.filter(document=document).update(
             search_vector=SearchVector(
                 "content", config=self.get_language_config(document.language)
@@ -95,6 +103,9 @@ class DocumentService:
             max_mb = settings.FILE_UPLOAD_MAX_SIZE / (1024 * 1024)
             raise ValueError(f"File too large. Maximum size: {max_mb:.0f}MB")
 
+        logger.debug(
+            f"Processing uploaded file '{file.name}' (size={file.size} bytes, content_type={content_type}, language={language})"
+        )
         file_bytes = file.read()
         raw_text = extract_text(file_bytes, content_type)
 
@@ -102,6 +113,9 @@ class DocumentService:
             raise ValueError("Could not extract any text from the file.")
 
         chunks, meta = self._chunk_for_content_type(raw_text, content_type)
+        logger.debug(
+            f"Split uploaded document '{file.name}' into {len(chunks)} chunk(s)"
+        )
 
         document = Document.objects.create(
             user=user,
@@ -113,6 +127,9 @@ class DocumentService:
         )
 
         self._create_document_chunks(document, chunks)
+        logger.debug(
+            f"Successfully uploaded, chunked, and indexed '{file.name}' (ID: {document.id}, chunks={len(chunks)})"
+        )
 
         return document
 
@@ -134,7 +151,11 @@ class DocumentService:
         if not raw_text.strip():
             raise ValueError("Content cannot be empty.")
 
+        logger.debug(
+            f"Processing pasted text document '{filename}' (len={len(raw_text)} chars, content_type={content_type}, language={language})"
+        )
         chunks, meta = self._chunk_for_content_type(raw_text, content_type)
+        logger.debug(f"Split pasted document '{filename}' into {len(chunks)} chunk(s)")
 
         document = Document.objects.create(
             user=user,
@@ -147,6 +168,9 @@ class DocumentService:
         )
 
         self._create_document_chunks(document, chunks)
+        logger.debug(
+            f"Successfully pasted, chunked, and indexed '{filename}' (ID: {document.id}, chunks={len(chunks)})"
+        )
 
         return document
 
