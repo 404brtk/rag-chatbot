@@ -3,6 +3,7 @@ from datetime import datetime
 
 from asgiref.sync import sync_to_async
 from django.db import transaction
+from django.db.models import Q
 from django.utils import timezone
 
 from .models import Message, Conversation, MessageAttachment
@@ -15,6 +16,7 @@ class StoredMessage:
     created_at: datetime | None = None
     is_compaction_summary: bool = False
     attachments: list[dict] | None = None
+    variant: str | None = None
 
 
 def _append_message_pair_sync(
@@ -101,12 +103,24 @@ class AsyncDjangoMessageRepository:
         *,
         limit: int | None = None,
         exclude_compacted: bool = False,
+        variant: str | None = None,
     ) -> list[StoredMessage]:
         qs = (
             Message.objects.filter(conversation_id=session_id)
-            .only("role", "content", "created_at", "is_compaction_summary", "id")
+            .only(
+                "role",
+                "content",
+                "created_at",
+                "is_compaction_summary",
+                "id",
+                "variant",
+                "raw_question",
+            )
             .order_by("-created_at")
         )
+
+        if variant:
+            qs = qs.filter(Q(variant=variant) | Q(variant__isnull=True))
 
         if exclude_compacted:
             qs = qs.filter(compacted=False, truncated=False)
@@ -133,10 +147,17 @@ class AsyncDjangoMessageRepository:
         return [
             StoredMessage(
                 role="assistant" if row.role == Message.Role.AI else row.role,
-                content=row.content,
+                content=row.raw_question
+                if (
+                    row.role == Message.Role.USER
+                    and variant == "rag_off"
+                    and row.raw_question
+                )
+                else row.content,
                 created_at=row.created_at,
                 is_compaction_summary=row.is_compaction_summary,
                 attachments=attachments_by_message.get(row.id, []),
+                variant=row.variant,
             )
             for row in rows
         ]
@@ -154,6 +175,7 @@ class AsyncDjangoMessageRepository:
         usage: dict | None = None,
         is_compaction_summary: bool = False,
         attachments: list[dict] | None = None,
+        variant: str | None = None,
     ) -> Message:
         db_role = Message.Role.AI if role == "assistant" else Message.Role.USER
 
@@ -167,6 +189,7 @@ class AsyncDjangoMessageRepository:
             model=model,
             usage=usage,
             is_compaction_summary=is_compaction_summary,
+            variant=variant,
         )
 
         if attachments:

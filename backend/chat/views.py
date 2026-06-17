@@ -361,6 +361,8 @@ class MessageStreamView(View):
                     payload = {"type": event.type}
                     if event.type == "token":
                         payload["content"] = event.content
+                        if event.variant:
+                            payload["variant"] = event.variant
                     elif event.type == "done":
                         payload["message_id"] = event.message_id
                         payload["title"] = event.title

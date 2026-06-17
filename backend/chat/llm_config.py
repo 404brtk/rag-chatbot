@@ -144,6 +144,7 @@ class GenerationResult:
 @dataclass(frozen=True, slots=True)
 class StreamEvent:
     type: Literal["token", "done", "error", "compaction_done"]
+    variant: str | None = None
     content: str | None = None
     message_id: str | None = None
     title: str | None = None

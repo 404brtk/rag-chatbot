@@ -4,8 +4,8 @@ from .models import Conversation, Message, MessageAttachment
 
 @admin.register(Conversation)
 class ConversationAdmin(admin.ModelAdmin):
-    list_display = ("title", "user", "status", "last_message_at", "created_at")
-    list_filter = ("status",)
+    list_display = ("title", "user", "status", "mode", "last_message_at", "created_at")
+    list_filter = ("status", "mode")
     search_fields = ("title", "user__email")
     list_select_related = ("user",)
     ordering = ("-last_message_at",)
@@ -21,6 +21,7 @@ class MessageAdmin(admin.ModelAdmin):
     list_display = (
         "conversation",
         "role",
+        "variant",
         "provider",
         "model",
         "compacted",
@@ -30,6 +31,7 @@ class MessageAdmin(admin.ModelAdmin):
     )
     list_filter = (
         "role",
+        "variant",
         "provider",
         "compacted",
         "truncated",

@@ -167,6 +167,7 @@ class ChatService:
         config: LLMConfig,
         document_ids: list[str] | None = None,
         attachments: list[dict] | None = None,
+        variant: str | None = None,
     ):
         raw_user_text = (user_text or "").strip()
         if not raw_user_text:
@@ -226,7 +227,10 @@ class ChatService:
         session = await Conversation.objects.aget(id=session_id)
 
         history = await self.repository.list_messages(
-            session_id=session_id, limit=config.history_limit, exclude_compacted=True
+            session_id=session_id,
+            limit=config.history_limit,
+            exclude_compacted=True,
+            variant=variant,
         )
 
         stored_attachments = []
@@ -253,15 +257,26 @@ class ChatService:
         compaction_tokens = None
         compaction_usage = None
 
-        if self.compaction.should_compact(
+        if session.mode == Conversation.Mode.SIDE_BY_SIDE:
+            logger.debug(
+                f"Side-by-side mode - evaluating in-memory truncation (history_len={len(history)}, variant={variant})"
+            )
+            history = self.compaction.chunk_truncate(
+                history=history,
+                new_message=new_msg,
+                system_prompt=config.system_prompt,
+                config=config,
+            )
+        elif self.compaction.should_compact(
             system_prompt=config.system_prompt,
             history=history,
             new_message=new_msg,
             config=config,
         ):
-            logger.debug(
-                f"Compaction triggered - max_input_tokens={config.max_input_tokens} threshold={config.compaction_threshold:.2f} history_len={len(history)}"
-            )
+            if config.compaction_enabled:
+                logger.debug(
+                    f"Compaction triggered - max_input_tokens={config.max_input_tokens} threshold={config.compaction_threshold:.2f} history_len={len(history)}"
+                )
             summary = ""
             tokens: list[str] = []
             summary_usage = None
@@ -295,6 +310,7 @@ class ChatService:
                     session_id=session_id,
                     limit=config.history_limit,
                     exclude_compacted=True,
+                    variant=variant,
                 )
                 logger.debug(
                     f"Compaction completed - summary_len={len(summary)} tokens={len(tokens)}"
@@ -437,6 +453,236 @@ class ChatService:
         usage_data = None
         prep = None
         try:
+            raw_user_text = (user_text or "").strip()
+            if not raw_user_text:
+                raise InvalidInputError("user_text cannot be empty")
+
+            session = await Conversation.objects.aget(id=session_id)
+
+            if session.mode == Conversation.Mode.SIDE_BY_SIDE:
+                prep_on = None
+                prep_off = None
+                user_msg = None
+                assistant_text_on = ""
+                assistant_text_off = ""
+                usage_data_on = None
+                usage_data_off = None
+                assistant_msg_on = None
+
+                try:
+                    prep_on = await self._prepare_generation(
+                        user=user,
+                        session_id=session_id,
+                        user_text=user_text,
+                        config=config,
+                        document_ids=document_ids,
+                        attachments=attachments,
+                        variant="rag_on",
+                    )
+
+                    prep_off = await self._prepare_generation(
+                        user=user,
+                        session_id=session_id,
+                        user_text=user_text,
+                        config=config,
+                        document_ids=None,
+                        attachments=attachments,
+                        variant="rag_off",
+                    )
+
+                    user_msg = await self.repository.append_message(
+                        session=session,
+                        role="user",
+                        content=prep_on.user_message,
+                        provider=config.provider,
+                        model=config.model,
+                        raw_question=prep_on.raw_user_text,
+                        context=prep_on.context_chunks,
+                        attachments=attachments,
+                    )
+
+                    async for chunk in self.gateway.generate_stream(
+                        api_key=prep_on.api_key,
+                        config=prep_on.config,
+                        messages=prep_on.messages,
+                    ):
+                        if chunk.text:
+                            assistant_text_on += chunk.text
+                            yield StreamEvent(
+                                type="token", content=chunk.text, variant="rag_on"
+                            )
+                        if chunk.usage:
+                            usage_data_on = chunk.usage
+
+                    if usage_data_on is None:
+                        usage_data_on = {
+                            "prompt_tokens": self.counter.estimate_system_tokens(
+                                prep_on.config.system_prompt, prep_on.config.model
+                            )
+                            + sum(
+                                self.counter.estimate_message_tokens(
+                                    m, prep_on.config.model
+                                )
+                                for m in prep_on.messages
+                            ),
+                            "completion_tokens": self.counter.estimate_text_tokens(
+                                assistant_text_on, prep_on.config.model
+                            ),
+                        }
+
+                    assistant_msg_on = await self.repository.append_message(
+                        session=session,
+                        role="assistant",
+                        content=assistant_text_on,
+                        provider=prep_on.config.provider,
+                        model=prep_on.config.model,
+                        usage=usage_data_on,
+                        variant="rag_on",
+                    )
+
+                    async for chunk in self.gateway.generate_stream(
+                        api_key=prep_off.api_key,
+                        config=prep_off.config,
+                        messages=prep_off.messages,
+                    ):
+                        if chunk.text:
+                            assistant_text_off += chunk.text
+                            yield StreamEvent(
+                                type="token", content=chunk.text, variant="rag_off"
+                            )
+                        if chunk.usage:
+                            usage_data_off = chunk.usage
+
+                    if usage_data_off is None:
+                        usage_data_off = {
+                            "prompt_tokens": self.counter.estimate_system_tokens(
+                                prep_off.config.system_prompt, prep_off.config.model
+                            )
+                            + sum(
+                                self.counter.estimate_message_tokens(
+                                    m, prep_off.config.model
+                                )
+                                for m in prep_off.messages
+                            ),
+                            "completion_tokens": self.counter.estimate_text_tokens(
+                                assistant_text_off, prep_off.config.model
+                            ),
+                        }
+
+                    await self.repository.append_message(
+                        session=session,
+                        role="assistant",
+                        content=assistant_text_off,
+                        provider=prep_off.config.provider,
+                        model=prep_off.config.model,
+                        usage=usage_data_off,
+                        variant="rag_off",
+                    )
+
+                    title = None
+                    if not session.title:
+                        title = self._compute_title(prep_on.raw_user_text)
+                        session.title = title
+                    session.last_message_at = timezone.now()
+                    fields = ["last_message_at"]
+                    if title:
+                        fields.append("title")
+                    await session.asave(update_fields=fields)
+
+                    yield StreamEvent(
+                        type="done",
+                        message_id=str(assistant_msg_on.id),
+                        title=title,
+                        usage=usage_data_on,
+                        provider=config.provider,
+                        model=config.model,
+                    )
+                    return
+
+                except asyncio.CancelledError:
+                    if user_msg:
+                        if not assistant_msg_on:
+                            if not assistant_text_on:
+                                assistant_text_on = "*Generation stopped.*"
+                            if usage_data_on is None:
+                                try:
+                                    usage_data_on = {
+                                        "prompt_tokens": self.counter.estimate_system_tokens(
+                                            prep_on.config.system_prompt,
+                                            prep_on.config.model,
+                                        )
+                                        + sum(
+                                            self.counter.estimate_message_tokens(
+                                                m, prep_on.config.model
+                                            )
+                                            for m in prep_on.messages
+                                        ),
+                                        "completion_tokens": self.counter.estimate_text_tokens(
+                                            assistant_text_on, prep_on.config.model
+                                        ),
+                                    }
+                                except Exception:
+                                    usage_data_on = {
+                                        "prompt_tokens": 0,
+                                        "completion_tokens": 0,
+                                    }
+                            try:
+                                await self.repository.append_message(
+                                    session=session,
+                                    role="assistant",
+                                    content=assistant_text_on,
+                                    provider=prep_on.config.provider,
+                                    model=prep_on.config.model,
+                                    usage=usage_data_on,
+                                    variant="rag_on",
+                                )
+                            except Exception:
+                                pass
+
+                        if not assistant_text_off:
+                            assistant_text_off = "*Generation stopped.*"
+                        if usage_data_off is None:
+                            try:
+                                usage_data_off = {
+                                    "prompt_tokens": self.counter.estimate_system_tokens(
+                                        prep_off.config.system_prompt,
+                                        prep_off.config.model,
+                                    )
+                                    + sum(
+                                        self.counter.estimate_message_tokens(
+                                            m, prep_off.config.model
+                                        )
+                                        for m in prep_off.messages
+                                    ),
+                                    "completion_tokens": self.counter.estimate_text_tokens(
+                                        assistant_text_off, prep_off.config.model
+                                    ),
+                                }
+                            except Exception:
+                                usage_data_off = {
+                                    "prompt_tokens": 0,
+                                    "completion_tokens": 0,
+                                }
+                        try:
+                            await self.repository.append_message(
+                                session=session,
+                                role="assistant",
+                                content=assistant_text_off,
+                                provider=prep_off.config.provider,
+                                model=prep_off.config.model,
+                                usage=usage_data_off,
+                                variant="rag_off",
+                            )
+                        except Exception:
+                            pass
+
+                        try:
+                            session.last_message_at = timezone.now()
+                            await session.asave(update_fields=["last_message_at"])
+                        except Exception:
+                            pass
+                    raise
+
             prep = await self._prepare_generation(
                 user=user,
                 session_id=session_id,
@@ -526,6 +772,8 @@ class ChatService:
             )
 
         except asyncio.CancelledError:
+            if session and session.mode == Conversation.Mode.SIDE_BY_SIDE:
+                raise
             if not session:
                 try:
                     session = await Conversation.objects.aget(id=session_id)

@@ -150,6 +150,52 @@ class TestAsyncListMessages:
             "saved_path": "attachments/att-1",
         }
 
+    async def test_list_messages_filters_by_variant_and_neutral(
+        self, repo, conversation
+    ):
+        await Message.objects.acreate(
+            conversation=conversation, role="user", content="hello shared"
+        )
+        await Message.objects.acreate(
+            conversation=conversation, role="ai", content="answer on", variant="rag_on"
+        )
+        await Message.objects.acreate(
+            conversation=conversation,
+            role="ai",
+            content="answer off",
+            variant="rag_off",
+        )
+
+        msgs_on = await repo.list_messages(
+            session_id=str(conversation.id), variant="rag_on"
+        )
+        assert [m.content for m in msgs_on] == ["hello shared", "answer on"]
+
+        msgs_off = await repo.list_messages(
+            session_id=str(conversation.id), variant="rag_off"
+        )
+        assert [m.content for m in msgs_off] == ["hello shared", "answer off"]
+
+    async def test_list_messages_serves_raw_question_for_rag_off(
+        self, repo, conversation
+    ):
+        await Message.objects.acreate(
+            conversation=conversation,
+            role="user",
+            content="stuffed context hello",
+            raw_question="clean question",
+        )
+
+        msgs_on = await repo.list_messages(
+            session_id=str(conversation.id), variant="rag_on"
+        )
+        assert msgs_on[0].content == "stuffed context hello"
+
+        msgs_off = await repo.list_messages(
+            session_id=str(conversation.id), variant="rag_off"
+        )
+        assert msgs_off[0].content == "clean question"
+
 
 @pytest.mark.django_db(transaction=True)
 class TestAsyncAppendMessage:

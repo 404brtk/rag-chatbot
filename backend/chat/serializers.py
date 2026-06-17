@@ -45,6 +45,7 @@ class MessageSerializer(serializers.ModelSerializer):
             "is_compaction_summary",
             "created_at",
             "attachments",
+            "variant",
         ]
         read_only_fields = [
             "id",
@@ -58,11 +59,12 @@ class MessageSerializer(serializers.ModelSerializer):
             "is_compaction_summary",
             "created_at",
             "attachments",
+            "variant",
         ]
 
 
 class ConversationSerializer(serializers.ModelSerializer):
     class Meta:
         model = Conversation
-        fields = ["id", "title", "status", "created_at", "last_message_at"]
+        fields = ["id", "title", "status", "mode", "created_at", "last_message_at"]
         read_only_fields = ["id", "status", "created_at", "last_message_at"]

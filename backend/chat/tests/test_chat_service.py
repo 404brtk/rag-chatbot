@@ -825,15 +825,17 @@ class TestChatServiceGenerateReplyStream:
         await conversation.arefresh_from_db()
         assert conversation.last_message_at > original_ts
 
+    @pytest.mark.django_db(transaction=True)
     @patch.object(
         ChatService, "_resolve_api_key", side_effect=MissingApiKeyError("No key")
     )
-    async def test_error_event_on_missing_api_key(self, mock_resolve):
+    async def test_error_event_on_missing_api_key(self, mock_resolve, user_a):
+        conversation = await Conversation.objects.acreate(user=user_a)
         service = ChatService(repository=self.mock_repo)
         events = await self._collect_events(
             service,
-            user=self.mock_user,
-            session_id="test-session",
+            user=user_a,
+            session_id=str(conversation.id),
             user_text="Hello",
             config=DEFAULT_CONFIG,
         )
@@ -1027,6 +1029,93 @@ class TestChatServiceGenerateReplyStream:
         assistant_call = self.mock_repo.append_message.call_args_list[1][1]
         assert assistant_call["role"] == "assistant"
         assert assistant_call["content"] == "Partial reply"
+
+    @pytest.mark.django_db(transaction=True)
+    @patch("chat.chat_service.ProviderGateway.generate_stream")
+    @patch.object(ChatService, "_resolve_api_key", return_value="sk-chat")
+    async def test_side_by_side_stream_generates_both_variants(
+        self, mock_resolve, mock_stream, user_a
+    ):
+        async def gen():
+            yield ProviderChunk(text="RAG ")
+            yield ProviderChunk(text="response")
+
+        mock_stream.side_effect = lambda *args, **kwargs: gen()
+        conversation = await Conversation.objects.acreate(
+            user=user_a, title="Existing", mode=Conversation.Mode.SIDE_BY_SIDE
+        )
+
+        service = ChatService(repository=self.mock_repo)
+        events = await self._collect_events(
+            service,
+            user=user_a,
+            session_id=str(conversation.id),
+            user_text="Hello",
+            config=DEFAULT_CONFIG,
+        )
+
+        tokens_on = [e for e in events if e.type == "token" and e.variant == "rag_on"]
+        tokens_off = [e for e in events if e.type == "token" and e.variant == "rag_off"]
+        dones = [e for e in events if e.type == "done"]
+
+        assert len(tokens_on) == 2
+        assert "".join(t.content for t in tokens_on) == "RAG response"
+        assert len(tokens_off) == 2
+        assert "".join(t.content for t in tokens_off) == "RAG response"
+        assert len(dones) == 1
+
+        assert self.mock_repo.append_message.call_count == 3
+        user_call = self.mock_repo.append_message.call_args_list[0][1]
+        assert user_call["role"] == "user"
+
+        rag_on_call = self.mock_repo.append_message.call_args_list[1][1]
+        assert rag_on_call["role"] == "assistant"
+        assert rag_on_call["variant"] == "rag_on"
+        assert rag_on_call["content"] == "RAG response"
+
+        rag_off_call = self.mock_repo.append_message.call_args_list[2][1]
+        assert rag_off_call["role"] == "assistant"
+        assert rag_off_call["variant"] == "rag_off"
+        assert rag_off_call["content"] == "RAG response"
+
+    @pytest.mark.django_db(transaction=True)
+    @patch("chat.chat_service.ProviderGateway.generate_stream")
+    @patch.object(ChatService, "_resolve_api_key", return_value="sk-chat")
+    async def test_side_by_side_cancelled_during_rag_on_writes_stopped_placeholders(
+        self, mock_resolve, mock_stream, user_a
+    ):
+        async def gen():
+            yield ProviderChunk(text="RAG partial")
+            raise asyncio.CancelledError()
+
+        mock_stream.side_effect = lambda *args, **kwargs: gen()
+        conversation = await Conversation.objects.acreate(
+            user=user_a, title="Existing", mode=Conversation.Mode.SIDE_BY_SIDE
+        )
+
+        service = ChatService(repository=self.mock_repo)
+        with pytest.raises(asyncio.CancelledError):
+            await self._collect_events(
+                service,
+                user=user_a,
+                session_id=str(conversation.id),
+                user_text="Hello",
+                config=DEFAULT_CONFIG,
+            )
+
+        assert self.mock_repo.append_message.call_count == 3
+        user_call = self.mock_repo.append_message.call_args_list[0][1]
+        assert user_call["role"] == "user"
+
+        rag_on_call = self.mock_repo.append_message.call_args_list[1][1]
+        assert rag_on_call["role"] == "assistant"
+        assert rag_on_call["variant"] == "rag_on"
+        assert rag_on_call["content"] == "RAG partial"
+
+        rag_off_call = self.mock_repo.append_message.call_args_list[2][1]
+        assert rag_off_call["role"] == "assistant"
+        assert rag_off_call["variant"] == "rag_off"
+        assert rag_off_call["content"] == "*Generation stopped.*"
 
 
 class TestChatServiceCompaction:

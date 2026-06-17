@@ -13,6 +13,10 @@ class Conversation(UUIDModel):
         ACTIVE = "active", "Active"
         ARCHIVED = "archived", "Archived"
 
+    class Mode(models.TextChoices):
+        DIRECT = "direct", "Direct"
+        SIDE_BY_SIDE = "side-by-side", "Side-by-Side"
+
     user = models.ForeignKey(
         settings.AUTH_USER_MODEL,
         on_delete=models.CASCADE,
@@ -24,6 +28,11 @@ class Conversation(UUIDModel):
         choices=Status.choices,
         default=Status.ACTIVE,
         db_index=True,
+    )
+    mode = models.CharField(
+        max_length=16,
+        choices=Mode.choices,
+        default=Mode.DIRECT,
     )
     created_at = models.DateTimeField(auto_now_add=True)
     last_message_at = models.DateTimeField(default=timezone.now, db_index=True)
@@ -42,10 +51,20 @@ class Message(UUIDModel):
         USER = "user", "User"
         AI = "ai", "AI"
 
+    class Variant(models.TextChoices):
+        RAG_ON = "rag_on", "RAG On"
+        RAG_OFF = "rag_off", "RAG Off"
+
     conversation = models.ForeignKey(
         Conversation, on_delete=models.CASCADE, related_name="messages"
     )
     role = models.CharField(max_length=10, choices=Role.choices, db_index=True)
+    variant = models.CharField(
+        max_length=16,
+        choices=Variant.choices,
+        null=True,
+        blank=True,
+    )
     content = models.TextField()
     raw_question = models.TextField(null=True, blank=True)
     context = models.JSONField(null=True, blank=True)
