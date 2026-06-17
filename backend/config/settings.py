@@ -173,8 +173,12 @@ RRF_K = 60
 HYBRID_RETRIEVAL_POOL = 50
 
 LLAMACPP_BASE_URL = env.str("LLAMACPP_BASE_URL", default="http://localhost:8080")
+OPENROUTER_BASE_URL = env.str(
+    "OPENROUTER_BASE_URL", default="https://openrouter.ai/api/v1"
+)
 
 OPENAI_MODELS = env.list("OPENAI_MODELS", default=["gpt-5.4-mini"])
+OPENROUTER_MODELS = env.list("OPENROUTER_MODELS", default=["openrouter/owl-alpha"])
 GEMINI_MODELS = env.list(
     "GEMINI_MODELS", default=["gemini-3.1-flash-lite", "gemini-3-flash-preview"]
 )

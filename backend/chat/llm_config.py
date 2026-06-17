@@ -6,10 +6,10 @@ from .repositories import StoredMessage
 
 @dataclass(frozen=True, slots=True)
 class LLMConfig:
-    provider: Literal["openai", "llamacpp", "gemini"]
+    provider: Literal["openai", "llamacpp", "openrouter", "gemini"]
     model: str
     system_prompt: str
-    compaction_provider: Literal["openai", "llamacpp", "gemini"]
+    compaction_provider: Literal["openai", "llamacpp", "openrouter", "gemini"]
     compaction_model: str
     max_input_tokens: int = 12_000  # TODO: adjust
     max_output_tokens: int = 4_096  # TODO: adjust
@@ -28,7 +28,7 @@ class LLMConfig:
         object.__setattr__(self, "compaction_model", self.compaction_model.strip())
 
 
-SUPPORTED_PROVIDERS = ["openai", "llamacpp", "gemini"]
+SUPPORTED_PROVIDERS = ["openai", "llamacpp", "openrouter", "gemini"]
 
 
 def validate_llm_config(data: dict) -> dict | None:

@@ -73,7 +73,7 @@ class TestChatServiceStatic:
         assert ChatService._compute_title("  Hello  ") == "Hello"
 
     @patch("chat.chat_service.ProviderGateway.discover_llamacpp_models")
-    async def test_returns_both_providers(self, mock_discover):
+    async def test_returns_all_providers(self, mock_discover):
         mock_discover.return_value = [
             {"id": "local-model", "object": "model", "owned_by": "llamacpp"}
         ]
@@ -82,6 +82,8 @@ class TestChatServiceStatic:
 
         assert "openai" in models
         assert "llamacpp" in models
+        assert "openrouter" in models
+        assert "gemini" in models
         assert models["llamacpp"] == ["local-model"]
 
     @patch("chat.chat_service.ProviderGateway.discover_llamacpp_models")
@@ -442,6 +444,14 @@ class TestChatServiceGenerateReply:
         key = await service._resolve_api_key(self.mock_user, "llamacpp")
         assert key == "llamacpp"
         mock_get.assert_not_called()
+
+    @patch("chat.chat_service.UserApiKey.objects.aget", new_callable=AsyncMock)
+    async def test_resolve_api_key_looks_up_db_for_openrouter(self, mock_get):
+        mock_get.return_value = MagicMock(encrypted_key="sk-or-v1-test")
+        service = ChatService(repository=self.mock_repo)
+        key = await service._resolve_api_key(self.mock_user, "openrouter")
+        assert key == "sk-or-v1-test"
+        mock_get.assert_called_once_with(user=self.mock_user, provider="openrouter")
 
     @patch("chat.chat_service.UserApiKey.objects.aget")
     async def test_raises_missing_api_key_error_when_no_key_set(self, mock_get):

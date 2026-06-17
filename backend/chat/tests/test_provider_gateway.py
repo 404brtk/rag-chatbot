@@ -87,6 +87,35 @@ class TestProviderGateway:
             fmt["json_schema"]["schema"]["properties"]["success"]["type"] == "boolean"
         )
 
+    @patch("chat.provider_gateway.AsyncOpenAI")
+    async def test_routes_to_openrouter_for_openrouter_provider(self, mock_openai_cls):
+        mock_client = MagicMock()
+        mock_openai_cls.return_value = mock_client
+
+        mock_response = MagicMock()
+        mock_response.choices = [MagicMock()]
+        mock_response.choices[0].message.content = "Hello from OpenRouter!"
+        mock_response.usage.model_dump.return_value = {
+            "prompt_tokens": 5,
+            "completion_tokens": 2,
+        }
+        mock_client.chat.completions.create = AsyncMock(return_value=mock_response)
+
+        config = replace(
+            DEFAULT_CONFIG, provider="openrouter", model="openrouter/owl-alpha"
+        )
+
+        gateway = ProviderGateway()
+        result = await gateway.generate(
+            api_key="sk-or-v1-test",
+            config=config,
+            messages=[StoredMessage(role="user", content="Hi")],
+        )
+
+        assert result.provider == "openrouter"
+        assert result.text == "Hello from OpenRouter!"
+        mock_client.chat.completions.create.assert_called_once()
+
     async def test_raises_permanent_error_for_unsupported_provider(self):
         gateway = ProviderGateway()
         config = replace(DEFAULT_CONFIG, provider="unsupported")

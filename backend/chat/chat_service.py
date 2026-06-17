@@ -859,6 +859,10 @@ class ChatService:
         if openai_models:
             models["openai"] = openai_models
 
+        openrouter_models = list(getattr(settings, "OPENROUTER_MODELS", []))
+        if openrouter_models:
+            models["openrouter"] = openrouter_models
+
         gemini_models = list(getattr(settings, "GEMINI_MODELS", []))
         if gemini_models:
             models["gemini"] = gemini_models

@@ -127,6 +127,13 @@ class ProviderGateway:
                 timeout=60.0,
                 max_retries=2,
             )
+        if provider == "openrouter":
+            return AsyncOpenAI(
+                base_url=settings.OPENROUTER_BASE_URL,
+                api_key=api_key,
+                timeout=30.0,
+                max_retries=2,
+            )
         return AsyncOpenAI(api_key=api_key, timeout=30.0, max_retries=2)
 
     async def _generate_openai(
@@ -147,7 +154,7 @@ class ProviderGateway:
                 ],
                 "temperature": config.temperature,
             }
-            if config.provider == "llamacpp":
+            if config.provider in {"llamacpp", "openrouter"}:
                 kwargs["max_tokens"] = config.max_output_tokens
             else:
                 kwargs["max_completion_tokens"] = config.max_output_tokens
@@ -254,7 +261,7 @@ class ProviderGateway:
         messages: list[StoredMessage],
         response_schema: type[BaseModel] | None = None,
     ) -> GenerationResult:
-        if config.provider in {"openai", "llamacpp"}:
+        if config.provider in {"openai", "llamacpp", "openrouter"}:
             return await self._generate_openai(
                 api_key=api_key,
                 config=config,
@@ -289,7 +296,7 @@ class ProviderGateway:
                 "stream": True,
                 "stream_options": {"include_usage": True},
             }
-            if config.provider == "llamacpp":
+            if config.provider in {"llamacpp", "openrouter"}:
                 kwargs["max_tokens"] = config.max_output_tokens
             else:
                 kwargs["max_completion_tokens"] = config.max_output_tokens
@@ -363,7 +370,7 @@ class ProviderGateway:
         config: LLMConfig,
         messages: list[StoredMessage],
     ):
-        if config.provider in {"openai", "llamacpp"}:
+        if config.provider in {"openai", "llamacpp", "openrouter"}:
             async for chunk in self._generate_openai_stream(
                 api_key=api_key, config=config, messages=messages
             ):

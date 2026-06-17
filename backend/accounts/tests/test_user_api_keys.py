@@ -75,7 +75,7 @@ class TestUserApiKeyModel:
     def test_same_user_can_have_different_providers(self, user_a):
         UserApiKey.objects.create(user=user_a, provider="openai", encrypted_key="key-1")
         UserApiKey.objects.create(
-            user=user_a, provider="anthropic", encrypted_key="key-2"
+            user=user_a, provider="openrouter", encrypted_key="key-2"
         )
         assert user_a.api_keys.count() == 2
 

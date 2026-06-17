@@ -33,7 +33,7 @@ class TestValidateLLMConfig:
         assert result is not None
         assert (
             result["error"]
-            == "Unsupported provider: anthropic. Supported: openai, llamacpp, gemini."
+            == "Unsupported provider: anthropic. Supported: openai, llamacpp, openrouter, gemini."
         )
 
     def test_rejects_missing_model(self):
@@ -128,7 +128,7 @@ class TestValidateLLMConfig:
         assert result is not None
         assert (
             result["error"]
-            == "Unsupported compaction provider: anthropic. Supported: openai, llamacpp, gemini."
+            == "Unsupported compaction provider: anthropic. Supported: openai, llamacpp, openrouter, gemini."
         )
 
     def test_rejects_max_input_tokens_too_low(self):
