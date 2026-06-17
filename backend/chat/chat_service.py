@@ -82,9 +82,12 @@ class ChatService:
     def _format_rag_context(search_results) -> str:
         chunks = []
         for i, result in enumerate(search_results, 1):
+            content = result.chunk_content
+            if result.source_url:
+                content = f"Source: {result.source_url}\n\n{content}"
             chunks.append(
                 f"[{i}] (source: {result.document_filename}, chunk {result.chunk_index})\n"
-                f"{result.chunk_content}"
+                f"{content}"
             )
         return "\n\n".join(chunks)
 
@@ -215,6 +218,7 @@ class ChatService:
                         "document_filename": r.document_filename,
                         "chunk_index": r.chunk_index,
                         "score": r.score,
+                        "source_url": r.source_url,
                     }
                     for i, r in enumerate(search_results, 1)
                 ]

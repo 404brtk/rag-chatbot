@@ -28,6 +28,7 @@ class SearchResult:
     document_filename: str
     chunk_index: int
     score: float
+    source_url: str | None = None
 
 
 class DocumentService:
@@ -38,18 +39,6 @@ class DocumentService:
 
     @classmethod
     def get_language_config(cls, language: str) -> str:
-        if language == "polish":
-            if cls._polish_config_verified is None:
-                try:
-                    with connection.cursor() as cursor:
-                        cursor.execute(
-                            "SELECT EXISTS (SELECT 1 FROM pg_ts_config WHERE cfgname = 'polish');"
-                        )
-                        exists = cursor.fetchone()[0]
-                        cls._polish_config_verified = "polish" if exists else "simple"
-                except Exception:
-                    return "simple"
-            return cls._polish_config_verified
         return PG_REGCONFIG.get(language, "simple")
 
     def _chunk_for_content_type(
@@ -65,7 +54,6 @@ class DocumentService:
                 f"No chunks to embed/save for document '{document.filename}'"
             )
             return
-        source_url = document.source_url
         logger.debug(
             f"Generating embeddings for {len(chunks)} chunks of document '{document.filename}' (ID: {document.id})..."
         )
@@ -74,9 +62,7 @@ class DocumentService:
         chunk_objects = [
             DocumentChunk(
                 document=document,
-                content=f"Source: {source_url}\n\n{chunk_content}"
-                if source_url
-                else chunk_content,
+                content=chunk_content,
                 chunk_index=i,
                 embedding=embedding,
                 word_count=len(chunk_content.split()),
@@ -430,6 +416,7 @@ SELECT tf.chunk_id,
                     document_filename=chunk.document.filename,
                     chunk_index=chunk.chunk_index,
                     score=rrf_scores[chunk_id],
+                    source_url=chunk.document.source_url,
                 )
             )
 
