@@ -22,3 +22,4 @@ wheels/
 .DS_Store
 
 media/
+data/
