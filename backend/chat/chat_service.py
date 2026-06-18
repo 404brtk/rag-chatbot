@@ -33,6 +33,9 @@ from .repositories import AsyncDjangoMessageRepository, StoredMessage
 logger = logging.getLogger(__name__)
 
 
+REFINEMENT_HISTORY_LIMIT = 5
+
+
 class QueryRefinementSchema(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -41,6 +44,12 @@ class QueryRefinementSchema(BaseModel):
     )
     refined_english_query: str = Field(description="Optimized query in English")
     refined_polish_query: str = Field(description="Optimized query in Polish")
+
+    @property
+    def formatted_query(self) -> str:
+        if self.detected_language == "polish":
+            return f"{self.refined_polish_query} ; {self.refined_english_query}"
+        return f"{self.refined_english_query} ; {self.refined_polish_query}"
 
 
 @dataclass(frozen=True, slots=True)
@@ -109,25 +118,30 @@ class ChatService:
         query: str,
         config: LLMConfig,
         api_key: str,
-    ) -> dict[str, str]:
-        system_prompt = (
-            "You are a highly efficient search query translation and refinement assistant.\n"
-            "Your task is to analyze a raw user query, detect its primary language (Polish or English), "
-            "and output an optimized version of this query for both languages.\n\n"
-            "Follow these strict guidelines for refinement:\n"
-            '1. Language Detection: Detect if the input query is primarily in "polish" or "english".\n'
-            "2. Typos & Grammar: Correct any typos, spelling errors, or grammatical issues in both outputs.\n"
-            "3. Keyword Expansion & Synonyms:\n"
-            "   - Expand the query naturally using relevant synonyms or search keywords.\n"
-            "   - Keep the expanded query concise and highly focused on the user's search intent.\n"
-            '   - Avoid "query drift" (do not add unrelated tech terms or generic categories that shift the original meaning).\n'
-            '4. Preserve Jargon and Brands: Keep proper nouns, brand names, product models (e.g., "iPhone 15", "Kubernetes"), '
-            "and domain-specific jargon intact in both languages.\n"
-            "5. Translation:\n"
-            "   - Translate the core intent of the query accurately.\n"
-            "   - Ensure 'refined_english_query' sounds natural to native English searchers.\n"
-            "   - Ensure 'refined_polish_query' sounds natural to native Polish searchers (handling proper Polish search terms)."
-        )
+        history: list[StoredMessage],
+    ) -> QueryRefinementSchema:
+        system_prompt = """You are a highly efficient search query translation and refinement assistant.
+Your task is to analyze a raw user query in the context of the conversation history, detect its primary language (Polish or English), and output an optimized version of this query for both languages.
+
+You will receive the recent conversation history followed by the user's latest query.
+Use the history to:
+- Resolve pronouns and references (e.g. 'it', 'that', 'the previous one', 'this topic')
+- Understand the topic when the latest message is vague or a follow-up
+- Produce self-contained, standalone refined queries that capture the full intent without requiring the conversation history to understand them
+
+Follow these strict guidelines for refinement:
+1. Language Detection: Detect if the input query is primarily in "polish" or "english".
+2. Typos & Grammar: Correct any typos, spelling errors, or grammatical issues in both outputs.
+3. Keyword Expansion & Synonyms:
+   - Expand the query naturally using relevant synonyms or search keywords.
+   - Keep the expanded query concise and highly focused on the user's search intent.
+   - Avoid "query drift" (do not add unrelated tech terms or generic categories that shift the original meaning).
+4. Preserve Jargon and Brands: Keep proper nouns, brand names, product models (e.g., "iPhone 15", "Kubernetes"), and domain-specific jargon intact in both languages.
+5. Translation:
+   - Translate the core intent of the query accurately.
+   - Ensure 'refined_english_query' sounds natural to native English searchers.
+   - Ensure 'refined_polish_query' sounds natural to native Polish searchers (handling proper Polish search terms).
+6. Context Resolution: If the query references prior conversation, incorporate enough context into the refined queries so they are meaningful standalone."""
 
         refine_config = replace(
             config,
@@ -136,30 +150,30 @@ class ChatService:
             temperature=0.1,
         )
 
-        refine_message = StoredMessage(role="user", content=query)
+        refinement_messages = []
+        recent = history[-REFINEMENT_HISTORY_LIMIT:] if history else []
+        for msg in recent:
+            refinement_messages.append(
+                StoredMessage(role=msg.role, content=msg.content)
+            )
+        refinement_messages.append(StoredMessage(role="user", content=query))
 
         try:
             res = await self.gateway.generate(
                 api_key=api_key,
                 config=refine_config,
-                messages=[refine_message],
+                messages=refinement_messages,
                 response_schema=QueryRefinementSchema,
             )
             text = res.text.strip()
-            refined_data = QueryRefinementSchema.model_validate_json(text)
-
-            return {
-                "detected_language": refined_data.detected_language,
-                "refined_english_query": refined_data.refined_english_query.strip(),
-                "refined_polish_query": refined_data.refined_polish_query.strip(),
-            }
+            return QueryRefinementSchema.model_validate_json(text)
         except Exception as e:
             logger.warning(f"Query refinement failed, falling back to raw query: {e}")
-            return {
-                "detected_language": "english",
-                "refined_english_query": query,
-                "refined_polish_query": query,
-            }
+            return QueryRefinementSchema(
+                detected_language="english",
+                refined_english_query=query,
+                refined_polish_query=query,
+            )
 
     async def _prepare_generation(
         self,
@@ -181,30 +195,43 @@ class ChatService:
             user, config.compaction_provider
         )
 
+        if config.provider == "llamacpp":
+            n_ctx = await ProviderGateway.discover_llamacpp_context()
+            if config.max_input_tokens > n_ctx:
+                config = replace(config, max_input_tokens=n_ctx)
+
+        session = await Conversation.objects.aget(id=session_id)
+
+        history = await self.repository.list_messages(
+            session_id=session_id,
+            limit=config.history_limit,
+            exclude_compacted=True,
+            variant=variant,
+        )
+
         user_message = raw_user_text
         context_chunks = None
 
         if document_ids is not None and raw_user_text:
-            refinement = await self._refine_query(
+            refined = await self._refine_query(
                 user=user,
                 query=raw_user_text,
                 config=config,
                 api_key=api_key,
+                history=history,
             )
-            detected_language = refinement["detected_language"]
-            refined_english = refinement["refined_english_query"]
-            refined_polish = refinement["refined_polish_query"]
 
             logger.debug(
-                f"Query refined - original='{raw_user_text}' detected_language={detected_language} "
-                f"refined_english='{refined_english}' refined_polish='{refined_polish}'"
+                f"Query refined - original='{raw_user_text}' detected_language={refined.detected_language} "
+                f"refined_english='{refined.refined_english_query}' refined_polish='{refined.refined_polish_query}' "
+                f"formatted_query='{refined.formatted_query}'"
             )
 
             search_results = await self.document_service.search(
                 user=user,
-                query=raw_user_text,
-                refined_english_query=refined_english,
-                refined_polish_query=refined_polish,
+                query=refined.formatted_query,
+                refined_english_query=refined.refined_english_query,
+                refined_polish_query=refined.refined_polish_query,
                 document_ids=document_ids or None,
             )
             if search_results:
@@ -222,20 +249,6 @@ class ChatService:
                     }
                     for i, r in enumerate(search_results, 1)
                 ]
-
-        if config.provider == "llamacpp":
-            n_ctx = await ProviderGateway.discover_llamacpp_context()
-            if config.max_input_tokens > n_ctx:
-                config = replace(config, max_input_tokens=n_ctx)
-
-        session = await Conversation.objects.aget(id=session_id)
-
-        history = await self.repository.list_messages(
-            session_id=session_id,
-            limit=config.history_limit,
-            exclude_compacted=True,
-            variant=variant,
-        )
 
         stored_attachments = []
         if attachments:
