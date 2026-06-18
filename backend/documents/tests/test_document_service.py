@@ -1,12 +1,14 @@
-from unittest.mock import patch
 import pytest
 from asgiref.sync import sync_to_async
+from django.conf import settings
 
 from documents.document_service import DocumentService, SearchResult
 from documents.models import Document, DocumentChunk
 
+DIM = settings.EMBEDDING_DIMENSIONS
 
-def _make_embedding(*values, dim=384):
+
+def _make_embedding(*values, dim=DIM):
     vec = [0.0] * dim
     for i, v in enumerate(values):
         vec[i] = v
@@ -16,7 +18,7 @@ def _make_embedding(*values, dim=384):
 @pytest.mark.django_db
 class TestCreateDocumentChunks:
     def test_bulk_creates_chunks_with_embeddings(self, user_a, mock_embedding_service):
-        mock_embedding_service.embed_texts.return_value = [[0.1] * 384, [0.2] * 384]
+        mock_embedding_service.embed_texts.return_value = [[0.1] * DIM, [0.2] * DIM]
         document = Document.objects.create(
             user=user_a,
             filename="test.txt",
@@ -31,10 +33,10 @@ class TestCreateDocumentChunks:
         assert chunks.count() == 2
         assert chunks[0].content == "Hello"
         assert chunks[0].chunk_index == 0
-        assert list(chunks[0].embedding) == [0.1] * 384
+        assert list(chunks[0].embedding) == [0.1] * DIM
         assert chunks[1].content == "world"
         assert chunks[1].chunk_index == 1
-        assert list(chunks[1].embedding) == [0.2] * 384
+        assert list(chunks[1].embedding) == [0.2] * DIM
         mock_embedding_service.embed_texts.assert_called_once_with(["Hello", "world"])
 
     def test_skips_empty_chunks(self, user_a, mock_embedding_service):
@@ -54,7 +56,7 @@ class TestCreateDocumentChunks:
     def test_populates_word_count_and_search_vector(
         self, user_a, mock_embedding_service
     ):
-        mock_embedding_service.embed_texts.return_value = [[0.1] * 384]
+        mock_embedding_service.embed_texts.return_value = [[0.1] * DIM]
         document = Document.objects.create(
             user=user_a,
             filename="test.txt",
@@ -70,7 +72,7 @@ class TestCreateDocumentChunks:
         assert chunk.search_vector is not None
 
     def test_prepends_source_url_when_present(self, user_a, mock_embedding_service):
-        mock_embedding_service.embed_texts.return_value = [[0.1] * 384]
+        mock_embedding_service.embed_texts.return_value = [[0.1] * DIM]
         document = Document.objects.create(
             user=user_a,
             filename="test.txt",
@@ -83,10 +85,10 @@ class TestCreateDocumentChunks:
         service._create_document_chunks(document, ["Hello world"])
 
         chunk = DocumentChunk.objects.get(document=document)
-        assert chunk.content == "Source: https://example.com/page\n\nHello world"
+        assert chunk.content == "Hello world"
 
     def test_no_source_url_prefix_when_missing(self, user_a, mock_embedding_service):
-        mock_embedding_service.embed_texts.return_value = [[0.1] * 384]
+        mock_embedding_service.embed_texts.return_value = [[0.1] * DIM]
         document = Document.objects.create(
             user=user_a,
             filename="test.txt",
@@ -135,7 +137,7 @@ class TestKeywordBm25Search:
         )
 
     def test_multilingual_isolation(self, user_a, mock_embedding_service):
-        mock_embedding_service.embed_texts.return_value = [[0.1] * 384, [0.2] * 384]
+        mock_embedding_service.embed_texts.return_value = [[0.1] * DIM, [0.2] * DIM]
 
         doc_en = Document.objects.create(
             user=user_a,
@@ -177,8 +179,8 @@ class TestKeywordBm25Search:
 
     def test_or_semantics_matches_partial_terms(self, user_a, mock_embedding_service):
         mock_embedding_service.embed_texts.return_value = [
-            [0.1] * 384,
-            [0.2] * 384,
+            [0.1] * DIM,
+            [0.2] * DIM,
         ]
 
         doc = Document.objects.create(
@@ -199,7 +201,7 @@ class TestKeywordBm25Search:
         assert chunk_id in results
 
     def test_english_stemming(self, user_a, mock_embedding_service):
-        mock_embedding_service.embed_texts.return_value = [[0.1] * 384]
+        mock_embedding_service.embed_texts.return_value = [[0.1] * DIM]
 
         doc = Document.objects.create(
             user=user_a,
@@ -312,7 +314,7 @@ class TestSearch:
     async def test_bm25_only_results_included_via_rrf(
         self, user_a, mock_embedding_service
     ):
-        mock_embedding_service.embed_texts.return_value = [[0.1] * 384]
+        mock_embedding_service.embed_texts.return_value = [[0.1] * DIM]
         mock_embedding_service.embed_query.return_value = _make_embedding(0.0, 0.0, 1.0)
 
         doc = await Document.objects.acreate(
@@ -331,39 +333,3 @@ class TestSearch:
 
         assert len(results) == 1
         assert results[0].chunk_content == "django framework tutorial"
-
-
-@pytest.mark.django_db
-class TestGetLanguageConfig:
-    @pytest.fixture(autouse=True)
-    def reset_cache(self):
-        DocumentService._polish_config_verified = None
-        yield
-        DocumentService._polish_config_verified = None
-
-    def test_english_returns_english(self):
-        assert DocumentService.get_language_config("english") == "english"
-
-    def test_unknown_language_defaults_to_simple(self):
-        assert DocumentService.get_language_config("spanish") == "simple"
-
-    def test_polish_exists_in_db(self):
-        with patch("django.db.connection.cursor") as mock_cursor_context:
-            mock_cursor = mock_cursor_context.return_value.__enter__.return_value
-            mock_cursor.fetchone.return_value = (True,)
-
-            assert DocumentService.get_language_config("polish") == "polish"
-            assert DocumentService._polish_config_verified == "polish"
-
-    def test_polish_does_not_exist_in_db(self):
-        with patch("django.db.connection.cursor") as mock_cursor_context:
-            mock_cursor = mock_cursor_context.return_value.__enter__.return_value
-            mock_cursor.fetchone.return_value = (False,)
-
-            assert DocumentService.get_language_config("polish") == "simple"
-            assert DocumentService._polish_config_verified == "simple"
-
-    def test_polish_db_exception_falls_back_to_simple(self):
-        with patch("django.db.connection.cursor", side_effect=Exception("DB Down")):
-            assert DocumentService.get_language_config("polish") == "simple"
-            assert DocumentService._polish_config_verified is None

@@ -1,5 +1,5 @@
 from datetime import datetime, timezone
-from unittest.mock import patch
+from unittest.mock import patch, MagicMock
 import pytest
 from cryptography.fernet import Fernet
 from django.contrib.auth import get_user_model
@@ -75,9 +75,22 @@ def api_key(user_a):
 
 
 @pytest.fixture
-def mock_embedding_service():
-    with patch("documents.document_service.EmbeddingService.get_instance") as mock:
+def mock_embedding_service(settings):
+    dim = settings.EMBEDDING_DIMENSIONS
+    with patch("documents.embeddings.EmbeddingService.get_instance") as mock:
         instance = mock.return_value
-        instance.embed_texts.return_value = [[0.1] * 384 for _ in range(200)]
-        instance.embed_query.return_value = [0.1] * 384
+
+        def dynamic_embed(texts):
+            if isinstance(instance.embed_texts.return_value, MagicMock):
+                return [[0.1] * dim for _ in texts]
+            return instance.embed_texts.return_value
+
+        instance.embed_texts.side_effect = dynamic_embed
+        instance.embed_query.return_value = [0.1] * dim
         yield instance
+
+
+@pytest.fixture(autouse=True)
+def disable_tokenizer_in_tests():
+    with patch("documents.chunking.get_tokenizer", return_value=None):
+        yield

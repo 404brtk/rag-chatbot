@@ -505,7 +505,7 @@ class TestChatServiceGenerateReply:
 
         mock_doc_svc_cls.return_value.search.assert_called_once_with(
             user=self.mock_user,
-            query="wyszukaj",
+            query="wyszukaj ; search",
             refined_english_query="search",
             refined_polish_query="wyszukaj",
             document_ids=["doc-1"],
@@ -514,6 +514,10 @@ class TestChatServiceGenerateReply:
         refine_call_kwargs = mock_generate.call_args_list[0][1]
         assert "response_schema" in refine_call_kwargs
         assert refine_call_kwargs["response_schema"] is QueryRefinementSchema
+
+        refine_messages = refine_call_kwargs["messages"]
+        assert len(refine_messages) == 1
+        assert refine_messages[0].content == "wyszukaj"
 
         refine_config = refine_call_kwargs["config"]
         assert refine_config.temperature == 0.1
@@ -563,7 +567,7 @@ class TestChatServiceGenerateReply:
 
         mock_doc_svc_cls.return_value.search.assert_called_once_with(
             user=self.mock_user,
-            query="python",
+            query="python ; python",
             refined_english_query="python",
             refined_polish_query="python",
             document_ids=["doc-1"],
@@ -612,7 +616,7 @@ class TestChatServiceGenerateReply:
 
         mock_doc_svc_cls.return_value.search.assert_called_once_with(
             user=self.mock_user,
-            query="python",
+            query="python ; python",
             refined_english_query="python",
             refined_polish_query="python",
             document_ids=["doc-1"],

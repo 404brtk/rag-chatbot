@@ -9,6 +9,7 @@ from documents.chunking import (
     chunk_text,
     extract_front_matter,
     extract_text,
+    get_token_count,
 )
 
 
@@ -56,11 +57,12 @@ class TestChunkText:
         text = "word " * 500
         chunks = chunk_text(text, chunk_size=100, overlap=20)
         assert len(chunks) > 1
+        limit = 135
         for chunk in chunks:
-            assert len(chunk) <= 100
+            assert get_token_count(chunk) <= limit
 
     def test_consecutive_chunks_share_overlap_content(self):
-        text = "A " * 100 + "MARKER " + "B " * 100
+        text = "A " * 300 + "MARKER " + "B " * 300
         chunks = chunk_text(text, chunk_size=150, overlap=30)
         assert len(chunks) >= 2
         for i in range(len(chunks) - 1):

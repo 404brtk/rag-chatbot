@@ -1,11 +1,13 @@
 from unittest.mock import patch
 
 import pytest
+from django.conf import settings
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.urls import reverse
 from rest_framework import status
 
-from documents.models import Document, DocumentChunk
+from core.exceptions import TemporaryProviderError
+from documents.models import Document, DocumentChunk, DocumentLanguage
 
 
 @pytest.mark.django_db
@@ -92,7 +94,10 @@ class TestDocumentViewSet:
             user=user_a, filename="mine.txt", content_type="text/plain", raw_text="123"
         )
         DocumentChunk.objects.create(
-            document=doc, content="123", chunk_index=0, embedding=[0.0] * 384
+            document=doc,
+            content="123",
+            chunk_index=0,
+            embedding=[0.0] * settings.EMBEDDING_DIMENSIONS,
         )
 
         assert DocumentChunk.objects.count() == 1
@@ -195,8 +200,6 @@ class TestDocumentViewSet:
     def test_upload_temporary_provider_error(
         self, auth_client_a, mock_embedding_service
     ):
-        from core.exceptions import TemporaryProviderError
-
         mock_embedding_service.embed_texts.side_effect = TemporaryProviderError(
             "Embedding API down"
         )
@@ -207,3 +210,14 @@ class TestDocumentViewSet:
 
         assert response.status_code == status.HTTP_503_SERVICE_UNAVAILABLE
         assert "AI service temporarily unavailable" in response.json()["error"]
+
+
+class TestDocumentLanguage:
+    def test_english_returns_english(self):
+        assert DocumentLanguage.get_pg_regconfig("english") == "english"
+
+    def test_polish_returns_polish(self):
+        assert DocumentLanguage.get_pg_regconfig("polish") == "polish"
+
+    def test_unknown_language_defaults_to_simple(self):
+        assert DocumentLanguage.get_pg_regconfig("spanish") == "simple"
