@@ -1,5 +1,5 @@
 import logging
-import threading
+import httpx
 
 from django.conf import settings
 
@@ -9,61 +9,68 @@ logger = logging.getLogger(__name__)
 
 
 class EmbeddingService:
+    QUERY_PREFIX = "query: "
+    PASSAGE_PREFIX = "passage: "
+
     _instance = None
-    _model = None
-    _dimensions = None
-    _lock = threading.Lock()
 
     @classmethod
     def get_instance(cls) -> "EmbeddingService":
         if cls._instance is None:
-            with cls._lock:
-                if cls._instance is None:
-                    cls._instance = cls()
+            cls._instance = cls()
         return cls._instance
-
-    def _load_model(self):
-        if self._model is not None:
-            return
-        with self._lock:
-            if self._model is not None:
-                return
-            try:
-                from sentence_transformers import SentenceTransformer
-
-                model_name = settings.EMBEDDING_MODEL
-                logger.info(f"Loading embedding model: {model_name}")
-                self._model = SentenceTransformer(model_name)
-                self._dimensions = self._model.get_embedding_dimension()
-                logger.info(f"Embedding model loaded (dimensions={self._dimensions})")
-
-                if self._dimensions != settings.EMBEDDING_DIMENSIONS:
-                    raise RuntimeError(
-                        f"Embedding model '{model_name}' produces {self._dimensions} dimensions, "
-                        f"but settings.EMBEDDING_DIMENSIONS is {settings.EMBEDDING_DIMENSIONS}. "
-                        f"Update settings or run a migration."
-                    )
-            except AttributeError, RuntimeError:
-                raise
-            except Exception:
-                logger.exception("Failed to load embedding model")
-                raise TemporaryProviderError("Embedding model initialization failed")
 
     @property
     def dimensions(self) -> int:
-        self._load_model()
-        return self._dimensions
+        return settings.EMBEDDING_DIMENSIONS
 
-    def embed_texts(self, texts: list[str]) -> list[list[float]]:
-        self._load_model()
+    def _embed_raw(
+        self, texts: list[str], context_msg: str = "embedding generation"
+    ) -> list[list[float]]:
+        url = f"{settings.TEI_EMBEDDING_URL.rstrip('/')}/embed"
+        batch_size = 32
+        all_embeddings = []
+
         try:
-            embeddings = self._model.encode(
-                texts, normalize_embeddings=True, show_progress_bar=False
-            )
-            return embeddings.tolist()
+            with httpx.Client(timeout=60.0) as client:
+                for i in range(0, len(texts), batch_size):
+                    batch = texts[i : i + batch_size]
+                    response = client.post(
+                        url,
+                        json={"inputs": batch, "truncate": True},
+                        headers={"Content-Type": "application/json"},
+                    )
+                    response.raise_for_status()
+                    embeddings = response.json()
+                    if not isinstance(embeddings, list) or not all(
+                        isinstance(emb, list) for emb in embeddings
+                    ):
+                        raise ValueError(
+                            "Expected a list of lists of floats from TEI endpoint"
+                        )
+                    all_embeddings.extend(embeddings)
+            return all_embeddings
+        except httpx.HTTPStatusError as e:
+            if e.response.status_code < 500:
+                raise
+            logger.exception(f"TEI server error during {context_msg}")
+            raise TemporaryProviderError("Embedding generation failed")
         except Exception:
-            logger.exception("Failed to generate embeddings")
+            logger.exception(
+                f"Failed to generate embeddings via TEI during {context_msg}"
+            )
             raise TemporaryProviderError("Embedding generation failed")
 
+    def embed_texts(self, texts: list[str]) -> list[list[float]]:
+        if not texts:
+            return []
+        return self._embed_raw(
+            [f"{self.PASSAGE_PREFIX}{t}" for t in texts],
+            context_msg="embedding generation",
+        )
+
     def embed_query(self, query: str) -> list[float]:
-        return self.embed_texts([query])[0]
+        return self._embed_raw(
+            [f"{self.QUERY_PREFIX}{query}"],
+            context_msg="query embedding",
+        )[0]
