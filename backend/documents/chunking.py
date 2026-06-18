@@ -1,16 +1,68 @@
 import logging
 import re
+import threading
 import tomllib
 from dataclasses import dataclass
 
 import pymupdf
 import pymupdf4llm
 import yaml
+from django.conf import settings
 
 logger = logging.getLogger(__name__)
+# TODO: consider implementing parent-child chunking in the future
 
-CHUNK_SIZE = 1000
-CHUNK_OVERLAP = 200
+HEADER_RE = re.compile(r"^(#{1,6})\s+(.+)$")
+UNORDERED_LIST_RE = re.compile(r"^[-*+]\s+")
+ORDERED_LIST_RE = re.compile(r"^\d+\.\s+")
+
+CHUNK_SIZE = 512
+CHUNK_OVERLAP = 64
+
+
+class TokenizerLoader:
+    _tokenizer = None
+    _init_attempted = False
+    _lock = threading.Lock()
+
+    @classmethod
+    def get_tokenizer(cls):
+        if cls._init_attempted:
+            return cls._tokenizer
+        with cls._lock:
+            if cls._init_attempted:
+                return cls._tokenizer
+            try:
+                from transformers import AutoTokenizer
+
+                cls._tokenizer = AutoTokenizer.from_pretrained(settings.EMBEDDING_MODEL)
+                cls._tokenizer.model_max_length = 1_000_000
+            except ImportError:
+                logger.info(
+                    "transformers package not installed, using character-based chunking"
+                )
+            except Exception:
+                logger.exception(
+                    "Failed to load tokenizer, using character-based chunking"
+                )
+            finally:
+                cls._init_attempted = True
+        return cls._tokenizer
+
+
+def get_tokenizer():
+    return TokenizerLoader.get_tokenizer()
+
+
+def get_token_count(text: str) -> int:
+    tok = get_tokenizer()
+    if tok is not None:
+        try:
+            return len(tok.encode(text, add_special_tokens=False))
+        except Exception:
+            pass
+    return int(len(text.split()) * 1.33)
+
 
 SUPPORTED_CONTENT_TYPES = frozenset(
     {
@@ -89,7 +141,7 @@ def extract_front_matter(text: str) -> tuple[dict, str]:
 
 
 def _is_header(line: str) -> tuple[int, str] | None:
-    match = re.match(r"^(#{1,6})\s+(.+)$", line)
+    match = HEADER_RE.match(line)
     if match:
         return len(match.group(1)), match.group(2).strip()
     return None
@@ -112,7 +164,7 @@ def _is_list_line(line: str) -> bool:
     stripped = line.lstrip()
     if not stripped:
         return False
-    return bool(re.match(r"^[-*+]\s+", stripped) or re.match(r"^\d+\.\s+", stripped))
+    return bool(UNORDERED_LIST_RE.match(stripped) or ORDERED_LIST_RE.match(stripped))
 
 
 def _is_table_line(line: str) -> bool:
@@ -187,7 +239,7 @@ def _scan_markdown(text: str) -> list[Block]:
                         _is_list_line(lines[lookahead])
                         or lines[lookahead].startswith(("  ", "\t"))
                     ):
-                        i += 1
+                        i = lookahead
                         continue
                     i += 1
                     break
@@ -224,14 +276,46 @@ def chunk_text(
     if not text:
         return []
 
-    if len(text) <= chunk_size:
+    tokenizer = get_tokenizer()
+    if tokenizer is not None:
+        try:
+            token_ids = tokenizer.encode(text, add_special_tokens=False)
+            if len(token_ids) <= chunk_size:
+                return [text]
+
+            chunks: list[str] = []
+            start = 0
+            while start < len(token_ids):
+                end = start + chunk_size
+                chunk_tokens = token_ids[start:end]
+                decoded = tokenizer.decode(
+                    chunk_tokens, skip_special_tokens=True
+                ).strip()
+                if decoded:
+                    chunks.append(decoded)
+
+                next_start = end - overlap
+                if next_start <= start:
+                    next_start = end
+                start = next_start
+                if start >= len(token_ids):
+                    break
+            return chunks
+        except Exception:
+            logger.exception(
+                "Failed to chunk by tokens, falling back to character chunking."
+            )
+
+    char_chunk_size = chunk_size * 5
+    char_overlap = overlap * 5
+
+    if len(text) <= char_chunk_size:
         return [text]
 
     chunks: list[str] = []
     start = 0
-
     while start < len(text):
-        end = start + chunk_size
+        end = start + char_chunk_size
 
         if end < len(text):
             boundary = _find_split_boundary(text, start, end)
@@ -242,7 +326,7 @@ def chunk_text(
         if chunk:
             chunks.append(chunk)
 
-        next_start = end - overlap
+        next_start = end - char_overlap
         if next_start <= start:
             next_start = end
         start = next_start
@@ -265,11 +349,11 @@ class MarkdownChunker:
     def _add_part(self, part: str) -> None:
         if not self.current_parts and self.overlap_buffer:
             self.current_parts.append(self.overlap_buffer)
-            self.current_size = len(self.overlap_buffer)
+            self.current_size = get_token_count(self.overlap_buffer)
         if self.current_size > 0:
             self.current_size += 2
         self.current_parts.append(part)
-        self.current_size += len(part)
+        self.current_size += get_token_count(part)
 
     def _flush(self) -> None:
         if not self.current_parts:
@@ -279,18 +363,36 @@ class MarkdownChunker:
         self.chunks.append(assembled)
 
         content_only = "\n\n".join(self.current_parts)
-        if len(content_only) > self.overlap:
-            self.overlap_buffer = content_only[-self.overlap :]
+
+        tokenizer = get_tokenizer()
+        if tokenizer is not None:
+            try:
+                token_ids = tokenizer.encode(content_only, add_special_tokens=False)
+                if len(token_ids) > self.overlap:
+                    overlap_tokens = token_ids[-self.overlap :]
+                    self.overlap_buffer = tokenizer.decode(
+                        overlap_tokens, skip_special_tokens=True
+                    ).strip()
+                else:
+                    self.overlap_buffer = content_only
+            except Exception:
+                if len(content_only) > self.overlap * 5:
+                    self.overlap_buffer = content_only[-(self.overlap * 5) :]
+                else:
+                    self.overlap_buffer = content_only
         else:
-            self.overlap_buffer = content_only
+            if len(content_only) > self.overlap * 5:
+                self.overlap_buffer = content_only[-(self.overlap * 5) :]
+            else:
+                self.overlap_buffer = content_only
 
         self.current_parts = []
         self.current_size = 0
 
     def _add_block(self, block: Block) -> None:
-        block_size = len(block.content)
+        block_size = get_token_count(block.content)
 
-        if block.kind == "paragraph" and block_size > self.max_size:
+        if block_size > self.max_size:
             if self.current_parts:
                 self._flush()
             sub_chunks = chunk_text(
@@ -301,27 +403,18 @@ class MarkdownChunker:
                 self._flush()
             return
 
-        if block_size > self.max_size and self.current_parts:
+        if self.current_size > 0 and self.current_size + block_size + 2 > self.max_size:
             self._flush()
 
-        if self.current_size > 0 and self.current_size + block_size + 2 > self.max_size:
-            if block_size > self.max_size:
-                self._flush()
-                self._add_part(block.content)
-                self._flush()
-            else:
-                self._flush()
-                self._add_part(block.content)
-        else:
-            self._add_part(block.content)
+        self._add_part(block.content)
 
     def _handle_header(self, block: Block) -> None:
         self._flush()
+        self.overlap_buffer = ""
         level = int(block.kind[1:])
         while self.header_path and self.header_path[-1][0] >= level:
             self.header_path.pop()
         self.header_path.append((level, block.content))
-        self.overlap_buffer = ""
 
     def _process_blocks(self, blocks: list[Block]) -> list[str]:
         for block in blocks:
