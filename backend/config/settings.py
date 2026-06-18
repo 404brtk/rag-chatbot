@@ -162,8 +162,9 @@ FILE_UPLOAD_MAX_SIZE = env.int("FILE_UPLOAD_MAX_SIZE", default=10 * 1024 * 1024)
 DATA_UPLOAD_MAX_MEMORY_SIZE = 10 * 1024 * 1024  # 10 MB
 FILE_UPLOAD_MAX_MEMORY_SIZE = 10 * 1024 * 1024  # 10 MB
 
-EMBEDDING_MODEL = "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2"  # TODO: try intfloat/multilingual-e5-small or other too
-EMBEDDING_DIMENSIONS = 384
+EMBEDDING_MODEL = "intfloat/multilingual-e5-base"
+EMBEDDING_DIMENSIONS = 768
+TEI_EMBEDDING_URL = env.str("TEI_EMBEDDING_URL", default="http://localhost:8002")
 
 RAG_TOP_K = env.int("RAG_TOP_K", default=5)
 

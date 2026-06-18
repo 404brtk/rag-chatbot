@@ -1,32 +1,54 @@
 services:
-  db:
-    image: pgvector/pgvector:pg18
-    container_name: pg-rag-chatbot
-    restart: unless-stopped
-    environment:
-      POSTGRES_USER: ${POSTGRES_USER}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
-      POSTGRES_DB: ${POSTGRES_DB}
-    ports:
-      - "${POSTGRES_PORT:-5432}:5432"
-    volumes:
-      - pgdata:/var/lib/postgresql
-      - ./resources/dictionaries/polish.dict:/usr/share/postgresql/18/tsearch_data/polish.dict
-      - ./resources/dictionaries/polish.affix:/usr/share/postgresql/18/tsearch_data/polish.affix
-      - ./resources/stopwords/polish.stop:/usr/share/postgresql/18/tsearch_data/polish.stop
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-      start_period: 15s
+    db:
+        image: pgvector/pgvector:pg18
+        container_name: pg-rag-chatbot
+        restart: unless-stopped
+        environment:
+            POSTGRES_USER: ${POSTGRES_USER}
+            POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+            POSTGRES_DB: ${POSTGRES_DB}
+        ports:
+            - "${POSTGRES_PORT:-5432}:5432"
+        volumes:
+            - pgdata:/var/lib/postgresql
+            - ./resources/dictionaries/polish.dict:/usr/share/postgresql/18/tsearch_data/polish.dict
+            - ./resources/dictionaries/polish.affix:/usr/share/postgresql/18/tsearch_data/polish.affix
+            - ./resources/stopwords/polish.stop:/usr/share/postgresql/18/tsearch_data/polish.stop
+        healthcheck:
+            test:
+                [
+                    "CMD-SHELL",
+                    "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}",
+                ]
+            interval: 10s
+            timeout: 5s
+            retries: 5
+            start_period: 15s
 
-  redis:
-    image: redis:8.6-alpine
-    container_name: redis-rag-chatbot
-    restart: unless-stopped
-    ports:
-      - "6380:6379"
+    redis:
+        image: redis:8.6-alpine
+        container_name: redis-rag-chatbot
+        restart: unless-stopped
+        ports:
+            - "6380:6379"
+
+    embedding-model:
+        image: ghcr.io/huggingface/text-embeddings-inference:120-1.9
+        container_name: embedding-model-rag-chatbot
+        restart: unless-stopped
+        pull_policy: always
+        ports:
+            - "8002:80"
+        volumes:
+            - ./data:/data
+        command: --model-id intfloat/multilingual-e5-base
+        deploy:
+            resources:
+                reservations:
+                    devices:
+                        - driver: nvidia
+                          count: all
+                          capabilities: [gpu]
 
 volumes:
-  pgdata:
+    pgdata:
