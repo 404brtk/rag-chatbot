@@ -16,7 +16,7 @@ from .chunking import (
     extract_text,
 )
 from .embeddings import EmbeddingService
-from .models import PG_REGCONFIG, Document, DocumentChunk
+from .models import Document, DocumentChunk, DocumentLanguage
 
 logger = logging.getLogger(__name__)
 
@@ -32,14 +32,8 @@ class SearchResult:
 
 
 class DocumentService:
-    _polish_config_verified = None
-
     def __init__(self):
         self.embedding_service = EmbeddingService.get_instance()
-
-    @classmethod
-    def get_language_config(cls, language: str) -> str:
-        return PG_REGCONFIG.get(language, "simple")
 
     def _chunk_for_content_type(
         self, raw_text: str, content_type: str
@@ -73,7 +67,7 @@ class DocumentService:
         logger.debug("Updating search vectors for search indexing...")
         DocumentChunk.objects.filter(document=document).update(
             search_vector=SearchVector(
-                "content", config=self.get_language_config(document.language)
+                "content", config=DocumentLanguage.get_pg_regconfig(document.language)
             )
         )
 
@@ -162,8 +156,8 @@ class DocumentService:
 
     def _build_bm25_sql(self, doc_filter: str) -> str:
         lang_values = ", ".join(
-            f"('{lang}'::varchar, '{self.get_language_config(lang)}'::regconfig)"
-            for lang in PG_REGCONFIG.keys()
+            f"('{lang}'::varchar, '{DocumentLanguage.get_pg_regconfig(lang)}'::regconfig)"
+            for lang in DocumentLanguage.values
         )
         return f"""
 WITH lang_config(language, regconfig) AS (

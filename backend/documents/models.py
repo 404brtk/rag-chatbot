@@ -10,11 +10,13 @@ class DocumentLanguage(models.TextChoices):
     ENGLISH = "english", "English"
     POLISH = "polish", "Polish"
 
-
-PG_REGCONFIG: dict[str, str] = {
-    DocumentLanguage.ENGLISH: "english",
-    DocumentLanguage.POLISH: "polish",
-}
+    @classmethod
+    def get_pg_regconfig(cls, language: str) -> str:
+        mapping = {
+            cls.ENGLISH: "english",
+            cls.POLISH: "polish",
+        }
+        return mapping.get(language, "simple")
 
 
 class Document(UUIDModel):
