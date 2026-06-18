@@ -34,6 +34,7 @@ jobs:
         ports:
           - 5432:5432
         options: >-
+          --name pg_db
           --health-cmd "pg_isready -U test_user -d test_db"
           --health-interval 2s
           --health-timeout 3s
@@ -46,6 +47,12 @@ jobs:
 
     steps:
       - uses: actions/checkout@v6
+
+      - name: Copy Polish search dictionaries to Postgres container
+        run: |
+          docker cp resources/dictionaries/polish.dict pg_db:/usr/share/postgresql/18/tsearch_data/polish.dict
+          docker cp resources/dictionaries/polish.affix pg_db:/usr/share/postgresql/18/tsearch_data/polish.affix
+          docker cp resources/stopwords/polish.stop pg_db:/usr/share/postgresql/18/tsearch_data/polish.stop
 
       - name: install uv
         uses: astral-sh/setup-uv@v8.1.0
