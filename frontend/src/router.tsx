@@ -14,6 +14,10 @@ export const router = createBrowserRouter([
         Component: ChatPage,
       },
       {
+        path: APP_ROUTES.chatDetail.slice(1),
+        Component: ChatPage,
+      },
+      {
         path: APP_ROUTES.history.slice(1),
         Component: HistoryPage,
       },
