@@ -94,23 +94,12 @@ class DocumentService:
         if not raw_text.strip():
             raise ValueError("Could not extract any text from the file.")
 
-        chunks, meta = self._chunk_for_content_type(raw_text, content_type)
-        logger.debug(
-            f"Split uploaded document '{file.name}' into {len(chunks)} chunk(s)"
-        )
-
         document = Document.objects.create(
             user=user,
             filename=file.name,
             content_type=content_type,
             raw_text=raw_text,
             language=language,
-            meta=meta,
-        )
-
-        self._create_document_chunks(document, chunks)
-        logger.debug(
-            f"Successfully uploaded, chunked, and indexed '{file.name}' (ID: {document.id}, chunks={len(chunks)})"
         )
 
         return document
@@ -136,8 +125,6 @@ class DocumentService:
         logger.debug(
             f"Processing pasted text document '{filename}' (len={len(raw_text)} chars, content_type={content_type}, language={language})"
         )
-        chunks, meta = self._chunk_for_content_type(raw_text, content_type)
-        logger.debug(f"Split pasted document '{filename}' into {len(chunks)} chunk(s)")
 
         document = Document.objects.create(
             user=user,
@@ -145,13 +132,7 @@ class DocumentService:
             content_type=content_type,
             raw_text=raw_text,
             language=language,
-            meta=meta,
             source_url=source_url,
-        )
-
-        self._create_document_chunks(document, chunks)
-        logger.debug(
-            f"Successfully pasted, chunked, and indexed '{filename}' (ID: {document.id}, chunks={len(chunks)})"
         )
 
         return document

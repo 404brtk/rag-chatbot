@@ -6,13 +6,13 @@ from django.utils import timezone
 from rest_framework import mixins, viewsets, status
 from rest_framework.response import Response
 
-from core.exceptions import TemporaryProviderError, PermanentProviderError
-from .models import DocumentLanguage, GetDocsJob
+from core.exceptions import TemporaryProviderError
+from .models import Document, DocumentLanguage, GetDocsJob
 from .pagination import DocumentCursorPagination, GetDocsJobCursorPagination
 from .serializers import DocumentSerializer, GetDocsJobSerializer
 from .document_service import DocumentService
 from .get_docs_client import GetDocsClient
-from .tasks import poll_get_docs_job
+from .tasks import poll_get_docs_job, process_document_embedding_task
 
 logger = logging.getLogger(__name__)
 
@@ -51,29 +51,32 @@ class DocumentViewSet(
 
         service = DocumentService()
         try:
-            document = service.process_upload(
-                user=request.user, file=file, language=language
-            )
+            with transaction.atomic():
+                document = service.process_upload(
+                    user=request.user, file=file, language=language
+                )
+
+                def queue_task():
+                    try:
+                        process_document_embedding_task.delay(document.id)
+                    except Exception as queue_err:
+                        logger.exception(
+                            f"Failed to queue Celery task for document {document.id}"
+                        )
+                        Document.objects.filter(id=document.id).update(
+                            status=Document.Status.FAILED,
+                            error_message=f"Broker queue error: {str(queue_err)}",
+                        )
+
+                transaction.on_commit(queue_task)
         except ValueError as e:
             return Response(
                 {"error": str(e)},
                 status=status.HTTP_400_BAD_REQUEST,
             )
-        except TemporaryProviderError as e:
-            return Response(
-                {
-                    "error": f"AI service temporarily unavailable during processing: {str(e)}"
-                },
-                status=status.HTTP_503_SERVICE_UNAVAILABLE,
-            )
-        except PermanentProviderError as e:
-            return Response(
-                {"error": f"AI service permanent error during processing: {str(e)}"},
-                status=status.HTTP_502_BAD_GATEWAY,
-            )
 
         serializer = self.get_serializer(document)
-        return Response(serializer.data, status=status.HTTP_201_CREATED)
+        return Response(serializer.data, status=status.HTTP_202_ACCEPTED)
 
     def _handle_text_paste(self, request):
         content = request.data.get("content")
@@ -104,33 +107,36 @@ class DocumentViewSet(
 
         service = DocumentService()
         try:
-            document = service.process_text(
-                user=request.user,
-                raw_text=str(content),
-                content_type=content_type,
-                filename=filename,
-                language=language,
-            )
+            with transaction.atomic():
+                document = service.process_text(
+                    user=request.user,
+                    raw_text=str(content),
+                    content_type=content_type,
+                    filename=filename,
+                    language=language,
+                )
+
+                def queue_task():
+                    try:
+                        process_document_embedding_task.delay(document.id)
+                    except Exception as queue_err:
+                        logger.exception(
+                            f"Failed to queue Celery task for document {document.id}"
+                        )
+                        Document.objects.filter(id=document.id).update(
+                            status=Document.Status.FAILED,
+                            error_message=f"Broker queue error: {str(queue_err)}",
+                        )
+
+                transaction.on_commit(queue_task)
         except ValueError as e:
             return Response(
                 {"error": str(e)},
                 status=status.HTTP_400_BAD_REQUEST,
             )
-        except TemporaryProviderError as e:
-            return Response(
-                {
-                    "error": f"AI service temporarily unavailable during processing: {str(e)}"
-                },
-                status=status.HTTP_503_SERVICE_UNAVAILABLE,
-            )
-        except PermanentProviderError as e:
-            return Response(
-                {"error": f"AI service permanent error during processing: {str(e)}"},
-                status=status.HTTP_502_BAD_GATEWAY,
-            )
 
         serializer = self.get_serializer(document)
-        return Response(serializer.data, status=status.HTTP_201_CREATED)
+        return Response(serializer.data, status=status.HTTP_202_ACCEPTED)
 
     def create(self, request, *args, **kwargs):
         if "file" in request.FILES:

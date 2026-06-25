@@ -11,6 +11,8 @@ class DocumentSerializer(serializers.ModelSerializer):
             "content_type",
             "language",
             "source_url",
+            "status",
+            "error_message",
             "created_at",
         ]
         read_only_fields = [
@@ -18,6 +20,8 @@ class DocumentSerializer(serializers.ModelSerializer):
             "filename",
             "content_type",
             "source_url",
+            "status",
+            "error_message",
             "created_at",
         ]
 

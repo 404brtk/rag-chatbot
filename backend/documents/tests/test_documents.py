@@ -6,24 +6,26 @@ from django.core.files.uploadedfile import SimpleUploadedFile
 from django.urls import reverse
 from rest_framework import status
 
-from core.exceptions import TemporaryProviderError
 from documents.models import Document, DocumentChunk, DocumentLanguage
 
 
 @pytest.mark.django_db
 class TestDocumentViewSet:
-    def test_upload_text_file(self, auth_client_a, user_a, mock_embedding_service):
+    @patch("django.db.transaction.on_commit", side_effect=lambda fn: fn())
+    @patch("documents.views.process_document_embedding_task.delay")
+    def test_upload_text_file(self, mock_delay, mock_on_commit, auth_client_a, user_a):
         url = reverse("document-list")
         file = SimpleUploadedFile("test.txt", b"Hello world", content_type="text/plain")
         response = auth_client_a.post(url, {"file": file}, format="multipart")
 
-        assert response.status_code == status.HTTP_201_CREATED
+        assert response.status_code == status.HTTP_202_ACCEPTED
         data = response.json()
         assert data["filename"] == "test.txt"
+        assert data["status"] == "pending"
 
         doc = Document.objects.get(id=data["id"])
         assert doc.raw_text == "Hello world"
-        assert doc.chunks.count() == 1
+        mock_delay.assert_called_once_with(doc.id)
 
     def test_upload_empty_file_returns_error(self, auth_client_a):
         url = reverse("document-list")
@@ -33,9 +35,11 @@ class TestDocumentViewSet:
         assert response.status_code == status.HTTP_400_BAD_REQUEST
         assert "Could not extract" in response.json()["error"]
 
+    @patch("django.db.transaction.on_commit", side_effect=lambda fn: fn())
+    @patch("documents.views.process_document_embedding_task.delay")
     @patch("documents.document_service.extract_text", return_value="Extracted PDF text")
     def test_upload_pdf_file(
-        self, mock_extract, auth_client_a, user_a, mock_embedding_service
+        self, mock_extract, mock_delay, mock_on_commit, auth_client_a, user_a
     ):
         url = reverse("document-list")
         file = SimpleUploadedFile(
@@ -43,11 +47,13 @@ class TestDocumentViewSet:
         )
         response = auth_client_a.post(url, {"file": file}, format="multipart")
 
-        assert response.status_code == status.HTTP_201_CREATED
+        assert response.status_code == status.HTTP_202_ACCEPTED
         data = response.json()
         assert data["filename"] == "test.pdf"
         assert data["content_type"] == "application/pdf"
+        assert data["status"] == "pending"
         mock_extract.assert_called_once()
+        mock_delay.assert_called_once()
 
     def test_upload_unsupported_file(self, auth_client_a):
         url = reverse("document-list")
@@ -123,7 +129,9 @@ class TestDocumentViewSet:
         assert response.status_code == status.HTTP_404_NOT_FOUND
         assert Document.objects.count() == 1
 
-    def test_paste_text_plain(self, auth_client_a, user_a, mock_embedding_service):
+    @patch("django.db.transaction.on_commit", side_effect=lambda fn: fn())
+    @patch("documents.views.process_document_embedding_task.delay")
+    def test_paste_text_plain(self, mock_delay, mock_on_commit, auth_client_a, user_a):
         url = reverse("document-list")
         response = auth_client_a.post(
             url,
@@ -135,16 +143,21 @@ class TestDocumentViewSet:
             format="json",
         )
 
-        assert response.status_code == status.HTTP_201_CREATED
+        assert response.status_code == status.HTTP_202_ACCEPTED
         data = response.json()
         assert data["filename"] == "notes.txt"
         assert data["content_type"] == "text/plain"
+        assert data["status"] == "pending"
 
         doc = Document.objects.get(id=data["id"])
         assert doc.raw_text == "Hello pasted text"
-        assert doc.chunks.count() >= 1
+        mock_delay.assert_called_once_with(doc.id)
 
-    def test_paste_text_markdown(self, auth_client_a, user_a, mock_embedding_service):
+    @patch("django.db.transaction.on_commit", side_effect=lambda fn: fn())
+    @patch("documents.views.process_document_embedding_task.delay")
+    def test_paste_text_markdown(
+        self, mock_delay, mock_on_commit, auth_client_a, user_a
+    ):
         url = reverse("document-list")
         response = auth_client_a.post(
             url,
@@ -156,13 +169,15 @@ class TestDocumentViewSet:
             format="json",
         )
 
-        assert response.status_code == status.HTTP_201_CREATED
+        assert response.status_code == status.HTTP_202_ACCEPTED
         data = response.json()
         assert data["filename"] == "doc.md"
         assert data["content_type"] == "text/markdown"
+        assert data["status"] == "pending"
 
         doc = Document.objects.get(id=data["id"])
         assert "# Title" in doc.raw_text
+        mock_delay.assert_called_once_with(doc.id)
 
     def test_paste_text_missing_content(self, auth_client_a):
         url = reverse("document-list")
@@ -196,20 +211,6 @@ class TestDocumentViewSet:
 
         assert response.status_code == status.HTTP_400_BAD_REQUEST
         assert "content" in response.json()
-
-    def test_upload_temporary_provider_error(
-        self, auth_client_a, mock_embedding_service
-    ):
-        mock_embedding_service.embed_texts.side_effect = TemporaryProviderError(
-            "Embedding API down"
-        )
-
-        url = reverse("document-list")
-        file = SimpleUploadedFile("test.txt", b"Hello world", content_type="text/plain")
-        response = auth_client_a.post(url, {"file": file}, format="multipart")
-
-        assert response.status_code == status.HTTP_503_SERVICE_UNAVAILABLE
-        assert "AI service temporarily unavailable" in response.json()["error"]
 
 
 class TestDocumentLanguage:

@@ -59,8 +59,8 @@ def _process_pages(
 
         try:
             with transaction.atomic():
-                logger.debug(f"Processing and embedding page: '{title}'")
-                document_service.process_text(
+                logger.debug(f"Processing page: '{title}'")
+                doc = document_service.process_text(
                     user=get_docs_job.user,
                     raw_text=content,
                     content_type="text/markdown",
@@ -68,6 +68,7 @@ def _process_pages(
                     language=get_docs_job.language,
                     source_url=url,
                 )
+            process_document_embedding_task.delay(doc.id)
         except Exception as process_err:
             logger.error(f"Failed to process page '{title}': {process_err}")
             failed_pages.append(f"'{title}' ({str(process_err)})")
@@ -192,4 +193,38 @@ def poll_get_docs_job(
             get_docs_job = GetDocsJob.objects.get(id=get_docs_job_id)
             _fail_job(get_docs_job, f"Unexpected task failure: {str(e)}")
         except GetDocsJob.DoesNotExist:
+            pass
+
+
+@shared_task
+def process_document_embedding_task(document_id: str) -> None:
+    try:
+        document = Document.objects.get(id=document_id)
+        document.status = Document.Status.IN_PROGRESS
+        document.save(update_fields=["status"])
+
+        service = DocumentService()
+        chunks, meta = service._chunk_for_content_type(
+            document.raw_text, document.content_type
+        )
+        if meta:
+            document.meta = meta
+            document.save(update_fields=["meta"])
+
+        service._create_document_chunks(document, chunks)
+
+        document.status = Document.Status.COMPLETED
+        document.error_message = None
+        document.save(update_fields=["status", "error_message"])
+
+    except Document.DoesNotExist:
+        logger.warning(f"Document {document_id} not found. Exiting worker.")
+    except Exception as e:
+        logger.exception(f"Failed to process embedding for document {document_id}: {e}")
+        try:
+            document = Document.objects.get(id=document_id)
+            document.status = Document.Status.FAILED
+            document.error_message = str(e)
+            document.save(update_fields=["status", "error_message"])
+        except Document.DoesNotExist:
             pass

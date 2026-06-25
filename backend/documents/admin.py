@@ -10,9 +10,11 @@ class DocumentAdmin(admin.ModelAdmin):
         "content_type",
         "language",
         "source_url",
+        "status",
+        "error_message",
         "created_at",
     )
-    list_filter = ("content_type", "language")
+    list_filter = ("status", "content_type", "language")
     search_fields = ("filename", "source_url", "user__email")
     list_select_related = ("user",)
     ordering = ("-created_at",)
