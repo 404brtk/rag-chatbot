@@ -16,6 +16,7 @@ from .chunking import (
     extract_text,
 )
 from .embeddings import EmbeddingService
+from .reranker import RerankerService
 from .models import Document, DocumentChunk, DocumentLanguage
 
 logger = logging.getLogger(__name__)
@@ -34,6 +35,7 @@ class SearchResult:
 class DocumentService:
     def __init__(self):
         self.embedding_service = EmbeddingService.get_instance()
+        self.reranker_service = RerankerService.get_instance()
 
     def _chunk_for_content_type(
         self, raw_text: str, content_type: str
@@ -380,8 +382,14 @@ SELECT tf.chunk_id,
             vector_rank_list, bm25_rank_list, k=settings.RRF_K
         )
 
+        candidate_limit = (
+            settings.RERANK_POOL_SIZE
+            if settings.RERANK_ENABLED and query
+            else settings.RAG_TOP_K
+        )
+
         sorted_ids = sorted(rrf_scores, key=rrf_scores.get, reverse=True)[
-            : settings.RAG_TOP_K
+            :candidate_limit
         ]
 
         missing_ids = [cid for cid in sorted_ids if cid not in vector_map]
@@ -398,18 +406,53 @@ SELECT tf.chunk_id,
             for chunk in extra_chunks:
                 vector_map[str(chunk.id)] = chunk
 
+        rerank_scores = {}
+        if settings.RERANK_ENABLED and query and sorted_ids:
+            candidates_to_rerank = [
+                vector_map[cid] for cid in sorted_ids if cid in vector_map
+            ]
+            texts_to_rerank = [chunk.content for chunk in candidates_to_rerank]
+
+            try:
+                rerank_results = await asyncio.to_thread(
+                    self.reranker_service.rerank,
+                    query=query,
+                    texts=texts_to_rerank,
+                )
+
+                scored_candidates = []
+                for item in rerank_results:
+                    idx = item["index"]
+                    score = item["score"]
+                    chunk = candidates_to_rerank[idx]
+                    scored_candidates.append((chunk, score))
+
+                scored_candidates.sort(key=lambda x: x[1], reverse=True)
+
+                final_candidates = scored_candidates[: settings.RAG_TOP_K]
+                sorted_ids = [str(chunk.id) for chunk, _ in final_candidates]
+                rerank_scores = {
+                    str(chunk.id): score for chunk, score in final_candidates
+                }
+            except Exception as e:
+                logger.exception(f"Reranking failed: {e}. Falling back to RRF ranking.")
+                sorted_ids = sorted_ids[: settings.RAG_TOP_K]
+        else:
+            sorted_ids = sorted_ids[: settings.RAG_TOP_K]
+
         results = []
         for chunk_id in sorted_ids:
             chunk = vector_map.get(chunk_id)
             if chunk is None:
                 continue
+            score = rerank_scores.get(chunk_id, rrf_scores.get(chunk_id, 0.0))
             results.append(
                 SearchResult(
                     chunk_content=chunk.content,
                     document_id=str(chunk.document_id),
                     document_filename=chunk.document.filename,
                     chunk_index=chunk.chunk_index,
-                    score=rrf_scores[chunk_id],
+                    score=score,
                     source_url=chunk.document.source_url,
                 )
             )
@@ -425,9 +468,11 @@ SELECT tf.chunk_id,
                 if chunk_id in bm25_rank_list
                 else "N/A"
             )
+            score_label = "rerank_score" if chunk_id in rerank_scores else "rrf_score"
+            score_val = rerank_scores.get(chunk_id, rrf_scores.get(chunk_id, 0.0))
             logger.debug(
-                f"[Fused RRF Candidate] Rank {rank}: chunk_id={chunk_id} "
-                f"score={rrf_scores[chunk_id]:.6f} (vector_rank={v_rank}, bm25_rank={b_rank})"
+                f"[Final Search Candidate] Rank {rank}: chunk_id={chunk_id} "
+                f"{score_label}={score_val:.6f} (vector_rank={v_rank}, bm25_rank={b_rank})"
             )
 
         logger.debug(

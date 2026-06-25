@@ -94,3 +94,16 @@ def mock_embedding_service(settings):
 def disable_tokenizer_in_tests():
     with patch("documents.chunking.get_tokenizer", return_value=None):
         yield
+
+
+@pytest.fixture
+def mock_reranker_service(settings):
+    with patch("documents.reranker.RerankerService.get_instance") as mock:
+        instance = mock.return_value
+        instance.rerank.return_value = []
+        yield instance
+
+
+@pytest.fixture(autouse=True)
+def disable_reranking_in_tests(settings):
+    settings.RERANK_ENABLED = False

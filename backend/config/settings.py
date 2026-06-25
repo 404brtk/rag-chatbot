@@ -166,7 +166,11 @@ EMBEDDING_MODEL = "intfloat/multilingual-e5-base"
 EMBEDDING_DIMENSIONS = 768
 TEI_EMBEDDING_URL = env.str("TEI_EMBEDDING_URL", default="http://localhost:8002")
 
-RAG_TOP_K = env.int("RAG_TOP_K", default=5)
+RAG_TOP_K = env.int("RAG_TOP_K", default=7)
+
+TEI_RERANKER_URL = env.str("TEI_RERANKER_URL", default="http://localhost:8003")
+RERANK_ENABLED = env.bool("RERANK_ENABLED", default=True)
+RERANK_POOL_SIZE = env.int("RERANK_POOL_SIZE", default=50)
 
 BM25_K1 = 1.2
 BM25_B = 0.75

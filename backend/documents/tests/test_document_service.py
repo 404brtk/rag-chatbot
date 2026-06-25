@@ -333,3 +333,89 @@ class TestSearch:
 
         assert len(results) == 1
         assert results[0].chunk_content == "django framework tutorial"
+
+
+@pytest.mark.django_db(transaction=True)
+class TestSearchWithReranker:
+    async def test_search_with_reranker_success(
+        self, user_a, mock_embedding_service, mock_reranker_service, settings
+    ):
+        settings.RERANK_ENABLED = True
+        settings.RERANK_POOL_SIZE = 50
+        settings.RAG_TOP_K = 2
+
+        mock_embedding_service.embed_query.return_value = _make_embedding(1.0)
+
+        doc = await Document.objects.acreate(
+            user=user_a,
+            filename="test.txt",
+            content_type="text/plain",
+            raw_text="doc",
+        )
+        await DocumentChunk.objects.acreate(
+            document=doc,
+            content="python flask app",
+            chunk_index=0,
+            embedding=_make_embedding(1.0),
+        )
+        await DocumentChunk.objects.acreate(
+            document=doc,
+            content="python django web project",
+            chunk_index=1,
+            embedding=_make_embedding(0.5),
+        )
+
+        mock_reranker_service.rerank.return_value = [
+            {"index": 0, "score": 0.45},
+            {"index": 1, "score": 0.95},
+        ]
+
+        service = DocumentService()
+        results = await service.search(user=user_a, query="django")
+
+        assert len(results) == 2
+        assert results[0].chunk_content == "python django web project"
+        assert results[0].score == 0.95
+        assert results[1].chunk_content == "python flask app"
+        assert results[1].score == 0.45
+
+        mock_reranker_service.rerank.assert_called_once_with(
+            query="django", texts=["python flask app", "python django web project"]
+        )
+
+    async def test_search_with_reranker_fallback_on_failure(
+        self, user_a, mock_embedding_service, mock_reranker_service, settings
+    ):
+        settings.RERANK_ENABLED = True
+        settings.RERANK_POOL_SIZE = 50
+        settings.RAG_TOP_K = 2
+
+        mock_embedding_service.embed_query.return_value = _make_embedding(1.0)
+
+        doc = await Document.objects.acreate(
+            user=user_a,
+            filename="test.txt",
+            content_type="text/plain",
+            raw_text="doc",
+        )
+        await DocumentChunk.objects.acreate(
+            document=doc,
+            content="python flask app",
+            chunk_index=0,
+            embedding=_make_embedding(1.0),
+        )
+        await DocumentChunk.objects.acreate(
+            document=doc,
+            content="python django web project",
+            chunk_index=1,
+            embedding=_make_embedding(0.5),
+        )
+
+        mock_reranker_service.rerank.side_effect = Exception("TEI service down")
+
+        service = DocumentService()
+        results = await service.search(user=user_a, query="django")
+
+        assert len(results) == 2
+        assert results[0].chunk_content == "python flask app"
+        assert results[1].chunk_content == "python django web project"
