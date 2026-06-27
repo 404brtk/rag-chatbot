@@ -167,7 +167,13 @@
   padding: var(--spacing-2) var(--spacing-3) var(--spacing-3) var(--spacing-3);
 }
 
-.chat-input-toolbar-left,
+.chat-input-toolbar-left {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-1);
+  flex-wrap: wrap;
+}
+
 .chat-input-toolbar-right {
   display: flex;
   align-items: center;
@@ -254,4 +260,87 @@
   .chat-input-toolbar {
     padding: var(--spacing-2) var(--spacing-2) var(--spacing-3) var(--spacing-2);
   }
+}
+
+.chat-input-selectors {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-2);
+  margin-left: var(--spacing-2);
+  flex-wrap: wrap;
+}
+
+.chat-input-select {
+  appearance: none;
+  -webkit-appearance: none;
+  background-image: url("data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 20 20'%3E%3Cpath stroke='%238e8ea0' stroke-linecap='round' stroke-linejoin='round' stroke-width='1.5' d='m6 8 4 4 4-4'/%3E%3C/svg%3E");
+  background-position: right 10px center;
+  background-repeat: no-repeat;
+  background-size: 12px;
+  padding: 4px 28px 4px var(--spacing-3);
+}
+
+.chat-input-select:hover {
+  background-image: url("data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 20 20'%3E%3Cpath stroke='%23ececf1' stroke-linecap='round' stroke-linejoin='round' stroke-width='1.5' d='m6 8 4 4 4-4'/%3E%3C/svg%3E");
+}
+
+.chat-input-select option {
+  background: var(--color-surface);
+  color: var(--color-text-primary);
+}
+
+.chat-input-rag-toggle {
+  padding: 4px var(--spacing-3) 4px 10px;
+}
+
+.chat-input-rag-toggle input {
+  display: none;
+}
+
+.rag-status-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--color-text-tertiary);
+  transition: all var(--transition-fast);
+}
+
+.pill-control.active .rag-status-dot {
+  background: var(--color-text-primary);
+}
+
+.rag-label-content {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.chat-input-doc-select-btn {
+  padding: 4px var(--spacing-3);
+}
+
+.chat-input-compaction-toggle {
+  padding: 4px var(--spacing-3) 4px 10px;
+}
+
+.chat-input-compaction-toggle input {
+  display: none;
+}
+
+.compaction-status-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--color-text-tertiary);
+  transition: all var(--transition-fast);
+}
+
+.pill-control.active .compaction-status-dot {
+  background: var(--color-text-primary);
+}
+
+.compaction-label-content {
+  display: flex;
+  align-items: center;
+  gap: 6px;
 }
