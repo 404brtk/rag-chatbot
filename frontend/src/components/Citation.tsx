@@ -1,5 +1,7 @@
 import { useState, useRef, useEffect, useId } from 'react';
 import { createPortal } from 'react-dom';
+import { Icon } from './Icon';
+import { Modal } from './Modal';
 import './Citation.css';
 
 const POPOVER_WIDTH = 300;
@@ -13,6 +15,7 @@ interface CitationProps {
 
 export function Citation({ id, sourceName, snippet }: CitationProps) {
   const [isHovered, setIsHovered] = useState(false);
+  const [isDetailOpen, setIsDetailOpen] = useState(false);
   const [placement, setPlacement] = useState<'top' | 'bottom'>('top');
   const [popoverStyle, setPopoverStyle] = useState<React.CSSProperties>({});
 
@@ -51,6 +54,7 @@ export function Citation({ id, sourceName, snippet }: CitationProps) {
   }, [instanceId]);
 
   const handleMouseEnter = () => {
+    if (isDetailOpen) return;
     clearTimeout(timeoutRef.current);
 
     if (isHovered) return;
@@ -87,6 +91,17 @@ export function Citation({ id, sourceName, snippet }: CitationProps) {
     timeoutRef.current = window.setTimeout(() => setIsHovered(false), 300);
   };
 
+  const handleClick = (e: React.MouseEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setIsHovered(false);
+    setIsDetailOpen(true);
+  };
+
+  const handleCloseDetail = () => {
+    setIsDetailOpen(false);
+  };
+
   return (
     <span
       className="citation-wrapper"
@@ -94,9 +109,12 @@ export function Citation({ id, sourceName, snippet }: CitationProps) {
       onMouseLeave={handleMouseLeave}
       ref={triggerRef}
     >
-      <span className="citation-badge">[{id}]</span>
+      <span className="citation-badge" onClick={handleClick}>
+        [{id}]
+      </span>
 
       {isHovered &&
+        !isDetailOpen &&
         createPortal(
           <span
             className={`citation-popover citation-popover-${placement}`}
@@ -105,8 +123,37 @@ export function Citation({ id, sourceName, snippet }: CitationProps) {
             onMouseLeave={handleMouseLeave}
           >
             <span className="citation-popover-source">{sourceName}</span>
-            <span className="citation-popover-snippet">"{snippet}"</span>
           </span>,
+          document.body
+        )}
+
+      {isDetailOpen &&
+        createPortal(
+          <Modal
+            isOpen={isDetailOpen}
+            onClose={handleCloseDetail}
+            className="citation-detail-modal"
+            id={`citation-detail-${instanceId}`}
+          >
+            <div className="citation-detail-header">
+              <h3>Citation Details</h3>
+              <button
+                type="button"
+                className="citation-detail-close modal-close-btn"
+                onClick={handleCloseDetail}
+                aria-label="Close details"
+              >
+                <Icon name="x" size={14} />
+              </button>
+            </div>
+            <div className="citation-detail-body">
+              <div className="citation-detail-meta">
+                <span className="citation-detail-meta-label">Source Document</span>
+                <span className="citation-detail-meta-val">{sourceName}</span>
+              </div>
+              <div className="citation-detail-content">"{snippet}"</div>
+            </div>
+          </Modal>,
           document.body
         )}
     </span>
