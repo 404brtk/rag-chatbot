@@ -1,4 +1,4 @@
-from unittest.mock import patch
+from unittest.mock import patch, AsyncMock
 
 import pytest
 from django.conf import settings
@@ -7,6 +7,7 @@ from django.urls import reverse
 from rest_framework import status
 
 from documents.models import Document, DocumentChunk, DocumentLanguage
+from documents.document_service import SearchResult
 
 
 @pytest.mark.django_db
@@ -222,3 +223,66 @@ class TestDocumentLanguage:
 
     def test_unknown_language_defaults_to_simple(self):
         assert DocumentLanguage.get_pg_regconfig("spanish") == "simple"
+
+
+@pytest.mark.django_db
+class TestDocumentRetrieveView:
+    def test_retrieve_missing_query_returns_400(self, client):
+        url = reverse("document-retrieve")
+        response = client.post(url, data={}, content_type="application/json")
+        assert response.status_code == status.HTTP_400_BAD_REQUEST
+        assert "Error: 'query' field is required" in response.content.decode()
+
+    @pytest.mark.django_db
+    @patch("documents.views.DocumentService.search", new_callable=AsyncMock)
+    def test_retrieve_success_returns_markdown(self, mock_search, client, user_a):
+        mock_search.return_value = [
+            SearchResult(
+                chunk_content="Sample mock content Alpha.",
+                document_id="mock-doc-id-1",
+                document_filename="doc_alpha.md",
+                chunk_index=0,
+                score=0.95,
+                source_url=None,
+            ),
+            SearchResult(
+                chunk_content="Sample mock content Beta.",
+                document_id="mock-doc-id-2",
+                document_filename="doc_beta.md",
+                chunk_index=1,
+                score=0.85,
+                source_url="https://example.com/docs/beta",
+            ),
+        ]
+
+        url = reverse("document-retrieve")
+        response = client.post(
+            url,
+            data={"query": "test query"},
+            content_type="application/json",
+        )
+
+        assert response.status_code == status.HTTP_200_OK
+        assert response["Content-Type"] == "text/markdown"
+        content = response.content.decode()
+        assert "sources:" in content
+        assert "- doc_alpha.md" in content
+        assert "- https://example.com/docs/beta" in content
+        assert "### Source: doc_alpha.md" in content
+        assert "Sample mock content Alpha." in content
+
+    @pytest.mark.django_db
+    @patch("documents.views.DocumentService.search", new_callable=AsyncMock)
+    def test_retrieve_empty_results(self, mock_search, client, user_a):
+        mock_search.return_value = []
+        url = reverse("document-retrieve")
+        response = client.post(
+            url,
+            data={"query": "test query"},
+            content_type="application/json",
+        )
+
+        assert response.status_code == status.HTTP_200_OK
+        content = response.content.decode()
+        assert "sources: []" in content
+        assert "No relevant documentation found." in content

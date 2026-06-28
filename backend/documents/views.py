@@ -1,8 +1,16 @@
+import json
 import logging
 import httpx
 
 from django.db import transaction
 from django.utils import timezone
+
+
+from django.views import View
+from django.http import HttpResponse
+from django.utils.decorators import method_decorator
+from django.views.decorators.csrf import csrf_exempt
+from django.contrib.auth import get_user_model
 from rest_framework import mixins, viewsets, status
 from rest_framework.response import Response
 
@@ -212,3 +220,52 @@ class GetDocsJobViewSet(
 
         response_serializer = self.get_serializer(get_docs_job)
         return Response(response_serializer.data, status=status.HTTP_201_CREATED)
+
+
+@method_decorator(csrf_exempt, name="dispatch")
+class DocumentRetrieveView(View):
+    async def post(self, request):
+        try:
+            data = json.loads(request.body) if request.body else {}
+        except json.JSONDecodeError:
+            return HttpResponse("Error: Invalid JSON body", status=400)
+
+        query = data.get("query")
+        if not query or not str(query).strip():
+            return HttpResponse("Error: 'query' field is required", status=400)
+
+        user = await get_user_model().objects.afirst()
+        if not user:
+            return HttpResponse("Error: No user found in database", status=400)
+
+        service = DocumentService()
+        results = await service.search(
+            user=user,
+            query=str(query).strip(),
+        )
+
+        if not results:
+            return HttpResponse(
+                "---\nsources: []\n---\n\nNo relevant documentation found.",
+                content_type="text/markdown",
+            )
+
+        sources = []
+        for r in results:
+            source_name = r.source_url if r.source_url else r.document_filename
+            if source_name not in sources:
+                sources.append(source_name)
+
+        frontmatter_sources = "\n".join(f"  - {s}" for s in sources)
+        markdown_parts = [
+            "---",
+            "sources:",
+            frontmatter_sources,
+            "---\n",
+        ]
+
+        for r in results:
+            source_label = r.source_url if r.source_url else r.document_filename
+            markdown_parts.append(f"### Source: {source_label}\n{r.chunk_content}\n")
+
+        return HttpResponse("\n".join(markdown_parts), content_type="text/markdown")
