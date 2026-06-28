@@ -227,11 +227,14 @@ class TestDocumentLanguage:
 
 @pytest.mark.django_db
 class TestDocumentRetrieveView:
-    def test_retrieve_missing_query_returns_400(self, client):
+    def test_retrieve_missing_queries_returns_400(self, client):
         url = reverse("document-retrieve")
         response = client.post(url, data={}, content_type="application/json")
         assert response.status_code == status.HTTP_400_BAD_REQUEST
-        assert "Error: 'query' field is required" in response.content.decode()
+        assert (
+            "Error: Both 'refined_english_query' and 'refined_polish_query' fields are required"
+            in response.content.decode()
+        )
 
     @pytest.mark.django_db
     @patch("documents.views.DocumentService.search", new_callable=AsyncMock)
@@ -258,7 +261,10 @@ class TestDocumentRetrieveView:
         url = reverse("document-retrieve")
         response = client.post(
             url,
-            data={"query": "test query"},
+            data={
+                "refined_english_query": "test query en",
+                "refined_polish_query": "test query pl",
+            },
             content_type="application/json",
         )
 
@@ -270,6 +276,12 @@ class TestDocumentRetrieveView:
         assert "- https://example.com/docs/beta" in content
         assert "### Source: doc_alpha.md" in content
         assert "Sample mock content Alpha." in content
+        mock_search.assert_called_once_with(
+            user=user_a,
+            query="test query en ; test query pl",
+            refined_english_query="test query en",
+            refined_polish_query="test query pl",
+        )
 
     @pytest.mark.django_db
     @patch("documents.views.DocumentService.search", new_callable=AsyncMock)
@@ -278,7 +290,10 @@ class TestDocumentRetrieveView:
         url = reverse("document-retrieve")
         response = client.post(
             url,
-            data={"query": "test query"},
+            data={
+                "refined_english_query": "test query en",
+                "refined_polish_query": "test query pl",
+            },
             content_type="application/json",
         )
 

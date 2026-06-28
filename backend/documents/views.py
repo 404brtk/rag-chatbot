@@ -230,9 +230,23 @@ class DocumentRetrieveView(View):
         except json.JSONDecodeError:
             return HttpResponse("Error: Invalid JSON body", status=400)
 
-        query = data.get("query")
-        if not query or not str(query).strip():
-            return HttpResponse("Error: 'query' field is required", status=400)
+        eng_query = data.get("refined_english_query")
+        pol_query = data.get("refined_polish_query")
+
+        if (
+            not eng_query
+            or not str(eng_query).strip()
+            or not pol_query
+            or not str(pol_query).strip()
+        ):
+            return HttpResponse(
+                "Error: Both 'refined_english_query' and 'refined_polish_query' fields are required.",
+                status=400,
+            )
+
+        eng_str = str(eng_query).strip()
+        pol_str = str(pol_query).strip()
+        query = f"{eng_str} ; {pol_str}"
 
         user = await get_user_model().objects.afirst()
         if not user:
@@ -241,7 +255,9 @@ class DocumentRetrieveView(View):
         service = DocumentService()
         results = await service.search(
             user=user,
-            query=str(query).strip(),
+            query=query,
+            refined_english_query=eng_str,
+            refined_polish_query=pol_str,
         )
 
         if not results:
