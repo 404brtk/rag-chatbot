@@ -53,9 +53,33 @@ class Document(UUIDModel):
         return self.filename
 
 
+class ParentChunk(UUIDModel):
+    document = models.ForeignKey(
+        Document, on_delete=models.CASCADE, related_name="parent_chunks"
+    )
+    content = models.TextField()
+    parent_index = models.PositiveIntegerField()
+
+    class Meta:
+        ordering = ["parent_index"]
+        indexes = [
+            models.Index(fields=["document", "parent_index"]),
+        ]
+
+    def __str__(self):
+        return f"{self.document.filename} parent {self.parent_index}"
+
+
 class DocumentChunk(UUIDModel):
     document = models.ForeignKey(
         Document, on_delete=models.CASCADE, related_name="chunks"
+    )
+    parent_chunk = models.ForeignKey(
+        ParentChunk,
+        on_delete=models.CASCADE,
+        related_name="child_chunks",
+        null=True,
+        blank=True,
     )
     content = models.TextField()
     chunk_index = models.PositiveIntegerField()

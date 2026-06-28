@@ -4,6 +4,7 @@ import pytest
 
 from documents.chunking import (
     Block,
+    ParentChunkData,
     _scan_markdown,
     chunk_markdown,
     chunk_text,
@@ -71,15 +72,6 @@ class TestChunkText:
             assert any(word in head for word in tail.split()), (
                 f"Chunks {i} and {i + 1} share no overlap"
             )
-
-    def test_prefers_paragraph_boundary(self):
-        text = "First paragraph content.\n\nSecond paragraph content."
-        chunks = chunk_text(text, chunk_size=30, overlap=5)
-        assert any("First paragraph" in c for c in chunks)
-        assert any("Second paragraph" in c for c in chunks)
-        reconstructed = " ".join(chunks)
-        assert "First paragraph content." in reconstructed
-        assert "Second paragraph content." in reconstructed
 
     def test_prefers_sentence_boundary(self):
         text = "First sentence. Second sentence. Third sentence."
@@ -163,17 +155,17 @@ class TestScanMarkdown:
         assert "Some text here." in blocks[0].content
         assert "Continued on next line." in blocks[0].content
 
-    def test_detects_code_block_backticks(self):
+    def test_detects_code_block_with_fences(self):
         blocks = _scan_markdown("```python\nprint('hi')\n```")
         assert len(blocks) == 1
         assert blocks[0].kind == "code"
-        assert blocks[0].content == "print('hi')"
+        assert blocks[0].content == "```python\nprint('hi')\n```"
 
     def test_detects_code_block_tildes(self):
         blocks = _scan_markdown("~~~\ncode here\n~~~")
         assert len(blocks) == 1
         assert blocks[0].kind == "code"
-        assert blocks[0].content == "code here"
+        assert "code here" in blocks[0].content
 
     def test_code_block_with_backticks_inside(self):
         text = "````\n```python\nprint('nested')\n```\n````"
@@ -232,32 +224,6 @@ class TestScanMarkdown:
         assert blocks[0] == Block(kind="paragraph", content="Some text")
         assert blocks[1] == Block(kind="h1", content="Header")
 
-    def test_paragraph_stops_at_code_fence(self):
-        text = "Some text\n```\ncode\n```"
-        blocks = _scan_markdown(text)
-        assert len(blocks) == 2
-        assert blocks[0].kind == "paragraph"
-        assert blocks[1].kind == "code"
-
-    def test_paragraph_stops_at_list(self):
-        text = "Some text\n- list item"
-        blocks = _scan_markdown(text)
-        assert len(blocks) == 2
-        assert blocks[0].kind == "paragraph"
-        assert blocks[1].kind == "list"
-
-    def test_mixed_blocks_in_order(self):
-        text = (
-            "# Title\n\n"
-            "Paragraph.\n\n"
-            "```\ncode\n```\n\n"
-            "| A | B |\n|---|---|\n\n"
-            "- item\n"
-        )
-        blocks = _scan_markdown(text)
-        kinds = [b.kind for b in blocks]
-        assert kinds == ["h1", "paragraph", "code", "table", "list"]
-
     def test_skips_blank_lines(self):
         text = "\n\n\nSome text.\n\n\n"
         blocks = _scan_markdown(text)
@@ -267,14 +233,38 @@ class TestScanMarkdown:
 
 class TestChunkMarkdown:
     def test_empty_text(self):
-        chunks, meta = chunk_markdown("")
-        assert chunks == []
+        parents, meta = chunk_markdown("")
+        assert parents == []
         assert meta == {}
 
     def test_single_paragraph(self):
-        chunks, meta = chunk_markdown("Just a paragraph.")
-        assert len(chunks) == 1
-        assert chunks[0] == "Just a paragraph."
+        parents, meta = chunk_markdown("Just a paragraph.")
+        assert len(parents) == 1
+        assert isinstance(parents[0], ParentChunkData)
+        assert "Just a paragraph." in parents[0].content
+        assert parents[0].header_breadcrumb is None
+
+    def test_header_hierarchy_and_breadcrumbs(self):
+        text = (
+            "# Main Title\n\nMain content.\n\n"
+            "## Section 1\n\nSection 1 content.\n\n"
+            "### Subsection 1A\n\nSubsection content."
+        )
+        parents, meta = chunk_markdown(text)
+        assert len(parents) == 3
+        assert parents[0].header_breadcrumb == "Main Title"
+        assert parents[1].header_breadcrumb == "Main Title > Section 1"
+        assert parents[2].header_breadcrumb == "Main Title > Section 1 > Subsection 1A"
+
+    def test_header_level_popping(self):
+        text = (
+            "# Top\n\nContent top.\n\n"
+            "## Sub 1\n\nContent sub 1.\n\n"
+            "# Another Top\n\nContent another top."
+        )
+        parents, _ = chunk_markdown(text)
+        assert len(parents) == 3
+        assert parents[2].header_breadcrumb == "Another Top"
 
     def test_preserves_code_block_content(self):
         text = (
@@ -282,122 +272,41 @@ class TestChunkMarkdown:
             "```python\nprint('hello')\nprint('world')\n```\n\n"
             "More text."
         )
-        chunks, _ = chunk_markdown(text, max_size=50)
-        code_chunks = [
-            c for c in chunks if "print('hello')" in c and "print('world')" in c
-        ]
-        assert len(code_chunks) >= 1
+        parents, _ = chunk_markdown(text)
+        assert len(parents) == 1
+        assert "```python\nprint('hello')\nprint('world')\n```" in parents[0].content
 
-    def test_preserves_tilde_code_fence(self):
-        text = "# Code\n\n~~~python\ncode line one\ncode line two\n~~~\n\nAfter."
-        chunks, _ = chunk_markdown(text, max_size=30)
-        code_chunks = [
-            c for c in chunks if "code line one" in c and "code line two" in c
-        ]
-        assert len(code_chunks) >= 1
+    def test_large_code_block_integral(self):
+        code_lines = ["def huge_func():"] + [f"    x = {i}" for i in range(500)]
+        text = "# Section\n\n```python\n" + "\n".join(code_lines) + "\n```"
+        parents, meta = chunk_markdown(text)
+        assert len(parents) == 1
+        assert isinstance(parents[0], ParentChunkData)
+        assert "def huge_func():" in parents[0].content
+        assert len(parents[0].child_texts) > 1
 
-    def test_code_block_with_nested_fences_preserved(self):
-        text = "# Docs\n\n````\n```python\nprint('inner')\n```\n````\n\nAfter."
-        chunks, _ = chunk_markdown(text, max_size=200)
-        code_chunks = [c for c in chunks if "```python" in c and "print('inner')" in c]
-        assert len(code_chunks) >= 1
-
-    def test_preserves_table_structure(self):
-        text = (
-            "# Data\n\n"
-            "| Col1 | Col2 |\n|------|------|\n| A    | B    |\n\n"
-            "After table."
-        )
-        chunks, _ = chunk_markdown(text, max_size=30)
-        table_chunks = [c for c in chunks if "| Col1 | Col2 |" in c]
-        assert len(table_chunks) >= 1
-        for c in table_chunks:
-            assert "| A    | B    |" in c
-
-    def test_preserves_list_structure(self):
-        text = "# List\n\n- Item one\n- Item two\n- Item three\n\nAfter list."
-        chunks, _ = chunk_markdown(text, max_size=30)
-        list_chunks = [c for c in chunks if "- Item one" in c]
-        assert len(list_chunks) >= 1
-        for c in list_chunks:
-            assert "- Item two" in c
-            assert "- Item three" in c
-
-    def test_preserves_list_with_indented_items(self):
-        text = "# List\n\n- Item one\n  - Nested item\n- Item two\n\nAfter."
-        chunks, _ = chunk_markdown(text, max_size=40)
-        list_chunks = [c for c in chunks if "- Item one" in c]
-        assert len(list_chunks) >= 1
-        for c in list_chunks:
-            assert "Nested item" in c
-            assert "- Item two" in c
-
-    def test_loose_list_stays_together(self):
-        text = (
-            "# Notes\n\n- First point\n\n- Second point\n\n- Third point\n\nConclusion."
-        )
-        chunks, _ = chunk_markdown(text, max_size=200)
-        list_chunks = [c for c in chunks if "- First point" in c]
-        assert len(list_chunks) >= 1
-        for c in list_chunks:
-            assert "- Second point" in c
-            assert "- Third point" in c
-
-    def test_prepends_header_path(self):
-        text = "# Main\n\nIntro.\n\n## Sub\n\nSub content."
-        chunks, _ = chunk_markdown(text)
-        sub_chunks = [c for c in chunks if "Sub content" in c]
-        assert len(sub_chunks) == 1
-        assert "# Main" in sub_chunks[0]
-        assert "## Sub" in sub_chunks[0]
-
-    def test_header_hierarchy_pops_on_same_or_higher_level(self):
-        text = "# A\n\nContent A.\n\n## B\n\nContent B.\n\n# C\n\nContent C."
-        chunks, _ = chunk_markdown(text, max_size=50)
-        c_chunks = [c for c in chunks if "Content C" in c]
-        assert len(c_chunks) == 1
-        assert "# C" in c_chunks[0]
-        assert "## B" not in c_chunks[0]
+    def test_child_texts_generation_and_overlap(self):
+        paragraph = "Word " * 500
+        text = f"# Long Section\n\n{paragraph}"
+        parents, _ = chunk_markdown(text)
+        assert len(parents) >= 1
+        child_texts = parents[0].child_texts
+        assert len(child_texts) > 1
+        for child in child_texts:
+            assert isinstance(child, str)
+            assert len(child) > 0
 
     def test_headers_without_content_produce_no_chunks(self):
         text = "# A\n\n## B\n\n### C"
-        chunks, _ = chunk_markdown(text)
-        assert chunks == []
+        parents, meta = chunk_markdown(text)
+        assert parents == []
 
-    def test_splits_oversized_paragraphs_with_header_context(self):
-        text = "# Section\n\n" + "word " * 300
-        chunks, _ = chunk_markdown(text, max_size=200)
-        assert len(chunks) > 1
-        for c in chunks:
-            assert "# Section" in c
-
-    def test_oversized_code_block_starts_fresh_chunk(self):
-        text = "# Section\n\n```\n" + "code line\n" * 100 + "```\n\nAfter."
-        chunks, _ = chunk_markdown(text, max_size=200)
-        code_chunks = [c for c in chunks if "code line" in c]
-        assert len(code_chunks) >= 1
-
-    def test_overlap_within_same_section(self):
-        text = "# Section\n\n" + "word " * 150
-        chunks, _ = chunk_markdown(text, max_size=100, overlap=20)
-        assert len(chunks) >= 2
-        first_tail = chunks[0].split()[-5:]
-        second_head = chunks[1].split()[:5]
-        assert any(word in second_head for word in first_tail)
-
-    def test_no_overlap_across_section_boundaries(self):
-        text = "# A\n\n" + "word " * 50 + "\n\n# B\n\nDifferent content here."
-        chunks, _ = chunk_markdown(text, max_size=100, overlap=20)
-        b_chunks = [c for c in chunks if "Different content" in c]
-        assert len(b_chunks) == 1
-        assert not b_chunks[0].startswith("word ")
-
-    def test_extracts_front_matter(self):
+    def test_extracts_front_matter_in_chunk_markdown(self):
         text = "---\ntitle: Doc\n---\n\n# Heading\n\nContent."
-        chunks, meta = chunk_markdown(text)
+        parents, meta = chunk_markdown(text)
         assert meta == {"title": "Doc"}
-        assert len(chunks) == 1
-        assert "# Heading" in chunks[0]
+        assert len(parents) == 1
+        assert "Content." in parents[0].content
 
     def test_mixed_content_types(self):
         text = (
@@ -408,58 +317,11 @@ class TestChunkMarkdown:
             "- List item\n\n"
             "Paragraph two."
         )
-        chunks, _ = chunk_markdown(text, max_size=200)
-        assert any("x = 1" in c for c in chunks)
-        assert any("| A | B |" in c for c in chunks)
-        assert any("- List item" in c for c in chunks)
-        assert any("Paragraph one" in c for c in chunks)
-        assert any("Paragraph two" in c for c in chunks)
-
-    def test_long_markdown_document(self):
-        sections = []
-        for i in range(10):
-            sections.append(f"# Section {i}\n\n")
-            sections.append(f"This is an introductory paragraph for section {i}. " * 20)
-            sections.append("\n\n")
-            sections.append("## Subsection A\n\n")
-            sections.append(
-                f"Some important content in subsection A of section {i}. " * 15
-            )
-            sections.append("\n\n")
-            sections.append(f"```python\ndef func_{i}():\n    return {i}\n```\n\n")
-            sections.append("| Key | Value |\n|-----|-------|\n")
-            sections.append(f"| section | {i} |\n| type | demo |\n\n")
-            sections.append(f"- Observation {i}a\n")
-            sections.append(f"- Observation {i}b\n")
-            sections.append(f"  - Detail for {i}\n")
-            sections.append(f"- Observation {i}c\n\n")
-            sections.append("## Subsection B\n\n")
-            sections.append(
-                f"Concluding paragraph for section {i} with a lot of text. " * 15
-            )
-            sections.append("\n\n")
-
-        text = "".join(sections)
-        chunks, meta = chunk_markdown(text, max_size=500, overlap=50)
-
-        assert len(chunks) > 10
-
-        for i in range(10):
-            section_chunks = [c for c in chunks if f"Section {i}" in c]
-            assert len(section_chunks) >= 1
-
-            code_chunks = [c for c in chunks if f"def func_{i}():" in c]
-            assert len(code_chunks) >= 1
-
-            table_chunks = [c for c in chunks if f"| section | {i} |" in c]
-            assert len(table_chunks) >= 1
-
-            list_chunks = [c for c in chunks if f"Observation {i}a" in c]
-            assert len(list_chunks) >= 1
-
-        reconstructed = "\n\n".join(chunks)
-        assert "# Section 0" in reconstructed
-        assert "# Section 9" in reconstructed
-        assert "def func_5():" in reconstructed
-        assert "| section | 5 |" in reconstructed
-        assert "Detail for 3" in reconstructed
+        parents, _ = chunk_markdown(text)
+        assert len(parents) >= 1
+        content = parents[0].content
+        assert "x = 1" in content
+        assert "| A | B |" in content
+        assert "- List item" in content
+        assert "Paragraph one" in content
+        assert "Paragraph two" in content

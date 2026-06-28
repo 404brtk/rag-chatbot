@@ -2,6 +2,7 @@ import pytest
 from asgiref.sync import sync_to_async
 from django.conf import settings
 
+from documents.chunking import ParentChunkData
 from documents.document_service import DocumentService, SearchResult
 from documents.models import Document, DocumentChunk
 
@@ -27,17 +28,25 @@ class TestCreateDocumentChunks:
         )
 
         service = DocumentService()
-        service._create_document_chunks(document, ["Hello", "world"])
+        service._create_document_chunks(
+            document,
+            [
+                ParentChunkData(content="Hello", child_texts=["Hello"]),
+                ParentChunkData(content="world", child_texts=["world"]),
+            ],
+        )
 
         chunks = DocumentChunk.objects.filter(document=document).order_by("chunk_index")
         assert chunks.count() == 2
-        assert chunks[0].content == "Hello"
+        assert chunks[0].content == "[Document: test.txt]\n\nHello"
         assert chunks[0].chunk_index == 0
         assert list(chunks[0].embedding) == [0.1] * DIM
-        assert chunks[1].content == "world"
+        assert chunks[1].content == "[Document: test.txt]\n\nworld"
         assert chunks[1].chunk_index == 1
         assert list(chunks[1].embedding) == [0.2] * DIM
-        mock_embedding_service.embed_texts.assert_called_once_with(["Hello", "world"])
+        mock_embedding_service.embed_texts.assert_called_once_with(
+            ["[Document: test.txt]\n\nHello", "[Document: test.txt]\n\nworld"]
+        )
 
     def test_skips_empty_chunks(self, user_a, mock_embedding_service):
         document = Document.objects.create(
@@ -65,10 +74,17 @@ class TestCreateDocumentChunks:
         )
 
         service = DocumentService()
-        service._create_document_chunks(document, ["three word sentence"])
+        service._create_document_chunks(
+            document,
+            [
+                ParentChunkData(
+                    content="three word sentence", child_texts=["three word sentence"]
+                )
+            ],
+        )
 
         chunk = DocumentChunk.objects.get(document=document)
-        assert chunk.word_count == 3
+        assert chunk.word_count == 5
         assert chunk.search_vector is not None
 
     def test_prepends_source_url_when_present(self, user_a, mock_embedding_service):
@@ -82,10 +98,13 @@ class TestCreateDocumentChunks:
         )
 
         service = DocumentService()
-        service._create_document_chunks(document, ["Hello world"])
+        service._create_document_chunks(
+            document,
+            [ParentChunkData(content="Hello world", child_texts=["Hello world"])],
+        )
 
         chunk = DocumentChunk.objects.get(document=document)
-        assert chunk.content == "Hello world"
+        assert chunk.content == "[Document: test.txt]\n\nHello world"
 
     def test_no_source_url_prefix_when_missing(self, user_a, mock_embedding_service):
         mock_embedding_service.embed_texts.return_value = [[0.1] * DIM]
@@ -97,10 +116,13 @@ class TestCreateDocumentChunks:
         )
 
         service = DocumentService()
-        service._create_document_chunks(document, ["Plain content"])
+        service._create_document_chunks(
+            document,
+            [ParentChunkData(content="Plain content", child_texts=["Plain content"])],
+        )
 
         chunk = DocumentChunk.objects.get(document=document)
-        assert chunk.content == "Plain content"
+        assert chunk.content == "[Document: test.txt]\n\nPlain content"
 
 
 @pytest.mark.django_db
@@ -156,10 +178,22 @@ class TestKeywordBm25Search:
 
         service = DocumentService()
         service._create_document_chunks(
-            doc_en, ["The quick brown fox jumps over the lazy dog"]
+            doc_en,
+            [
+                ParentChunkData(
+                    content="The quick brown fox jumps over the lazy dog",
+                    child_texts=["The quick brown fox jumps over the lazy dog"],
+                )
+            ],
         )
         service._create_document_chunks(
-            doc_pl, ["Szybki brązowy lis przeskakuje nad leniwym psem"]
+            doc_pl,
+            [
+                ParentChunkData(
+                    content="Szybki brązowy lis przeskakuje nad leniwym psem",
+                    child_texts=["Szybki brązowy lis przeskakuje nad leniwym psem"],
+                )
+            ],
         )
 
         chunk_en_id = str(DocumentChunk.objects.get(document=doc_en).id)
@@ -192,7 +226,14 @@ class TestKeywordBm25Search:
         )
 
         service = DocumentService()
-        service._create_document_chunks(doc, ["python web framework"])
+        service._create_document_chunks(
+            doc,
+            [
+                ParentChunkData(
+                    content="python web framework", child_texts=["python web framework"]
+                )
+            ],
+        )
 
         results = service._keyword_bm25_search(
             user=user_a, english_query="python database", polish_query=""
@@ -212,7 +253,15 @@ class TestKeywordBm25Search:
         )
 
         service = DocumentService()
-        service._create_document_chunks(doc, ["The runners were running fast"])
+        service._create_document_chunks(
+            doc,
+            [
+                ParentChunkData(
+                    content="The runners were running fast",
+                    child_texts=["The runners were running fast"],
+                )
+            ],
+        )
 
         results = service._keyword_bm25_search(
             user=user_a, english_query="run", polish_query=""
@@ -326,7 +375,13 @@ class TestSearch:
         )
         service = DocumentService()
         await sync_to_async(service._create_document_chunks)(
-            doc, ["django framework tutorial"]
+            doc,
+            [
+                ParentChunkData(
+                    content="django framework tutorial",
+                    child_texts=["django framework tutorial"],
+                )
+            ],
         )
 
         results = await service.search(user=user_a, query="django")

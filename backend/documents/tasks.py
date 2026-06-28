@@ -204,14 +204,14 @@ def process_document_embedding_task(document_id: str) -> None:
         document.save(update_fields=["status"])
 
         service = DocumentService()
-        chunks, meta = service._chunk_for_content_type(
+        parents_data, meta = service._chunk_for_content_type(
             document.raw_text, document.content_type
         )
         if meta:
             document.meta = meta
             document.save(update_fields=["meta"])
 
-        service._create_document_chunks(document, chunks)
+        service._create_document_chunks(document, parents_data)
 
         document.status = Document.Status.COMPLETED
         document.error_message = None

@@ -10,7 +10,6 @@ import yaml
 from django.conf import settings
 
 logger = logging.getLogger(__name__)
-# TODO: consider implementing parent-child chunking in the future
 
 HEADER_RE = re.compile(r"^(#{1,6})\s+(.+)$")
 UNORDERED_LIST_RE = re.compile(r"^[-*+]\s+")
@@ -203,6 +202,7 @@ def _scan_markdown(text: str) -> list[Block]:
         fence = _is_code_fence(line)
         if fence:
             fence_chars, _ = fence
+            fence_header = line.strip()
             content_lines: list[str] = []
             i += 1
             while i < len(lines):
@@ -214,8 +214,9 @@ def _scan_markdown(text: str) -> list[Block]:
                     break
                 content_lines.append(lines[i])
                 i += 1
+            raw_code = "\n".join(content_lines).rstrip("\n")
             blocks.append(
-                Block(kind="code", content="\n".join(content_lines).rstrip("\n"))
+                Block(kind="code", content=f"{fence_header}\n{raw_code}\n{fence_chars}")
             )
             continue
 
@@ -336,102 +337,106 @@ def chunk_text(
     return chunks
 
 
+@dataclass(frozen=True, slots=True)
+class ParentChunkData:
+    content: str
+    child_texts: list[str]
+    header_breadcrumb: str | None = None
+
+
 class MarkdownChunker:
-    def __init__(self, max_size: int = CHUNK_SIZE, overlap: int = CHUNK_OVERLAP):
-        self.max_size = max_size
-        self.overlap = overlap
-        self.chunks: list[str] = []
-        self.header_path: list[tuple[int, str]] = []
-        self.current_parts: list[str] = []
-        self.current_size = 0
-        self.overlap_buffer = ""
+    def __init__(
+        self,
+        parent_size: int | None = None,
+        parent_overlap: int | None = None,
+        child_size: int | None = None,
+        child_overlap: int | None = None,
+    ):
+        self.parent_size = (
+            parent_size
+            if parent_size is not None
+            else getattr(settings, "PARENT_CHUNK_SIZE", 1024)
+        )
+        self.parent_overlap = (
+            parent_overlap
+            if parent_overlap is not None
+            else getattr(settings, "PARENT_CHUNK_OVERLAP", 200)
+        )
+        self.child_size = (
+            child_size
+            if child_size is not None
+            else getattr(settings, "CHILD_CHUNK_SIZE", 256)
+        )
+        self.child_overlap = (
+            child_overlap
+            if child_overlap is not None
+            else getattr(settings, "CHILD_CHUNK_OVERLAP", 32)
+        )
 
-    def _add_part(self, part: str) -> None:
-        if not self.current_parts and self.overlap_buffer:
-            self.current_parts.append(self.overlap_buffer)
-            self.current_size = get_token_count(self.overlap_buffer)
-        if self.current_size > 0:
-            self.current_size += 2
-        self.current_parts.append(part)
-        self.current_size += get_token_count(part)
+    def _flush_parent(
+        self,
+        current_parts: list[str],
+        header_path: list[tuple[int, str]],
+        parents: list[tuple[str, str | None]],
+    ) -> int:
+        if not current_parts:
+            return 0
+        header_breadcrumb = (
+            " > ".join(t for _, t in header_path) if header_path else None
+        )
+        header_lines = [f"{'#' * lvl} {t}" for lvl, t in header_path]
+        assembled = "\n\n".join(header_lines + current_parts)
+        parents.append((assembled, header_breadcrumb))
+        current_parts.clear()
+        return 0
 
-    def _flush(self) -> None:
-        if not self.current_parts:
-            return
-        header_lines = [f"{'#' * level} {title}" for level, title in self.header_path]
-        assembled = "\n\n".join(header_lines + self.current_parts)
-        self.chunks.append(assembled)
-
-        content_only = "\n\n".join(self.current_parts)
-
-        tokenizer = get_tokenizer()
-        if tokenizer is not None:
-            try:
-                token_ids = tokenizer.encode(content_only, add_special_tokens=False)
-                if len(token_ids) > self.overlap:
-                    overlap_tokens = token_ids[-self.overlap :]
-                    self.overlap_buffer = tokenizer.decode(
-                        overlap_tokens, skip_special_tokens=True
-                    ).strip()
-                else:
-                    self.overlap_buffer = content_only
-            except Exception:
-                if len(content_only) > self.overlap * 5:
-                    self.overlap_buffer = content_only[-(self.overlap * 5) :]
-                else:
-                    self.overlap_buffer = content_only
-        else:
-            if len(content_only) > self.overlap * 5:
-                self.overlap_buffer = content_only[-(self.overlap * 5) :]
-            else:
-                self.overlap_buffer = content_only
-
-        self.current_parts = []
-        self.current_size = 0
-
-    def _add_block(self, block: Block) -> None:
-        block_size = get_token_count(block.content)
-
-        if block_size > self.max_size:
-            if self.current_parts:
-                self._flush()
-            sub_chunks = chunk_text(
-                block.content, chunk_size=self.max_size, overlap=self.overlap
-            )
-            for sub in sub_chunks:
-                self._add_part(sub)
-                self._flush()
-            return
-
-        if self.current_size > 0 and self.current_size + block_size + 2 > self.max_size:
-            self._flush()
-
-        self._add_part(block.content)
-
-    def _handle_header(self, block: Block) -> None:
-        self._flush()
-        self.overlap_buffer = ""
-        level = int(block.kind[1:])
-        while self.header_path and self.header_path[-1][0] >= level:
-            self.header_path.pop()
-        self.header_path.append((level, block.content))
-
-    def _process_blocks(self, blocks: list[Block]) -> list[str]:
-        for block in blocks:
-            if block.kind.startswith("h"):
-                self._handle_header(block)
-                continue
-            self._add_block(block)
-        self._flush()
-        return self.chunks
-
-    def chunk(self, text: str) -> tuple[list[str], dict]:
+    def chunk(self, text: str) -> tuple[list[ParentChunkData], dict]:
         meta, cleaned = extract_front_matter(text)
         blocks = _scan_markdown(cleaned)
-        return self._process_blocks(blocks), meta
+
+        parents: list[tuple[str, str | None]] = []
+        header_path: list[tuple[int, str]] = []
+        current_parts: list[str] = []
+        current_size = 0
+
+        for block in blocks:
+            if block.kind.startswith("h"):
+                current_size = self._flush_parent(current_parts, header_path, parents)
+                level = int(block.kind[1:])
+                while header_path and header_path[-1][0] >= level:
+                    header_path.pop()
+                header_path.append((level, block.content))
+                continue
+
+            block_size = get_token_count(block.content)
+
+            if current_size > 0 and current_size + block_size + 2 > self.parent_size:
+                current_size = self._flush_parent(current_parts, header_path, parents)
+
+            current_parts.append(block.content)
+            current_size += block_size + (2 if len(current_parts) > 1 else 0)
+
+        self._flush_parent(current_parts, header_path, parents)
+
+        parent_data_list: list[ParentChunkData] = []
+        for content, breadcrumb in parents:
+            child_texts = chunk_text(
+                content,
+                chunk_size=self.child_size,
+                overlap=self.child_overlap,
+            )
+            parent_data_list.append(
+                ParentChunkData(
+                    content=content,
+                    child_texts=child_texts if child_texts else [content],
+                    header_breadcrumb=breadcrumb,
+                )
+            )
+
+        return parent_data_list, meta
 
 
 def chunk_markdown(
-    text: str, max_size: int = CHUNK_SIZE, overlap: int = CHUNK_OVERLAP
-) -> tuple[list[str], dict]:
-    return MarkdownChunker(max_size, overlap).chunk(text)
+    text: str,
+) -> tuple[list[ParentChunkData], dict]:
+    return MarkdownChunker().chunk(text)

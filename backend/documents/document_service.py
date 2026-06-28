@@ -11,13 +11,14 @@ from pgvector.django import CosineDistance
 
 from .chunking import (
     SUPPORTED_CONTENT_TYPES,
+    ParentChunkData,
     chunk_markdown,
     chunk_text,
     extract_text,
 )
 from .embeddings import EmbeddingService
 from .reranker import RerankerService
-from .models import Document, DocumentChunk, DocumentLanguage
+from .models import Document, DocumentChunk, DocumentLanguage, ParentChunk
 
 logger = logging.getLogger(__name__)
 
@@ -39,33 +40,76 @@ class DocumentService:
 
     def _chunk_for_content_type(
         self, raw_text: str, content_type: str
-    ) -> tuple[list[str], dict]:
+    ) -> tuple[list[ParentChunkData], dict]:
         if content_type in ("text/markdown", "application/pdf"):
             return chunk_markdown(raw_text)
-        return chunk_text(raw_text), {}
 
-    def _create_document_chunks(self, document: Document, chunks: list[str]) -> None:
-        if not chunks:
+        child_texts = chunk_text(
+            raw_text,
+            chunk_size=getattr(settings, "CHILD_CHUNK_SIZE", 256),
+            overlap=getattr(settings, "CHILD_CHUNK_OVERLAP", 32),
+        )
+        parent = ParentChunkData(
+            content=raw_text,
+            child_texts=child_texts if child_texts else [raw_text],
+        )
+        return [parent], {}
+
+    def _create_document_chunks(
+        self, document: Document, parents_data: list[ParentChunkData]
+    ) -> None:
+        if not parents_data:
             logger.warning(
                 f"No chunks to embed/save for document '{document.filename}'"
             )
             return
+
+        parent_objects = [
+            ParentChunk(
+                document=document,
+                content=p.content,
+                parent_index=i,
+            )
+            for i, p in enumerate(parents_data)
+        ]
+        created_parents = ParentChunk.objects.bulk_create(parent_objects)
+
+        all_child_tuples: list[tuple[ParentChunk, str]] = []
+        doc_title = document.filename
+        for parent_obj, p_data in zip(created_parents, parents_data):
+            context_headers = [f"[Document: {doc_title}]"]
+            if p_data.header_breadcrumb:
+                context_headers.append(f"[Context: {p_data.header_breadcrumb}]")
+            header_prefix = "\n".join(context_headers)
+
+            for child_text in p_data.child_texts:
+                indexed_child_text = f"{header_prefix}\n\n{child_text}"
+                all_child_tuples.append((parent_obj, indexed_child_text))
+
+        if not all_child_tuples:
+            return
+
+        child_texts_only = [t[1] for t in all_child_tuples]
         logger.debug(
-            f"Generating embeddings for {len(chunks)} chunks of document '{document.filename}' (ID: {document.id})..."
+            f"Generating embeddings for {len(child_texts_only)} child chunks across {len(created_parents)} parents for '{document.filename}'..."
         )
-        embeddings = self.embedding_service.embed_texts(chunks)
-        logger.debug("Generated embeddings. Storing chunks in database...")
+        embeddings = self.embedding_service.embed_texts(child_texts_only)
+
         chunk_objects = [
             DocumentChunk(
                 document=document,
-                content=chunk_content,
+                parent_chunk=parent_obj,
+                content=child_text,
                 chunk_index=i,
                 embedding=embedding,
-                word_count=len(chunk_content.split()),
+                word_count=len(child_text.split()),
             )
-            for i, (chunk_content, embedding) in enumerate(zip(chunks, embeddings))
+            for i, ((parent_obj, child_text), embedding) in enumerate(
+                zip(all_child_tuples, embeddings)
+            )
         ]
         DocumentChunk.objects.bulk_create(chunk_objects)
+
         logger.debug("Updating search vectors for search indexing...")
         DocumentChunk.objects.filter(document=document).update(
             search_vector=SearchVector(
@@ -284,7 +328,7 @@ SELECT tf.chunk_id,
             async for chunk in qs.annotate(
                 distance=CosineDistance("embedding", query_embedding)
             )
-            .select_related("document")
+            .select_related("document", "parent_chunk")
             .order_by("distance")[:limit]
         ]
 
@@ -382,7 +426,7 @@ SELECT tf.chunk_id,
                 chunk
                 async for chunk in DocumentChunk.objects.filter(
                     id__in=missing_ids
-                ).select_related("document")
+                ).select_related("document", "parent_chunk")
             ]
             for chunk in extra_chunks:
                 vector_map[str(chunk.id)] = chunk
@@ -409,27 +453,37 @@ SELECT tf.chunk_id,
                     scored_candidates.append((chunk, score))
 
                 scored_candidates.sort(key=lambda x: x[1], reverse=True)
-
-                final_candidates = scored_candidates[: settings.RAG_TOP_K]
-                sorted_ids = [str(chunk.id) for chunk, _ in final_candidates]
+                sorted_ids = [str(chunk.id) for chunk, _ in scored_candidates]
                 rerank_scores = {
-                    str(chunk.id): score for chunk, score in final_candidates
+                    str(chunk.id): score for chunk, score in scored_candidates
                 }
             except Exception as e:
                 logger.exception(f"Reranking failed: {e}. Falling back to RRF ranking.")
-                sorted_ids = sorted_ids[: settings.RAG_TOP_K]
-        else:
-            sorted_ids = sorted_ids[: settings.RAG_TOP_K]
 
         results = []
+        seen_parents: set[str] = set()
+
         for chunk_id in sorted_ids:
+            if len(results) >= settings.RAG_TOP_K:
+                break
+
             chunk = vector_map.get(chunk_id)
             if chunk is None:
                 continue
+
+            if chunk.parent_chunk_id:
+                parent_key = str(chunk.parent_chunk_id)
+                if parent_key in seen_parents:
+                    continue
+                seen_parents.add(parent_key)
+                final_content = chunk.parent_chunk.content
+            else:
+                final_content = chunk.content
+
             score = rerank_scores.get(chunk_id, rrf_scores.get(chunk_id, 0.0))
             results.append(
                 SearchResult(
-                    chunk_content=chunk.content,
+                    chunk_content=final_content,
                     document_id=str(chunk.document_id),
                     document_filename=chunk.document.filename,
                     chunk_index=chunk.chunk_index,
