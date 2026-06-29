@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect } from 'react';
+import { useState, useRef, useEffect, useMemo } from 'react';
 import { NavLink, useLocation } from 'react-router';
 import { createPortal } from 'react-dom';
 import { Icon } from './Icon';
@@ -68,6 +68,8 @@ interface SidebarProps {
   onSelectChat: (id: string) => void;
   onDeleteChat: (id: string) => void;
   onRenameChat: (id: string, title: string) => void;
+  onOpenSettings: (tab?: 'keys' | 'docs' | 'get-docs') => void;
+  loadMoreConversations: () => Promise<void>;
 }
 
 export function Sidebar({
@@ -81,6 +83,8 @@ export function Sidebar({
   onSelectChat,
   onDeleteChat,
   onRenameChat,
+  onOpenSettings,
+  loadMoreConversations,
 }: SidebarProps) {
   const location = useLocation();
   const {
@@ -97,6 +101,10 @@ export function Sidebar({
   } = useSessionActions(onRenameChat);
 
   const dialogRef = useRef<HTMLDialogElement>(null);
+
+  const sortedHistory = useMemo(() => {
+    return [...history].sort((a, b) => b.timestamp - a.timestamp);
+  }, [history]);
 
   useEffect(() => {
     if (!isCompact) return;
@@ -129,6 +137,13 @@ export function Sidebar({
   const handleDialogClick = (e: React.MouseEvent<HTMLDialogElement>) => {
     if (e.target === e.currentTarget) {
       handleDismiss();
+    }
+  };
+
+  const handleSidebarScroll = (e: React.UIEvent<HTMLDivElement>) => {
+    const target = e.currentTarget;
+    if (target.scrollHeight - target.scrollTop - target.clientHeight <= 30) {
+      loadMoreConversations();
     }
   };
 
@@ -180,12 +195,12 @@ export function Sidebar({
       {isExpanded && <div className="sidebar-divider" />}
 
       {isExpanded && (
-        <div className="sidebar-history-container">
+        <div className="sidebar-history-container" onScroll={handleSidebarScroll}>
           <div className="history-group">
-            {history.map((session) => (
+            {sortedHistory.map((session) => (
               <div
                 key={session.id}
-                className={`history-item-wrapper ${location.pathname === APP_ROUTES.chat && session.id === activeChatId ? 'active' : ''} ${optionsMenu?.id === session.id ? 'hover-locked' : ''}`}
+                className={`history-item-wrapper ${(location.pathname === APP_ROUTES.chat || location.pathname.startsWith('/chat/')) && session.id === activeChatId ? 'active' : ''} ${optionsMenu?.id === session.id ? 'hover-locked' : ''}`}
               >
                 {editingId === session.id ? (
                   <div className="history-item-edit-mode">
@@ -207,10 +222,18 @@ export function Sidebar({
                     </button>
                   </div>
                 ) : (
-                  <button
+                  <div
                     className="sidebar-icon-btn history-item-btn"
+                    role="button"
+                    tabIndex={0}
                     aria-label={`Conversation: ${session.title}`}
                     onClick={() => onSelectChat(session.id)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter' || e.key === ' ') {
+                        e.preventDefault();
+                        onSelectChat(session.id);
+                      }
+                    }}
                   >
                     <span className="sidebar-text history-text">{session.title}</span>
 
@@ -237,7 +260,7 @@ export function Sidebar({
                         />
                       )}
                     </div>
-                  </button>
+                  </div>
                 )}
               </div>
             ))}
@@ -248,12 +271,42 @@ export function Sidebar({
       {isExpanded && <div className="sidebar-divider" />}
 
       <div className="sidebar-bottom">
-        <Tooltip text="View Profile" disabled={isExpanded || isCompact}>
-          <button className="sidebar-icon-btn action-btn user-btn" aria-label="User profile">
+        <Tooltip text="API Keys" disabled={isExpanded || isCompact}>
+          <button
+            className="sidebar-icon-btn action-btn keys-btn"
+            aria-label="Manage API keys"
+            onClick={() => onOpenSettings('keys')}
+          >
             <div className="icon-wrapper">
-              <Icon name="user" />
+              <Icon name="pencil" />
             </div>
-            <span className="sidebar-text">Profile</span>
+            <span className="sidebar-text">API Keys</span>
+          </button>
+        </Tooltip>
+
+        <Tooltip text="Documents" disabled={isExpanded || isCompact}>
+          <button
+            className="sidebar-icon-btn action-btn docs-btn"
+            aria-label="Manage documents"
+            onClick={() => onOpenSettings('docs')}
+          >
+            <div className="icon-wrapper">
+              <Icon name="file" />
+            </div>
+            <span className="sidebar-text">Documents</span>
+          </button>
+        </Tooltip>
+
+        <Tooltip text="Get Docs" disabled={isExpanded || isCompact}>
+          <button
+            className="sidebar-icon-btn action-btn scraper-btn"
+            aria-label="Get Docs"
+            onClick={() => onOpenSettings('get-docs')}
+          >
+            <div className="icon-wrapper">
+              <Icon name="search" />
+            </div>
+            <span className="sidebar-text">Get Docs</span>
           </button>
         </Tooltip>
       </div>
