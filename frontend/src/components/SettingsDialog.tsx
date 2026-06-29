@@ -373,7 +373,7 @@ export function SettingsDialog({ isOpen, onClose, defaultTab = 'keys' }: Setting
                   <label htmlFor="key-provider">Provider</label>
                   <CustomDropdown
                     value={keyProvider}
-                    options={['openai', 'openrouter', 'gemini']}
+                    options={['openai', 'openrouter', 'gemini', 'github']}
                     onChange={setKeyProvider}
                     labelFormatter={formatProviderName}
                     variant="form"

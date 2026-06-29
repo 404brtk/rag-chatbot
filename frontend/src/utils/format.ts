@@ -3,6 +3,7 @@ const PROVIDER_NAMES: Record<string, string> = {
   llamacpp: 'llama.cpp',
   openrouter: 'OpenRouter',
   gemini: 'Gemini',
+  github: 'GitHub',
 };
 
 export function formatProviderName(provider: string): string {
