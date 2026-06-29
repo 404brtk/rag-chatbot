@@ -32,63 +32,66 @@ def _process_pages(
 ) -> None:
     pages = result.get("pages", [])
     logger.debug(
-        f"GetDocs job {get_docs_job.job_id} completed. Processing {len(pages)} pages..."
+        f"GetDocs job {get_docs_job.job_id} completed. Consolidating {len(pages)} pages..."
     )
 
-    document_service = DocumentService()
-    failed_pages = []
+    combined_markdown_parts = []
+    pages_meta = []
 
     for page in pages:
         url = page.get("url")
-        title = page.get("title")
+        title = page.get("title", "Untitled Section")
         content = page.get("content")
 
         if not content or not content.strip():
             logger.debug(f"Skipping empty page content for url: {url}")
             continue
 
-        url_suffix = url.replace("https://", "").replace("http://", "").rstrip("/")
-        filename = f"{title} - {url_suffix}"
+        header_block = f"# {title}\n*Source: [{url}]({url})*\n\n"
+        combined_markdown_parts.append(header_block + content.strip())
+        pages_meta.append({"title": title, "url": url})
 
-        if len(filename) > 255:
-            filename = filename[:252] + "..."
+    if not combined_markdown_parts:
+        _fail_job(get_docs_job, "No valid page content retrieved from microservice.")
+        return
 
-        if Document.objects.filter(user=get_docs_job.user, filename=filename).exists():
-            logger.debug(f"Page '{title}' already processed. Skipping.")
-            continue
+    full_raw_text = "\n\n---\n\n".join(combined_markdown_parts)
 
-        try:
-            with transaction.atomic():
-                logger.debug(f"Processing page: '{title}'")
-                doc = document_service.process_text(
-                    user=get_docs_job.user,
-                    raw_text=content,
-                    content_type="text/markdown",
-                    filename=filename,
-                    language=get_docs_job.language,
-                    source_url=url,
-                )
-            process_document_embedding_task.delay(doc.id)
-        except Exception as process_err:
-            logger.error(f"Failed to process page '{title}': {process_err}")
-            failed_pages.append(f"'{title}' ({str(process_err)})")
+    root_target = get_docs_job.github_repo or get_docs_job.url or "Documentation Set"
+    filename = f"Docs: {root_target}"
+    if len(filename) > 255:
+        filename = filename[:252] + "..."
+
+    document_service = DocumentService()
+    try:
+        with transaction.atomic():
+            doc = document_service.process_text(
+                user=get_docs_job.user,
+                raw_text=full_raw_text,
+                content_type="text/markdown",
+                filename=filename,
+                language=get_docs_job.language,
+                source_url=get_docs_job.url,
+            )
+            doc.meta["pages_count"] = len(pages_meta)
+            doc.meta["pages"] = pages_meta
+            doc.save(update_fields=["meta"])
+
+        process_document_embedding_task.delay(doc.id)
+    except Exception as process_err:
+        logger.error(f"Failed to process consolidated document: {process_err}")
+        _fail_job(
+            get_docs_job,
+            f"Failed to process consolidated document: {str(process_err)}",
+        )
+        return
 
     get_docs_job.status = GetDocsJob.Status.COMPLETED
     get_docs_job.pages_fetched = pages_fetched
     get_docs_job.pages_total = pages_total
     get_docs_job.source_method = result.get("source_method")
     get_docs_job.completed_at = timezone.now()
-
-    if failed_pages:
-        get_docs_job.error_message = (
-            "Processing completed with partial failures. "
-            f"Failed to process: {', '.join(failed_pages)}"
-        )
-        logger.warning(
-            f"GetDocs job {get_docs_job.id} completed with partial failures."
-        )
-    else:
-        get_docs_job.error_message = None
+    get_docs_job.error_message = None
 
     get_docs_job.save(
         update_fields=[

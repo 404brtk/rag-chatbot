@@ -1,4 +1,4 @@
-from unittest.mock import patch
+from unittest.mock import patch, MagicMock
 import pytest
 import uuid
 
@@ -39,6 +39,11 @@ class TestPollGetDocsJob:
             ],
         }
 
+        mock_doc = MagicMock()
+        mock_doc.id = uuid.uuid4()
+        mock_doc.meta = {}
+        mock_process.return_value = mock_doc
+
         job = GetDocsJob.objects.create(
             user=user_a,
             job_id="test-job-success",
@@ -57,23 +62,22 @@ class TestPollGetDocsJob:
         assert job.completed_at is not None
         assert job.error_message is None
 
-        assert mock_process.call_count == 2
-        mock_process.assert_any_call(
-            user=user_a,
-            raw_text="# Page One Content",
-            content_type="text/markdown",
-            filename="Page One - example.com/page/1",
-            language="english",
-            source_url="https://example.com/page/1",
+        assert mock_process.call_count == 1
+        expected_raw_text = (
+            "# Page One\n*Source: [https://example.com/page/1](https://example.com/page/1)*\n\n# Page One Content"
+            "\n\n---\n\n"
+            "# Page Two\n*Source: [https://example.com/page/2](https://example.com/page/2)*\n\n# Page Two Content"
         )
-        mock_process.assert_any_call(
+        mock_process.assert_called_once_with(
             user=user_a,
-            raw_text="# Page Two Content",
+            raw_text=expected_raw_text,
             content_type="text/markdown",
-            filename="Page Two - example.com/page/2",
+            filename="Docs: https://example.com",
             language="english",
-            source_url="https://example.com/page/2",
+            source_url="https://example.com",
         )
+        assert mock_doc.meta["pages_count"] == 2
+        assert len(mock_doc.meta["pages"]) == 2
 
     @patch("documents.tasks.GetDocsClient")
     def test_no_pages_skips_ingestion(self, mock_client_class, user_a):
@@ -95,8 +99,8 @@ class TestPollGetDocsJob:
         poll_get_docs_job(job.id)
 
         job.refresh_from_db()
-        assert job.status == "completed"
-        assert job.pages_fetched == 0
+        assert job.status == "failed"
+        assert "No valid page content" in job.error_message
 
     @patch("documents.tasks.GetDocsClient")
     @patch("documents.tasks.DocumentService.process_text")
@@ -121,6 +125,11 @@ class TestPollGetDocsJob:
             ],
         }
 
+        mock_doc = MagicMock()
+        mock_doc.id = uuid.uuid4()
+        mock_doc.meta = {}
+        mock_process.return_value = mock_doc
+
         job = GetDocsJob.objects.create(
             user=user_a,
             job_id="test-job-empty-page",
@@ -134,6 +143,7 @@ class TestPollGetDocsJob:
         job.refresh_from_db()
         assert job.status == "completed"
         mock_process.assert_called_once()
+        assert mock_doc.meta["pages_count"] == 1
 
     @patch("documents.tasks.GetDocsClient")
     def test_failed_in_microservice(self, mock_client_class, user_a):
@@ -158,89 +168,6 @@ class TestPollGetDocsJob:
         assert job.status == "failed"
         assert "failed in microservice" in job.error_message.lower()
         assert job.completed_at is not None
-
-    @patch("documents.tasks.GetDocsClient")
-    @patch("documents.tasks.DocumentService.process_text")
-    def test_partial_ingestion_failure(self, mock_process, mock_client_class, user_a):
-        mock_client = mock_client_class.return_value
-        mock_client.get_job_status.return_value = {
-            "status": "completed",
-            "progress": {"pages_fetched": 2, "pages_total": 2},
-            "pages": [
-                {
-                    "url": "https://example.com/page/good",
-                    "title": "Good Page",
-                    "content": "# Good Content",
-                },
-                {
-                    "url": "https://example.com/page/bad",
-                    "title": "Bad Page",
-                    "content": "# Bad Content",
-                },
-            ],
-        }
-
-        def fail_bad_page(user, raw_text, content_type, filename, language):
-            if "bad" in filename.lower():
-                raise ValueError("Simulated ingestion failure")
-
-        mock_process.side_effect = fail_bad_page
-
-        job = GetDocsJob.objects.create(
-            user=user_a,
-            job_id="test-job-partial-fail",
-            url="https://example.com",
-            language="english",
-            status="pending",
-        )
-
-        poll_get_docs_job(job.id)
-
-        job.refresh_from_db()
-        assert job.status == "completed"
-        assert "Processing completed with partial failures" in job.error_message
-        assert "Bad Page" in job.error_message
-
-        assert mock_process.call_count == 2
-
-    @patch("documents.tasks.GetDocsClient")
-    @patch("documents.tasks.DocumentService.process_text")
-    def test_skips_already_ingested_page(self, mock_process, mock_client_class, user_a):
-        mock_client = mock_client_class.return_value
-        mock_client.get_job_status.return_value = {
-            "status": "completed",
-            "progress": {"pages_fetched": 1, "pages_total": 1},
-            "pages": [
-                {
-                    "url": "https://example.com/page/1",
-                    "title": "Already There",
-                    "content": "# Duplicate Content",
-                },
-            ],
-        }
-
-        job = GetDocsJob.objects.create(
-            user=user_a,
-            job_id="test-job-dup-check",
-            url="https://example.com",
-            language="english",
-            status="pending",
-        )
-
-        Document.objects.create(
-            user=user_a,
-            filename="Already There - example.com/page/1",
-            content_type="text/markdown",
-            raw_text="# Already ingested",
-            language="english",
-        )
-
-        poll_get_docs_job(job.id)
-
-        job.refresh_from_db()
-        assert job.status == "completed"
-
-        mock_process.assert_not_called()
 
     def test_nonexistent_job_returns_silently(self):
         poll_get_docs_job(uuid.uuid4())
