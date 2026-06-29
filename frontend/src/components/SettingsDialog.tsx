@@ -56,6 +56,7 @@ export function SettingsDialog({ isOpen, onClose, defaultTab = 'keys' }: Setting
   const [keyError, setKeyError] = useState<string | null>(null);
 
   const [docs, setDocs] = useState<DocumentData[]>([]);
+  const [nextDocsCursor, setNextDocsCursor] = useState<string | null>(null);
   const [docLang, setDocLang] = useState('english');
   const [pasteContent, setPasteContent] = useState('');
   const [pasteFilename, setPasteFilename] = useState('');
@@ -65,6 +66,7 @@ export function SettingsDialog({ isOpen, onClose, defaultTab = 'keys' }: Setting
   const [savingPaste, setSavingPaste] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [jobs, setJobs] = useState<GetDocsJobData[]>([]);
+  const [nextJobsCursor, setNextJobsCursor] = useState<string | null>(null);
   const [scraperUrl, setScraperUrl] = useState('');
   const [scraperRepo, setScraperRepo] = useState('');
   const [scraperLang, setScraperLang] = useState('english');
@@ -86,19 +88,61 @@ export function SettingsDialog({ isOpen, onClose, defaultTab = 'keys' }: Setting
     try {
       const data = await api.get<CursorPaginated<DocumentData>>('/documents/');
       setDocs(data.results || []);
+      setNextDocsCursor(data.next || null);
     } catch (err) {
       console.error('Failed to load documents:', err);
     }
   }, []);
 
+  const isLoadingMoreDocsRef = useRef(false);
+
+  const loadMoreDocs = useCallback(async () => {
+    if (isLoadingMoreDocsRef.current || !nextDocsCursor) return;
+    isLoadingMoreDocsRef.current = true;
+    try {
+      const data = await api.get<CursorPaginated<DocumentData>>(nextDocsCursor);
+      setDocs((prev) => {
+        const existingIds = new Set(prev.map((d) => d.id));
+        const newDocs = (data.results || []).filter((d) => !existingIds.has(d.id));
+        return [...prev, ...newDocs];
+      });
+      setNextDocsCursor(data.next || null);
+    } catch (err) {
+      console.error('Failed to load more documents:', err);
+    } finally {
+      isLoadingMoreDocsRef.current = false;
+    }
+  }, [nextDocsCursor]);
+
   const loadJobs = useCallback(async () => {
     try {
       const data = await api.get<CursorPaginated<GetDocsJobData>>('/getdocs-jobs/');
       setJobs(data.results || []);
+      setNextJobsCursor(data.next || null);
     } catch (err) {
       console.error('Failed to load scraper jobs:', err);
     }
   }, []);
+
+  const isLoadingMoreJobsRef = useRef(false);
+
+  const loadMoreJobs = useCallback(async () => {
+    if (isLoadingMoreJobsRef.current || !nextJobsCursor) return;
+    isLoadingMoreJobsRef.current = true;
+    try {
+      const data = await api.get<CursorPaginated<GetDocsJobData>>(nextJobsCursor);
+      setJobs((prev) => {
+        const existingIds = new Set(prev.map((j) => j.id));
+        const newJobs = (data.results || []).filter((j) => !existingIds.has(j.id));
+        return [...prev, ...newJobs];
+      });
+      setNextJobsCursor(data.next || null);
+    } catch (err) {
+      console.error('Failed to load more scraper jobs:', err);
+    } finally {
+      isLoadingMoreJobsRef.current = false;
+    }
+  }, [nextJobsCursor]);
 
   const fetchTabData = useCallback(
     (tab: TabType) => {
@@ -502,7 +546,15 @@ export function SettingsDialog({ isOpen, onClose, defaultTab = 'keys' }: Setting
                 {docs.length === 0 ? (
                   <p className="settings-empty">No documents uploaded yet.</p>
                 ) : (
-                  <ul className="settings-list max-height-list">
+                  <ul
+                    className="settings-list max-height-list"
+                    onScroll={(e) => {
+                      const target = e.currentTarget;
+                      if (target.scrollHeight - target.scrollTop - target.clientHeight <= 30) {
+                        loadMoreDocs();
+                      }
+                    }}
+                  >
                     {docs.map((d) => {
                       const isProcessing = d.status === 'pending' || d.status === 'in_progress';
                       return (
@@ -623,7 +675,15 @@ export function SettingsDialog({ isOpen, onClose, defaultTab = 'keys' }: Setting
                 {jobs.length === 0 ? (
                   <p className="settings-empty">No scraping jobs run yet.</p>
                 ) : (
-                  <ul className="settings-list max-height-list">
+                  <ul
+                    className="settings-list max-height-list"
+                    onScroll={(e) => {
+                      const target = e.currentTarget;
+                      if (target.scrollHeight - target.scrollTop - target.clientHeight <= 30) {
+                        loadMoreJobs();
+                      }
+                    }}
+                  >
                     {jobs.map((j) => (
                       <li key={j.id} className="settings-list-item-block">
                         <div className="job-item-header">
