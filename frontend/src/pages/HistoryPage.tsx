@@ -1,10 +1,8 @@
 import { useMemo, useRef, useState } from 'react';
-import { useNavigate } from 'react-router';
 import { Icon } from '../components/Icon';
 import { SessionOptionsMenu } from '../components/SessionOptionsMenu';
 import { useAppRouteContext } from '../hooks/useAppRouteContext';
 import { useSessionActions } from '../hooks/useSessionActions';
-import { APP_ROUTES } from '../routes';
 import './HistoryPage.css';
 
 const DATE_FORMATTER = new Intl.DateTimeFormat(undefined, {
@@ -17,9 +15,14 @@ function formatMessageCount(count: number) {
 }
 
 export function HistoryPage() {
-  const { sessions, handleSelectChat, handleDeleteChat, handleRenameChat, handleNewChat } =
-    useAppRouteContext();
-  const navigate = useNavigate();
+  const {
+    sessions,
+    handleSelectChat,
+    handleDeleteChat,
+    handleRenameChat,
+    handleNewChat,
+    totalConversationsCount,
+  } = useAppRouteContext();
   const [searchQuery, setSearchQuery] = useState('');
   const searchInputRef = useRef<HTMLInputElement>(null);
   const {
@@ -51,22 +54,15 @@ export function HistoryPage() {
     );
   }, [normalizedQuery, sessions]);
 
-  const openChat = (id: string) => {
-    handleSelectChat(id);
-    navigate(APP_ROUTES.chat);
-  };
-
-  const openNewChat = () => {
-    handleNewChat();
-    navigate(APP_ROUTES.chat);
-  };
-
   const clearSearch = () => {
     setSearchQuery('');
     searchInputRef.current?.focus();
   };
 
-  const historyCountLabel = `${visibleSessions.length} conversation${visibleSessions.length === 1 ? '' : 's'}`;
+  const historyCountLabel =
+    normalizedQuery === ''
+      ? `${totalConversationsCount} conversation${totalConversationsCount === 1 ? '' : 's'}`
+      : `${visibleSessions.length} matching conversation${visibleSessions.length === 1 ? '' : 's'}`;
 
   return (
     <section className="history-page">
@@ -76,7 +72,7 @@ export function HistoryPage() {
           <p className="history-page-subtitle">{historyCountLabel}</p>
         </div>
 
-        <button className="history-page-new-chat" type="button" onClick={openNewChat}>
+        <button className="history-page-new-chat" type="button" onClick={handleNewChat}>
           <Icon name="plus" size={14} />
           New Chat
         </button>
@@ -95,7 +91,7 @@ export function HistoryPage() {
           autoComplete="off"
           spellCheck={false}
         />
-        {searchQuery !== '' && (
+        {searchQuery !== '' ? (
           <button
             type="button"
             className="history-page-search-clear"
@@ -105,7 +101,7 @@ export function HistoryPage() {
           >
             <Icon name="x" size={14} />
           </button>
-        )}
+        ) : null}
       </div>
 
       {visibleSessions.length === 0 ? (
@@ -123,7 +119,7 @@ export function HistoryPage() {
               <p className="history-page-empty-description">
                 Start a conversation and it will appear in your history.
               </p>
-              <button className="history-page-empty-cta" type="button" onClick={openNewChat}>
+              <button className="history-page-empty-cta" type="button" onClick={handleNewChat}>
                 Start chatting
               </button>
             </>
@@ -141,7 +137,7 @@ export function HistoryPage() {
                 className={`history-page-item ${isEditing ? 'editing' : 'interactive'}`}
                 tabIndex={isEditing ? undefined : 0}
                 aria-label={isEditing ? undefined : `Open conversation: ${session.title}`}
-                onClick={isEditing ? undefined : () => openChat(session.id)}
+                onClick={isEditing ? undefined : () => handleSelectChat(session.id)}
                 onKeyDown={
                   isEditing
                     ? undefined
@@ -152,7 +148,7 @@ export function HistoryPage() {
 
                         if (e.key === 'Enter') {
                           e.preventDefault();
-                          openChat(session.id);
+                          handleSelectChat(session.id);
                         }
                       }
                 }
@@ -207,7 +203,7 @@ export function HistoryPage() {
                         <Icon name="more" size={14} />
                       </button>
 
-                      {optionsMenu?.id === session.id && (
+                      {optionsMenu?.id === session.id ? (
                         <SessionOptionsMenu
                           rect={optionsMenu.rect}
                           onRename={() => startRename(session.id, session.title)}
@@ -217,7 +213,7 @@ export function HistoryPage() {
                           }}
                           onClose={closeOptionsMenu}
                         />
-                      )}
+                      ) : null}
                     </div>
                   </>
                 )}
