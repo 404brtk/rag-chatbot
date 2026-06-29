@@ -1,0 +1,60 @@
+.auth-dialog {
+  max-width: 400px;
+}
+
+.auth-dialog-wrapper {
+  padding: var(--spacing-6);
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-4);
+}
+
+.auth-dialog-tabs {
+  display: flex;
+  gap: var(--spacing-2);
+}
+
+.auth-dialog-tab-btn {
+  background: none;
+  border: none;
+  color: var(--color-text-secondary);
+  font-family: var(--font-sans);
+  font-size: var(--text-base);
+  font-weight: var(--font-weight-medium);
+  cursor: pointer;
+  padding: var(--spacing-1) var(--spacing-3);
+  border-radius: var(--radius-sm);
+  transition: all var(--transition-fast);
+}
+
+.auth-dialog-tab-btn:hover {
+  color: var(--color-text-primary);
+  background: var(--color-surface-hover);
+}
+
+.auth-dialog-tab-btn.active {
+  color: var(--color-text-primary);
+  background: var(--color-surface-active);
+}
+
+.auth-dialog-form {
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-4);
+}
+
+.auth-dialog-submit-btn {
+  margin-top: var(--spacing-2);
+  height: 42px;
+  padding: 0;
+  font-size: var(--text-base);
+}
+
+.auth-dialog-submit-btn:hover:not(:disabled) {
+  transform: translateY(-1px);
+}
+
+.auth-dialog-submit-btn:active:not(:disabled) {
+  transform: translateY(0);
+}
