@@ -10,6 +10,11 @@ interface TopNavProps {
   isCompactLayout?: boolean;
   isSidebarOpen?: boolean;
   onToggleSidebar?: () => void;
+  isAuthenticated: boolean;
+  userEmail: string | null;
+  onOpenLogin: () => void;
+  onOpenRegister: () => void;
+  onLogout: () => void;
 }
 
 export function TopNav({
@@ -19,6 +24,11 @@ export function TopNav({
   isCompactLayout = false,
   isSidebarOpen = false,
   onToggleSidebar,
+  isAuthenticated,
+  userEmail,
+  onOpenLogin,
+  onOpenRegister,
+  onLogout,
 }: TopNavProps) {
   const [isDropdownOpen, setIsDropdownOpen] = useState(false);
   const dropdownRef = useRef<HTMLDivElement>(null);
@@ -89,12 +99,27 @@ export function TopNav({
       </div>
 
       <div className="topnav-right">
-        <button className="btn-register compact-register" type="button">
-          Register
-        </button>
-        <button className="btn-login" type="button">
-          Login
-        </button>
+        {isAuthenticated ? (
+          <>
+            <span className="user-email-label">{userEmail}</span>
+            <button className="btn-secondary" type="button" onClick={onLogout}>
+              Logout
+            </button>
+          </>
+        ) : (
+          <>
+            <button
+              className="btn-secondary compact-register"
+              type="button"
+              onClick={onOpenRegister}
+            >
+              Register
+            </button>
+            <button className="btn-primary btn-login-nav" type="button" onClick={onOpenLogin}>
+              Login
+            </button>
+          </>
+        )}
       </div>
     </header>
   );
