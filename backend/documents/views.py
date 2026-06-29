@@ -15,6 +15,7 @@ from rest_framework import mixins, viewsets, status
 from rest_framework.response import Response
 
 from core.exceptions import TemporaryProviderError
+from accounts.models import UserApiKey
 from .models import Document, DocumentLanguage, GetDocsJob
 from .pagination import DocumentCursorPagination, GetDocsJobCursorPagination
 from .serializers import DocumentSerializer, GetDocsJobSerializer
@@ -169,6 +170,10 @@ class GetDocsJobViewSet(
         serializer.is_valid(raise_exception=True)
 
         client = GetDocsClient()
+        github_key_obj = UserApiKey.objects.filter(
+            user=request.user, provider="github"
+        ).first()
+        github_token = github_key_obj.encrypted_key if github_key_obj else None
 
         try:
             with transaction.atomic():
@@ -178,6 +183,7 @@ class GetDocsJobViewSet(
                     job_id = client.trigger_get_docs(
                         url=get_docs_job.url,
                         github_repo=get_docs_job.github_repo,
+                        github_token=github_token,
                         max_pages=get_docs_job.max_pages,
                         max_depth=get_docs_job.max_depth,
                         delay_seconds=get_docs_job.delay_seconds,

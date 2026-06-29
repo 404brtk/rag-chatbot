@@ -63,6 +63,22 @@ class TestTriggerGetDocs:
         assert payload["github_repo"] == "owner/repo"
         assert "url" not in payload
 
+    def test_sends_github_token_in_payload(self):
+        mock_response = MagicMock()
+        mock_response.json.return_value = {"job_id": "abc-123"}
+        mock_response.raise_for_status.return_value = None
+
+        with patch.object(
+            httpx.Client, "post", return_value=mock_response
+        ) as mock_post:
+            client = GetDocsClient()
+            client.trigger_get_docs(
+                github_repo="owner/repo", github_token="ghp_test123"
+            )
+
+        payload = mock_post.call_args.kwargs["json"]
+        assert payload["github_token"] == "ghp_test123"
+
     def test_raises_on_http_error(self):
         with patch.object(
             httpx.Client, "post", side_effect=httpx.HTTPError("Server error")

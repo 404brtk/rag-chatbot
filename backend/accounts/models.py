@@ -2,7 +2,7 @@ import uuid
 from django.db import models
 from django.contrib.auth.models import AbstractUser, BaseUserManager
 from core.models import UUIDModel
-from core.constants import LLMProvider
+from core.constants import Provider
 from core.fields import EncryptedTextField
 
 
@@ -44,7 +44,7 @@ class User(AbstractUser):
 
 class UserApiKey(UUIDModel):
     user = models.ForeignKey(User, on_delete=models.CASCADE, related_name="api_keys")
-    provider = models.CharField(max_length=32, choices=LLMProvider.choices)
+    provider = models.CharField(max_length=32, choices=Provider.choices)
     encrypted_key = EncryptedTextField()
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)

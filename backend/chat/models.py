@@ -5,7 +5,7 @@ from django.dispatch import receiver
 from django.core.files.storage import default_storage
 from django.utils import timezone
 from core.models import UUIDModel
-from core.constants import LLMProvider
+from core.constants import Provider
 
 
 class Conversation(UUIDModel):
@@ -70,7 +70,7 @@ class Message(UUIDModel):
     context = models.JSONField(null=True, blank=True)
     provider = models.CharField(
         max_length=16,
-        choices=LLMProvider.choices,
+        choices=Provider.choices,
         null=True,
         blank=True,
     )

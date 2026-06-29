@@ -13,6 +13,7 @@ class GetDocsClient:
         self,
         url: str | None = None,
         github_repo: str | None = None,
+        github_token: str | None = None,
         max_pages: int = 150,
         max_depth: int = 3,
         delay_seconds: float = 1.5,
@@ -33,6 +34,8 @@ class GetDocsClient:
             payload["url"] = url
         if github_repo:
             payload["github_repo"] = github_repo
+        if github_token:
+            payload["github_token"] = github_token
 
         with httpx.Client() as client:
             response = client.post(endpoint, json=payload, timeout=10.0)
