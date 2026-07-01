@@ -1,12 +1,21 @@
+name: Get Docs CI
+
 on:
   push:
     branches: [main]
+    paths:
+      - 'get-docs/**'
   pull_request:
     branches: [main]
+    paths:
+      - 'get-docs/**'
 
 jobs:
   test:
     runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: ./get-docs
 
     steps:
       - uses: actions/checkout@v6
