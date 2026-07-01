@@ -1,0 +1,22 @@
+.chat-page-empty-state-wrapper {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: flex-start;
+  gap: var(--spacing-1);
+  width: 100%;
+  padding-top: clamp(128px, 20vh, 196px);
+}
+
+.chat-page-empty-state-wrapper .hero-section {
+  padding-top: var(--spacing-4);
+  margin-bottom: 0;
+}
+
+.chat-page-empty-input-region {
+  position: static;
+  background: transparent;
+  padding-bottom: 0;
+  width: 100%;
+}

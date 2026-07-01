@@ -1,0 +1,276 @@
+:root {
+  --color-bg: #09090e;
+  --color-surface: #111118;
+  --color-surface-hover: #191922;
+  --color-surface-active: #21212e;
+  --color-surface-elevated: #1c1c26;
+
+  --color-border: rgba(255, 255, 255, 0.07);
+  --color-border-hover: rgba(255, 255, 255, 0.13);
+  --color-border-focus: rgba(255, 255, 255, 0.18);
+
+  --color-text-primary: #ececf1;
+  --color-text-secondary: #8e8ea0;
+  --color-text-tertiary: #565669;
+  --color-text-on-accent: #111118;
+
+  --color-accent: #ececf1;
+  --color-accent-hover: #ffffff;
+
+  --color-danger: #ff6b6b;
+  --color-danger-hover: rgba(255, 107, 107, 0.1);
+
+  --color-warning: #d9a726;
+  --color-warning-bg: rgba(217, 167, 38, 0.12);
+  --color-info: #8e8ea0;
+  --color-info-bg: rgba(255, 255, 255, 0.06);
+
+  --color-backdrop: rgba(4, 4, 6, 0.75);
+
+  --color-overlay-light: rgba(255, 255, 255, 0.03);
+  --color-overlay-hover: rgba(255, 255, 255, 0.08);
+  --color-overlay-active: rgba(255, 255, 255, 0.12);
+
+  --radius-full: 9999px;
+  --radius-xl: 22px;
+  --radius-lg: 16px;
+  --radius-md: 10px;
+  --radius-sm: 6px;
+  --radius-xs: 4px;
+
+  --font-sans: 'Geist', -apple-system, BlinkMacSystemFont, sans-serif;
+  --font-mono: 'Geist Mono', ui-monospace, monospace;
+  --font-serif: 'Gelasio', serif;
+
+  --font-weight-regular: 400;
+  --font-weight-medium: 500;
+  --font-weight-semibold: 600;
+  --font-weight-bold: 700;
+
+  --text-xs: 0.7rem;
+  --text-sm: 0.8rem;
+  --text-base: 0.9rem;
+  --text-lg: 1rem;
+  --text-xl: 1.25rem;
+  --text-2xl: 2.25rem;
+
+  --spacing-1: 4px;
+  --spacing-2: 8px;
+  --spacing-3: 12px;
+  --spacing-4: 16px;
+  --spacing-5: 22px;
+  --spacing-6: 24px;
+  --spacing-8: 32px;
+
+  --icon-sm: 14px;
+  --icon-md: 20px;
+  --icon-lg: 32px;
+  --icon-xl: 44px;
+
+  --popover-width: 300px;
+  --message-collapse-height: 280px;
+  --typing-shape-size: 10px;
+
+  --scale-down: 0.92;
+  --scale-up: 1.05;
+
+  --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
+  --transition-fast: 120ms var(--ease-out);
+  --transition-normal: 200ms var(--ease-out);
+  --transition-slow: 350ms var(--ease-out);
+
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.4);
+  --shadow-md: 0 4px 16px rgba(0, 0, 0, 0.4);
+  --shadow-lg: 0 8px 32px rgba(0, 0, 0, 0.5);
+  --shadow-2xl: 0 16px 48px rgba(0, 0, 0, 0.6);
+  --shadow-focus: 0 0 0 1px var(--color-border-focus), 0 0 12px var(--color-overlay-light);
+
+  --spacing-0: 0px;
+
+  --chat-max-width: 768px;
+  --sidebar-collapsed-width: 72px;
+  --sidebar-expanded-width: 240px;
+}
+
+*,
+*::before,
+*::after {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+html {
+  font-size: 16px;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
+}
+
+body {
+  font-family: var(--font-sans);
+  background: var(--color-bg);
+  color: var(--color-text-primary);
+  line-height: 1.5;
+  min-height: 100dvh;
+}
+
+#root {
+  min-height: 100dvh;
+}
+
+::-webkit-scrollbar {
+  width: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--color-surface-active);
+  border-radius: var(--radius-full);
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--color-text-tertiary);
+}
+
+.error-banner {
+  background: var(--color-danger-hover);
+  color: var(--color-danger);
+  border: 1px solid var(--color-border);
+  padding: var(--spacing-3);
+  border-radius: var(--radius-md);
+  font-size: var(--text-sm);
+  white-space: pre-wrap;
+}
+
+.form-field {
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-2);
+}
+
+.form-field label {
+  font-size: var(--text-sm);
+  color: var(--color-text-secondary);
+  font-weight: var(--font-weight-medium);
+}
+
+.form-field input,
+.form-field select {
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  padding: 0 var(--spacing-3);
+  height: 42px;
+  color: var(--color-text-primary);
+  font-family: var(--font-sans);
+  font-size: var(--text-base);
+  outline: none;
+  transition:
+    border var(--transition-fast),
+    box-shadow var(--transition-fast);
+}
+
+.form-field textarea {
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  padding: var(--spacing-3);
+  color: var(--color-text-primary);
+  font-family: var(--font-sans);
+  font-size: var(--text-base);
+  outline: none;
+  transition:
+    border var(--transition-fast),
+    box-shadow var(--transition-fast);
+}
+
+.form-field input:focus,
+.form-field select:focus,
+.form-field textarea:focus {
+  border-color: var(--color-border-focus);
+  box-shadow: var(--shadow-focus);
+}
+
+.btn-primary {
+  background: var(--color-accent);
+  color: var(--color-text-on-accent);
+  border: none;
+  border-radius: var(--radius-md);
+  padding: var(--spacing-2) var(--spacing-4);
+  font-family: var(--font-sans);
+  font-size: var(--text-sm);
+  font-weight: var(--font-weight-semibold);
+  cursor: pointer;
+  transition: background var(--transition-fast);
+}
+
+.btn-primary:hover:not(:disabled) {
+  background: var(--color-accent-hover);
+}
+
+.btn-primary:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.btn-secondary {
+  background: transparent;
+  color: var(--color-text-primary);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  padding: var(--spacing-2) var(--spacing-5);
+  font-family: var(--font-sans);
+  font-size: var(--text-sm);
+  font-weight: var(--font-weight-semibold);
+  cursor: pointer;
+  transition:
+    background var(--transition-fast),
+    border-color var(--transition-fast);
+}
+
+.btn-secondary:hover:not(:disabled) {
+  background: var(--color-surface-hover);
+  border-color: var(--color-border-hover);
+}
+
+.btn-secondary:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.pill-control {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  background: var(--color-surface-elevated);
+  border: 1px solid var(--color-border);
+  color: var(--color-text-secondary);
+  border-radius: var(--radius-full);
+  font-size: var(--text-xs);
+  font-family: var(--font-sans);
+  font-weight: var(--font-weight-medium);
+  cursor: pointer;
+  user-select: none;
+  transition: all var(--transition-fast);
+}
+
+.pill-control:hover {
+  border-color: var(--color-border-hover);
+  color: var(--color-text-primary);
+  background-color: var(--color-surface-hover);
+}
+
+.pill-control.active {
+  background-color: var(--color-surface-active);
+  border-color: var(--color-border-hover);
+  color: var(--color-text-primary);
+}
+
+.pill-control.active:hover {
+  background-color: var(--color-surface-hover);
+  border-color: var(--color-border-focus);
+}

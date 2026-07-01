@@ -1,0 +1,43 @@
+.session-options-menu {
+  position: fixed;
+  background: var(--color-surface-elevated);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-lg);
+  display: flex;
+  flex-direction: column;
+  padding: var(--spacing-1);
+  min-width: 120px;
+}
+
+.session-options-menu button {
+  background: transparent;
+  border: none;
+  color: var(--color-text-primary);
+  padding: var(--spacing-2) var(--spacing-3);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-2);
+  font-size: var(--text-sm);
+  font-weight: var(--font-weight-regular);
+  text-align: left;
+}
+
+.session-options-menu button svg {
+  width: var(--icon-sm);
+  height: var(--icon-sm);
+}
+
+.session-options-menu button:hover {
+  background: var(--color-surface-active);
+}
+
+.session-options-menu button.danger {
+  color: var(--color-danger);
+}
+
+.session-options-menu button.danger:hover {
+  background: var(--color-danger-hover);
+}

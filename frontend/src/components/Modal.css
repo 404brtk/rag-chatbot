@@ -1,0 +1,56 @@
+.modal-popover,
+.modal-dialog {
+  position: fixed;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  width: 90%;
+  margin: 0;
+  background: var(--color-surface-elevated);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-lg);
+  color: var(--color-text-primary);
+  outline: none;
+  transition: opacity var(--transition-normal);
+}
+
+.modal-popover:popover-open,
+.modal-dialog[open] {
+  display: flex;
+  flex-direction: column;
+}
+
+.modal-popover::backdrop,
+.modal-dialog::backdrop,
+.citation-detail-popover::backdrop {
+  background: var(--color-backdrop);
+  backdrop-filter: blur(8px);
+  transition: opacity var(--transition-normal);
+}
+
+.modal-close-btn {
+  background: none;
+  border: none;
+  color: var(--color-text-secondary);
+  cursor: pointer;
+  padding: var(--spacing-1);
+  border-radius: var(--radius-sm);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all var(--transition-fast);
+}
+
+.modal-close-btn:hover {
+  color: var(--color-text-primary);
+  background: var(--color-surface-hover);
+}
+
+.modal-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  border-bottom: 1px solid var(--color-border);
+  padding-bottom: var(--spacing-3);
+}

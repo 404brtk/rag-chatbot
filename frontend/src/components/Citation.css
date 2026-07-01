@@ -1,0 +1,173 @@
+.citation-wrapper {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  margin: 0 var(--spacing-1);
+}
+
+.citation-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  font-weight: var(--font-weight-medium);
+  color: var(--color-text-secondary);
+  background: var(--color-surface-hover);
+  padding: 0 var(--spacing-1);
+  border-radius: var(--radius-xs);
+  transform: translateY(-0.25em);
+  cursor: pointer;
+  transition:
+    background-color var(--transition-fast),
+    color var(--transition-fast),
+    transform var(--transition-fast);
+  border: 1px solid var(--color-border);
+}
+
+.citation-wrapper:hover .citation-badge {
+  background: var(--color-surface-active);
+  color: var(--color-text-primary);
+  border-color: var(--color-border-hover);
+}
+
+.citation-popover {
+  position: fixed;
+  width: max-content;
+  max-width: var(--popover-width);
+  background: var(--color-surface-elevated);
+  border: 1px solid var(--color-border-focus);
+  border-radius: var(--radius-md);
+  padding: var(--spacing-3) var(--spacing-4);
+  box-shadow: var(--shadow-lg);
+  z-index: 9999;
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-1);
+  backdrop-filter: blur(8px);
+}
+
+.citation-popover-top {
+  animation: citationRevealTop var(--transition-fast) forwards;
+  transform-origin: bottom center;
+}
+
+.citation-popover-bottom {
+  animation: citationRevealBottom var(--transition-fast) forwards;
+  transform-origin: top center;
+}
+
+.citation-popover-source {
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  font-weight: var(--font-weight-semibold);
+  color: var(--color-accent);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.citation-popover-snippet {
+  font-family: var(--font-sans);
+  font-size: var(--text-sm);
+  font-weight: var(--font-weight-regular);
+  line-height: 1.5;
+  color: var(--color-text-secondary);
+  font-style: italic;
+  display: -webkit-box;
+  -webkit-line-clamp: 4;
+  line-clamp: 4;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: pre-wrap;
+}
+
+@keyframes citationRevealTop {
+  from {
+    opacity: 0;
+    transform: translateX(-50%) translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(-50%) translateY(0);
+  }
+}
+
+@keyframes citationRevealBottom {
+  from {
+    opacity: 0;
+    transform: translateX(-50%) translateY(-4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(-50%) translateY(0);
+  }
+}
+
+.citation-detail-modal {
+  width: min(500px, 90vw);
+  overflow: hidden;
+}
+
+.citation-detail-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: var(--spacing-4);
+  border-bottom: 1px solid var(--color-border);
+  background: var(--color-surface-elevated);
+}
+
+.citation-detail-header h3 {
+  margin: 0;
+  font-size: var(--text-base);
+  font-weight: var(--font-weight-semibold);
+  color: var(--color-text-primary);
+}
+
+.citation-detail-close {
+  width: 24px;
+  height: 24px;
+}
+
+.citation-detail-body {
+  padding: var(--spacing-5);
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-4);
+  max-height: 70vh;
+  overflow-y: auto;
+}
+
+.citation-detail-meta {
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-1);
+}
+
+.citation-detail-meta-label {
+  font-size: var(--text-xs);
+  color: var(--color-text-tertiary);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  font-weight: var(--font-weight-semibold);
+}
+
+.citation-detail-meta-val {
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
+  color: var(--color-accent);
+}
+
+.citation-detail-content {
+  background: var(--color-surface-elevated);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  padding: var(--spacing-4);
+  font-family: var(--font-sans);
+  font-size: var(--text-sm);
+  line-height: 1.6;
+  color: var(--color-text-secondary);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
