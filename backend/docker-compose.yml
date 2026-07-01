@@ -92,3 +92,4 @@ services:
 
 volumes:
     pgdata:
+        name: backend_pgdata
