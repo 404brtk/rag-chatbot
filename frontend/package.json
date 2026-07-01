@@ -9,15 +9,15 @@
     "lint": "eslint .",
     "format": "prettier --write .",
     "preview": "vite preview",
-    "prepare": "husky"
+    "lint-staged": "lint-staged"
   },
   "lint-staged": {
     "*.{ts,tsx,js,jsx}": [
-      "eslint --fix",
-      "prettier --write"
+      "bunx eslint --fix",
+      "bunx prettier --write"
     ],
     "*.{json,css,scss,md,html,yml,yaml}": [
-      "prettier --write"
+      "bunx prettier --write"
     ]
   },
   "dependencies": {
