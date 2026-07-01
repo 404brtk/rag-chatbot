@@ -1,0 +1,277 @@
+from dataclasses import dataclass
+import xml.etree.ElementTree as ET
+import httpx
+
+from src.core.robots_txt_parser import RobotsParser, fetch_robots_txt
+from src.utils.http_client import HttpClient
+from src.utils.lang_utils import _has_lang_segment
+from src.utils.url_utils import (
+    extract_path,
+    is_url_within_scope,
+    make_url_prefix,
+    url_path_parents,
+)
+from src.utils.version_utils import (
+    LATEST_KEYWORDS,
+    parse_version,
+    find_version_index,
+)
+
+
+@dataclass
+class SitemapEntry:
+    loc: str
+    lastmod: str | None = None
+
+
+def _strip_ns(tag: str) -> str:
+    """Remove XML namespace prefix: '{http://...}urlset' -> 'urlset'."""
+    if tag.startswith("{"):
+        return tag.split("}", 1)[1]
+    return tag
+
+
+def _parse_entry(elem: ET.Element) -> SitemapEntry | None:
+    loc = None
+    lastmod = None
+    for child in elem:
+        tag = _strip_ns(child.tag)
+        if tag == "loc" and child.text:
+            loc = child.text.strip()
+        elif tag == "lastmod" and child.text:
+            lastmod = child.text.strip()
+    if loc:
+        return SitemapEntry(loc=loc, lastmod=lastmod)
+    return None
+
+
+class SitemapParser:
+    """(urlset XML, sitemapindex XML, or plain text)."""
+
+    def __init__(self, content: str):
+        self._urls: list[SitemapEntry] = []
+        self._sub_sitemaps: list[SitemapEntry] = []
+        self._parse(content)
+
+    def _parse(self, content: str) -> None:
+        content = content.strip()
+        if not content:
+            return
+
+        if not content.startswith("<"):
+            self._parse_plain_text(content)
+            return
+
+        self._parse_xml(content)
+
+    def _parse_plain_text(self, content: str) -> None:
+        for line in content.splitlines():
+            url = line.strip()
+            if url and not url.startswith("#"):
+                self._urls.append(SitemapEntry(loc=url))
+
+    def _parse_xml(self, content: str) -> None:
+        root = ET.fromstring(content)
+        tag = _strip_ns(root.tag)
+
+        if tag == "urlset":
+            for child in root:
+                if _strip_ns(child.tag) == "url":
+                    entry = _parse_entry(child)
+                    if entry:
+                        self._urls.append(entry)
+
+        elif tag == "sitemapindex":
+            for child in root:
+                if _strip_ns(child.tag) == "sitemap":
+                    entry = _parse_entry(child)
+                    if entry:
+                        self._sub_sitemaps.append(entry)
+
+    def get_urls(self) -> list[SitemapEntry]:
+        return list(self._urls)
+
+    def get_sub_sitemaps(self) -> list[SitemapEntry]:
+        return list(self._sub_sitemaps)
+
+    def is_index(self) -> bool:
+        return len(self._sub_sitemaps) > 0
+
+
+def _filter_by_scope(urls: list[str], base_url: str | None) -> list[str]:
+    if not base_url:
+        return urls
+    prefix = make_url_prefix(base_url)
+    return [u for u in urls if is_url_within_scope(u, prefix)]
+
+
+def _dedupe_versioned_sitemaps(subs: list[SitemapEntry]) -> list[SitemapEntry]:
+    groups: dict[str, list[SitemapEntry]] = {}
+    ungrouped: list[SitemapEntry] = []
+
+    for entry in subs:
+        path = extract_path(entry.loc)
+        parts = [p for p in path.strip("/").split("/") if p]
+
+        version_idx = find_version_index(parts)
+        if version_idx is None:
+            ungrouped.append(entry)
+            continue
+
+        product_key = "/".join(parts[:version_idx])
+        groups.setdefault(product_key, []).append(entry)
+
+    result = list(ungrouped)
+    for entries in groups.values():
+        latest = [
+            e for e in entries if any(f"/{kw}/" in e.loc for kw in LATEST_KEYWORDS)
+        ]
+        if latest:
+            result.append(latest[0])
+            continue
+
+        best = entries[0]
+        best_ver = (0,)
+        for e in entries:
+            parts = extract_path(e.loc).strip("/").split("/")
+            for p in parts:
+                ver = parse_version(p)
+                if ver and ver > best_ver:
+                    best_ver = ver
+                    best = e
+        result.append(best)
+
+    return result
+
+
+def _sitemap_could_contain_scope(sitemap_url: str, scope_prefix: str) -> bool:
+    if is_url_within_scope(sitemap_url, scope_prefix):
+        return True
+    sitemap_dir = make_url_prefix(sitemap_url)
+    return is_url_within_scope(scope_prefix, sitemap_dir)
+
+
+async def fetch_sitemap_urls(
+    sitemap_url: str,
+    client: HttpClient,
+    timeout: float = 15,
+    max_depth: int = 3,
+    base_url: str | None = None,
+) -> list[str]:
+    if max_depth <= 0:
+        return []
+
+    try:
+        resp = await client.get(sitemap_url, follow_redirects=True, timeout=timeout)
+        if resp.status_code != 200:
+            return []
+    except httpx.HTTPError:
+        return []
+
+    try:
+        parser = SitemapParser(resp.text)
+    except ET.ParseError:
+        return []
+
+    if not parser.is_index():
+        return _filter_by_scope([entry.loc for entry in parser.get_urls()], base_url)
+
+    subs = parser.get_sub_sitemaps()
+    if base_url:
+        prefix = make_url_prefix(base_url)
+        subs = [s for s in subs if _sitemap_could_contain_scope(s.loc, prefix)]
+
+        base_path = extract_path(base_url)
+        base_parts = [p for p in base_path.strip("/").split("/") if p]
+        base_lang = _has_lang_segment(base_parts)
+        if base_lang:
+            filtered_subs = []
+            for s in subs:
+                s_path = extract_path(s.loc)
+                if "." in s_path:
+                    s_path = s_path.rsplit(".", 1)[0]
+                s_parts = [
+                    p
+                    for p in s_path.replace("-", "/")
+                    .replace("_", "/")
+                    .strip("/")
+                    .split("/")
+                    if p
+                ]
+                s_lang = _has_lang_segment(s_parts)
+                if (
+                    s_lang is None
+                    or s_lang == base_lang
+                    or base_lang.startswith(s_lang + "-")
+                    or s_lang.startswith(base_lang + "-")
+                ):
+                    filtered_subs.append(s)
+            subs = filtered_subs
+
+    subs = _dedupe_versioned_sitemaps(subs)
+
+    if not subs:
+        return []
+
+    async def _fetch_sub(sub: SitemapEntry) -> list[str]:
+        return await fetch_sitemap_urls(
+            sub.loc,
+            client,
+            timeout,
+            max_depth - 1,
+            base_url=base_url,
+        )
+
+    outcomes = await client.fetch_many(
+        items=subs,
+        fetch_fn=_fetch_sub,
+    )
+
+    urls: list[str] = []
+    for _sub, result in outcomes:
+        if isinstance(result, Exception):
+            continue
+        urls.extend(result)
+    return urls
+
+
+async def collect_sitemap_urls(
+    base_url: str,
+    client: HttpClient,
+    robots: RobotsParser | None = None,
+    timeout: float = 15,
+    max_depth: int = 3,
+) -> list[str]:
+    if robots is None:
+        robots = await fetch_robots_txt(base_url, client, timeout)
+
+    sitemap_sources = robots.get_sitemaps()
+    all_page_urls: list[str] = []
+
+    if sitemap_sources:
+        for src in sitemap_sources:
+            all_page_urls.extend(
+                await fetch_sitemap_urls(
+                    src,
+                    client,
+                    timeout,
+                    max_depth,
+                    base_url=base_url,
+                )
+            )
+
+    if not all_page_urls:
+        for parent in url_path_parents(base_url):
+            candidate = parent.rstrip("/") + "/sitemap.xml"
+            urls = await fetch_sitemap_urls(
+                candidate,
+                client,
+                timeout,
+                max_depth,
+                base_url=base_url,
+            )
+            if urls:
+                all_page_urls.extend(urls)
+                break
+
+    return all_page_urls
