@@ -1,5 +1,5 @@
 services:
-  redis:
+  redis-get-docs:
     image: redis:8.6-alpine
     ports:
       - "6379:6379"
