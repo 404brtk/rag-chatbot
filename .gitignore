@@ -1,8 +1,9 @@
-# IDE/Editor directories
+# IDE
 .idea/
 .vscode/
+
+# AI Agent settings
 .agents/
 
 # System files
 .DS_Store
-Thumbs.db
