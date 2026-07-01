@@ -1,0 +1,67 @@
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: install uv
+        uses: astral-sh/setup-uv@v8.1.0
+        with:
+          python-version: "3.14"
+
+      - name: lint and format check
+        run: |
+          uvx ruff check .
+          uvx ruff format --check .
+
+  test:
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: pgvector/pgvector:pg18
+        env:
+          POSTGRES_DB: test_db
+          POSTGRES_USER: test_user
+          POSTGRES_PASSWORD: test_password
+        ports:
+          - 5432:5432
+        options: >-
+          --name pg_db
+          --health-cmd "pg_isready -U test_user -d test_db"
+          --health-interval 2s
+          --health-timeout 3s
+          --health-retries 5
+
+    env:
+      DATABASE_URL: postgres://test_user:test_password@localhost:5432/test_db
+      SECRET_KEY: django-insecure-ci-only-not-a-real-secret-key
+      DEBUG: "True"
+
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Copy Polish search dictionaries to Postgres container
+        run: |
+          docker cp resources/dictionaries/polish.dict pg_db:/usr/share/postgresql/18/tsearch_data/polish.dict
+          docker cp resources/dictionaries/polish.affix pg_db:/usr/share/postgresql/18/tsearch_data/polish.affix
+          docker cp resources/stopwords/polish.stop pg_db:/usr/share/postgresql/18/tsearch_data/polish.stop
+
+      - name: install uv
+        uses: astral-sh/setup-uv@v8.1.0
+        with:
+          python-version: "3.14"
+          enable-cache: true
+
+      - name: install dependencies
+        run: uv sync --frozen
+
+      - name: run tests
+        run: uv run pytest -v --tb=short

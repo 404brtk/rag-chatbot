@@ -1,0 +1,109 @@
+from datetime import datetime, timezone
+from unittest.mock import patch, MagicMock
+import pytest
+from cryptography.fernet import Fernet
+from django.contrib.auth import get_user_model
+from rest_framework.test import APIClient
+
+from chat.llm_config import LLMConfig
+from accounts.models import UserApiKey
+from chat.repositories import StoredMessage
+
+User = get_user_model()
+
+VALID_PASSWORD = "4Ah?,*d]GAx2"
+TOKEN_URL = "/api/token/"
+DEFAULT_CONFIG = LLMConfig(
+    provider="openai",
+    model="gpt",
+    system_prompt="You are a helpful assistant.",
+    compaction_provider="openai",
+    compaction_model="gpt",
+    compaction_enabled=True,
+)
+
+
+def _msg(role, content, created_at=None, is_compaction_summary=False):
+    return StoredMessage(
+        role=role,
+        content=content,
+        created_at=created_at or datetime(2025, 1, 1, tzinfo=timezone.utc),
+        is_compaction_summary=is_compaction_summary,
+    )
+
+
+@pytest.fixture(autouse=True)
+def _fernet_settings(settings):
+    settings.FERNET_KEYS = [Fernet.generate_key().decode()]
+
+
+@pytest.fixture
+def user_a():
+    return User.objects.create_user(email="alice@example.com", password=VALID_PASSWORD)
+
+
+@pytest.fixture
+def user_b():
+    return User.objects.create_user(email="bob@example.com", password=VALID_PASSWORD)
+
+
+@pytest.fixture
+def auth_client_a(user_a):
+    client = APIClient()
+    tokens = client.post(
+        TOKEN_URL, {"email": "alice@example.com", "password": VALID_PASSWORD}
+    )
+    client.credentials(HTTP_AUTHORIZATION=f"Bearer {tokens.data['access']}")
+    return client
+
+
+@pytest.fixture
+def auth_client_b(user_b):
+    client = APIClient()
+    tokens = client.post(
+        TOKEN_URL, {"email": "bob@example.com", "password": VALID_PASSWORD}
+    )
+    client.credentials(HTTP_AUTHORIZATION=f"Bearer {tokens.data['access']}")
+    return client
+
+
+@pytest.fixture
+def api_key(user_a):
+    return UserApiKey.objects.create(
+        user=user_a, provider="openai", encrypted_key="sk-chat"
+    )
+
+
+@pytest.fixture
+def mock_embedding_service(settings):
+    dim = settings.EMBEDDING_DIMENSIONS
+    with patch("documents.embeddings.EmbeddingService.get_instance") as mock:
+        instance = mock.return_value
+
+        def dynamic_embed(texts):
+            if isinstance(instance.embed_texts.return_value, MagicMock):
+                return [[0.1] * dim for _ in texts]
+            return instance.embed_texts.return_value
+
+        instance.embed_texts.side_effect = dynamic_embed
+        instance.embed_query.return_value = [0.1] * dim
+        yield instance
+
+
+@pytest.fixture(autouse=True)
+def disable_tokenizer_in_tests():
+    with patch("documents.chunking.get_tokenizer", return_value=None):
+        yield
+
+
+@pytest.fixture
+def mock_reranker_service(settings):
+    with patch("documents.reranker.RerankerService.get_instance") as mock:
+        instance = mock.return_value
+        instance.rerank.return_value = []
+        yield instance
+
+
+@pytest.fixture(autouse=True)
+def disable_reranking_in_tests(settings):
+    settings.RERANK_ENABLED = False

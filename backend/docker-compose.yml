@@ -1,0 +1,94 @@
+services:
+    db:
+        image: pgvector/pgvector:pg18
+        container_name: pg-rag-chatbot
+        restart: unless-stopped
+        environment:
+            POSTGRES_USER: ${POSTGRES_USER}
+            POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+            POSTGRES_DB: ${POSTGRES_DB}
+        ports:
+            - "${POSTGRES_PORT:-5432}:5432"
+        volumes:
+            - pgdata:/var/lib/postgresql
+            - ./resources/dictionaries/polish.dict:/usr/share/postgresql/18/tsearch_data/polish.dict
+            - ./resources/dictionaries/polish.affix:/usr/share/postgresql/18/tsearch_data/polish.affix
+            - ./resources/stopwords/polish.stop:/usr/share/postgresql/18/tsearch_data/polish.stop
+        healthcheck:
+            test:
+                [
+                    "CMD-SHELL",
+                    "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}",
+                ]
+            interval: 10s
+            timeout: 5s
+            retries: 5
+            start_period: 15s
+
+    redis:
+        image: redis:8.6-alpine
+        container_name: redis-rag-chatbot
+        restart: unless-stopped
+        ports:
+            - "6380:6379"
+
+    # NOTE: This 'embedding-model' service is assigned to the 'nvidia' profile, meaning it will NOT start by default.
+    # It is pre-configured for Windows/Linux with an NVIDIA GPU (RTX 50x0 series). To run it, you must explicitly pass the profile:
+    # 'docker compose --profile nvidia up -d'
+    # If you have a different GPU architecture, check the latest compatible image tags at: https://github.com/huggingface/text-embeddings-inference
+    #
+    # MAC USERS: Apple Silicon doesn't support NVIDIA drivers. Instead of running this container,
+    # 1. Start the core infrastructure (database & cache) using: 'docker compose up -d'
+    # 2. Install TEI locally via Homebrew: 'brew install text-embeddings-inference'
+    # 3. Run the model with Metal acceleration: 'text-embeddings-router --model-id intfloat/multilingual-e5-base --port 8002'
+    embedding-model:
+        image: ghcr.io/huggingface/text-embeddings-inference:120-1.9
+        container_name: embedding-model-rag-chatbot
+        restart: unless-stopped
+        pull_policy: always
+        profiles:
+            - nvidia
+        ports:
+            - "8002:80"
+        volumes:
+            - ./data:/data
+        command: --model-id intfloat/multilingual-e5-base
+        deploy:
+            resources:
+                reservations:
+                    devices:
+                        - driver: nvidia
+                          count: all
+                          capabilities: [gpu]
+
+    # NOTE: This 'reranker-model' service is assigned to the 'nvidia' profile, meaning it will NOT start by default.
+    # It is pre-configured for Windows/Linux with an NVIDIA GPU. To run it, you must explicitly pass the profile:
+    # 'docker compose --profile nvidia up -d'
+    # If you have a different GPU architecture, check the latest compatible image tags at: https://github.com/huggingface/text-embeddings-inference
+    #
+    # MAC USERS: Apple Silicon doesn't support NVIDIA drivers. Instead of running this container,
+    # 1. Start the core infrastructure (database & cache) using: 'docker compose up -d'
+    # 2. Install TEI locally via Homebrew: 'brew install text-embeddings-inference'
+    # 3. Run the model with Metal acceleration: 'text-embeddings-router --model-id BAAI/bge-reranker-v2-m3 --port 8003'
+    reranker-model:
+        image: ghcr.io/huggingface/text-embeddings-inference:120-1.9
+        container_name: reranker-model-rag-chatbot
+        restart: unless-stopped
+        pull_policy: always
+        profiles:
+            - nvidia
+        ports:
+            - "8003:80"
+        volumes:
+            - ./data:/data
+        command: --model-id BAAI/bge-reranker-v2-m3
+        deploy:
+            resources:
+                reservations:
+                    devices:
+                        - driver: nvidia
+                          count: all
+                          capabilities: [gpu]
+
+volumes:
+    pgdata:

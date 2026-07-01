@@ -1,0 +1,476 @@
+import pytest
+from asgiref.sync import sync_to_async
+from django.conf import settings
+
+from documents.chunking import ParentChunkData
+from documents.document_service import DocumentService, SearchResult
+from documents.models import Document, DocumentChunk
+
+DIM = settings.EMBEDDING_DIMENSIONS
+
+
+def _make_embedding(*values, dim=DIM):
+    vec = [0.0] * dim
+    for i, v in enumerate(values):
+        vec[i] = v
+    return vec
+
+
+@pytest.mark.django_db
+class TestCreateDocumentChunks:
+    def test_bulk_creates_chunks_with_embeddings(self, user_a, mock_embedding_service):
+        mock_embedding_service.embed_texts.return_value = [[0.1] * DIM, [0.2] * DIM]
+        document = Document.objects.create(
+            user=user_a,
+            filename="test.txt",
+            content_type="text/plain",
+            raw_text="Hello world",
+        )
+
+        service = DocumentService()
+        service._create_document_chunks(
+            document,
+            [
+                ParentChunkData(content="Hello", child_texts=["Hello"]),
+                ParentChunkData(content="world", child_texts=["world"]),
+            ],
+        )
+
+        chunks = DocumentChunk.objects.filter(document=document).order_by("chunk_index")
+        assert chunks.count() == 2
+        assert chunks[0].content == "[Document: test.txt]\n\nHello"
+        assert chunks[0].chunk_index == 0
+        assert list(chunks[0].embedding) == [0.1] * DIM
+        assert chunks[1].content == "[Document: test.txt]\n\nworld"
+        assert chunks[1].chunk_index == 1
+        assert list(chunks[1].embedding) == [0.2] * DIM
+        mock_embedding_service.embed_texts.assert_called_once_with(
+            ["[Document: test.txt]\n\nHello", "[Document: test.txt]\n\nworld"]
+        )
+
+    def test_skips_empty_chunks(self, user_a, mock_embedding_service):
+        document = Document.objects.create(
+            user=user_a,
+            filename="test.txt",
+            content_type="text/plain",
+            raw_text="Hello",
+        )
+
+        service = DocumentService()
+        service._create_document_chunks(document, [])
+
+        assert DocumentChunk.objects.filter(document=document).count() == 0
+        mock_embedding_service.embed_texts.assert_not_called()
+
+    def test_populates_word_count_and_search_vector(
+        self, user_a, mock_embedding_service
+    ):
+        mock_embedding_service.embed_texts.return_value = [[0.1] * DIM]
+        document = Document.objects.create(
+            user=user_a,
+            filename="test.txt",
+            content_type="text/plain",
+            raw_text="three word sentence",
+        )
+
+        service = DocumentService()
+        service._create_document_chunks(
+            document,
+            [
+                ParentChunkData(
+                    content="three word sentence", child_texts=["three word sentence"]
+                )
+            ],
+        )
+
+        chunk = DocumentChunk.objects.get(document=document)
+        assert chunk.word_count == 5
+        assert chunk.search_vector is not None
+
+    def test_prepends_source_url_when_present(self, user_a, mock_embedding_service):
+        mock_embedding_service.embed_texts.return_value = [[0.1] * DIM]
+        document = Document.objects.create(
+            user=user_a,
+            filename="test.txt",
+            content_type="text/plain",
+            raw_text="Hello",
+            source_url="https://example.com/page",
+        )
+
+        service = DocumentService()
+        service._create_document_chunks(
+            document,
+            [ParentChunkData(content="Hello world", child_texts=["Hello world"])],
+        )
+
+        chunk = DocumentChunk.objects.get(document=document)
+        assert chunk.content == "[Document: test.txt]\n\nHello world"
+
+    def test_no_source_url_prefix_when_missing(self, user_a, mock_embedding_service):
+        mock_embedding_service.embed_texts.return_value = [[0.1] * DIM]
+        document = Document.objects.create(
+            user=user_a,
+            filename="test.txt",
+            content_type="text/plain",
+            raw_text="Hello",
+        )
+
+        service = DocumentService()
+        service._create_document_chunks(
+            document,
+            [ParentChunkData(content="Plain content", child_texts=["Plain content"])],
+        )
+
+        chunk = DocumentChunk.objects.get(document=document)
+        assert chunk.content == "[Document: test.txt]\n\nPlain content"
+
+
+@pytest.mark.django_db
+class TestReciprocalRankFusion:
+    def test_single_list(self):
+        scores = DocumentService._reciprocal_rank_fusion(["a", "b", "c"], k=60)
+        assert scores["a"] == pytest.approx(1 / 61)
+        assert scores["b"] == pytest.approx(1 / 62)
+        assert scores["c"] == pytest.approx(1 / 63)
+
+    def test_overlapping_lists_boost_shared_items(self):
+        scores = DocumentService._reciprocal_rank_fusion(["a", "b"], ["b", "c"], k=60)
+        assert scores["b"] > scores["a"]
+        assert scores["b"] > scores["c"]
+
+    def test_empty_lists(self):
+        scores = DocumentService._reciprocal_rank_fusion([], [], k=60)
+        assert scores == {}
+
+
+@pytest.mark.django_db
+class TestKeywordBm25Search:
+    def test_returns_empty_for_blank_query(self, user_a, mock_embedding_service):
+        service = DocumentService()
+        assert (
+            service._keyword_bm25_search(user=user_a, english_query="", polish_query="")
+            == {}
+        )
+        assert (
+            service._keyword_bm25_search(
+                user=user_a, english_query="   ", polish_query="   "
+            )
+            == {}
+        )
+
+    def test_multilingual_isolation(self, user_a, mock_embedding_service):
+        mock_embedding_service.embed_texts.return_value = [[0.1] * DIM, [0.2] * DIM]
+
+        doc_en = Document.objects.create(
+            user=user_a,
+            filename="english.txt",
+            content_type="text/plain",
+            raw_text="The quick brown fox jumps over the lazy dog",
+            language="english",
+        )
+        doc_pl = Document.objects.create(
+            user=user_a,
+            filename="polish.txt",
+            content_type="text/plain",
+            raw_text="Szybki brązowy lis przeskakuje nad leniwym psem",
+            language="polish",
+        )
+
+        service = DocumentService()
+        service._create_document_chunks(
+            doc_en,
+            [
+                ParentChunkData(
+                    content="The quick brown fox jumps over the lazy dog",
+                    child_texts=["The quick brown fox jumps over the lazy dog"],
+                )
+            ],
+        )
+        service._create_document_chunks(
+            doc_pl,
+            [
+                ParentChunkData(
+                    content="Szybki brązowy lis przeskakuje nad leniwym psem",
+                    child_texts=["Szybki brązowy lis przeskakuje nad leniwym psem"],
+                )
+            ],
+        )
+
+        chunk_en_id = str(DocumentChunk.objects.get(document=doc_en).id)
+        chunk_pl_id = str(DocumentChunk.objects.get(document=doc_pl).id)
+
+        en_results = service._keyword_bm25_search(
+            user=user_a, english_query="fox", polish_query=""
+        )
+        assert chunk_en_id in en_results
+        assert chunk_pl_id not in en_results
+
+        pl_results = service._keyword_bm25_search(
+            user=user_a, english_query="", polish_query="lis"
+        )
+        assert chunk_pl_id in pl_results
+        assert chunk_en_id not in pl_results
+
+    def test_or_semantics_matches_partial_terms(self, user_a, mock_embedding_service):
+        mock_embedding_service.embed_texts.return_value = [
+            [0.1] * DIM,
+            [0.2] * DIM,
+        ]
+
+        doc = Document.objects.create(
+            user=user_a,
+            filename="test.txt",
+            content_type="text/plain",
+            raw_text="python web framework",
+            language="english",
+        )
+
+        service = DocumentService()
+        service._create_document_chunks(
+            doc,
+            [
+                ParentChunkData(
+                    content="python web framework", child_texts=["python web framework"]
+                )
+            ],
+        )
+
+        results = service._keyword_bm25_search(
+            user=user_a, english_query="python database", polish_query=""
+        )
+        chunk_id = str(DocumentChunk.objects.get(document=doc).id)
+        assert chunk_id in results
+
+    def test_english_stemming(self, user_a, mock_embedding_service):
+        mock_embedding_service.embed_texts.return_value = [[0.1] * DIM]
+
+        doc = Document.objects.create(
+            user=user_a,
+            filename="test.txt",
+            content_type="text/plain",
+            raw_text="The runners were running fast",
+            language="english",
+        )
+
+        service = DocumentService()
+        service._create_document_chunks(
+            doc,
+            [
+                ParentChunkData(
+                    content="The runners were running fast",
+                    child_texts=["The runners were running fast"],
+                )
+            ],
+        )
+
+        results = service._keyword_bm25_search(
+            user=user_a, english_query="run", polish_query=""
+        )
+        assert len(results) == 1
+
+
+@pytest.mark.django_db(transaction=True)
+class TestSearch:
+    async def test_returns_ordered_search_results(self, user_a, mock_embedding_service):
+        mock_embedding_service.embed_query.return_value = _make_embedding(1.0)
+        document = await Document.objects.acreate(
+            user=user_a,
+            filename="test.txt",
+            content_type="text/plain",
+            raw_text="Hello world python code",
+        )
+        await DocumentChunk.objects.acreate(
+            document=document,
+            content="python code example",
+            chunk_index=0,
+            embedding=_make_embedding(1.0),
+        )
+        await DocumentChunk.objects.acreate(
+            document=document,
+            content="irrelevant text",
+            chunk_index=1,
+            embedding=_make_embedding(0.0, 1.0),
+        )
+
+        service = DocumentService()
+        results = await service.search(user=user_a, query="python")
+
+        assert len(results) == 2
+        assert all(isinstance(r, SearchResult) for r in results)
+        assert results[0].chunk_content == "python code example"
+        assert results[1].chunk_content == "irrelevant text"
+        assert results[0].score > results[1].score
+        assert isinstance(results[0].score, float)
+        assert results[0].document_id == str(document.id)
+        assert results[0].document_filename == "test.txt"
+        assert results[0].chunk_index == 0
+
+    async def test_filters_by_document_ids(self, user_a, mock_embedding_service):
+        mock_embedding_service.embed_query.return_value = _make_embedding(1.0)
+        doc_a = await Document.objects.acreate(
+            user=user_a,
+            filename="a.txt",
+            content_type="text/plain",
+            raw_text="doc a",
+        )
+        doc_b = await Document.objects.acreate(
+            user=user_a,
+            filename="b.txt",
+            content_type="text/plain",
+            raw_text="doc b",
+        )
+        await DocumentChunk.objects.acreate(
+            document=doc_a,
+            content="content a",
+            chunk_index=0,
+            embedding=_make_embedding(1.0),
+        )
+        await DocumentChunk.objects.acreate(
+            document=doc_b,
+            content="content b",
+            chunk_index=0,
+            embedding=_make_embedding(1.0),
+        )
+
+        service = DocumentService()
+        results = await service.search(
+            user=user_a, query="test", document_ids=[str(doc_a.id)]
+        )
+
+        assert len(results) == 1
+        assert results[0].chunk_content == "content a"
+
+    async def test_isolates_by_user(self, user_a, user_b, mock_embedding_service):
+        mock_embedding_service.embed_query.return_value = _make_embedding(1.0)
+        doc = await Document.objects.acreate(
+            user=user_a,
+            filename="secret.txt",
+            content_type="text/plain",
+            raw_text="secret",
+        )
+        await DocumentChunk.objects.acreate(
+            document=doc,
+            content="secret content",
+            chunk_index=0,
+            embedding=_make_embedding(1.0),
+        )
+
+        service = DocumentService()
+        results = await service.search(user=user_b, query="secret")
+
+        assert len(results) == 0
+
+    async def test_bm25_only_results_included_via_rrf(
+        self, user_a, mock_embedding_service
+    ):
+        mock_embedding_service.embed_texts.return_value = [[0.1] * DIM]
+        mock_embedding_service.embed_query.return_value = _make_embedding(0.0, 0.0, 1.0)
+
+        doc = await Document.objects.acreate(
+            user=user_a,
+            filename="test.txt",
+            content_type="text/plain",
+            raw_text="django framework tutorial",
+            language="english",
+        )
+        service = DocumentService()
+        await sync_to_async(service._create_document_chunks)(
+            doc,
+            [
+                ParentChunkData(
+                    content="django framework tutorial",
+                    child_texts=["django framework tutorial"],
+                )
+            ],
+        )
+
+        results = await service.search(user=user_a, query="django")
+
+        assert len(results) == 1
+        assert results[0].chunk_content == "django framework tutorial"
+
+
+@pytest.mark.django_db(transaction=True)
+class TestSearchWithReranker:
+    async def test_search_with_reranker_success(
+        self, user_a, mock_embedding_service, mock_reranker_service, settings
+    ):
+        settings.RERANK_ENABLED = True
+        settings.RERANK_POOL_SIZE = 50
+        settings.RAG_TOP_K = 2
+
+        mock_embedding_service.embed_query.return_value = _make_embedding(1.0)
+
+        doc = await Document.objects.acreate(
+            user=user_a,
+            filename="test.txt",
+            content_type="text/plain",
+            raw_text="doc",
+        )
+        await DocumentChunk.objects.acreate(
+            document=doc,
+            content="python flask app",
+            chunk_index=0,
+            embedding=_make_embedding(1.0),
+        )
+        await DocumentChunk.objects.acreate(
+            document=doc,
+            content="python django web project",
+            chunk_index=1,
+            embedding=_make_embedding(0.5),
+        )
+
+        mock_reranker_service.rerank.return_value = [
+            {"index": 0, "score": 0.45},
+            {"index": 1, "score": 0.95},
+        ]
+
+        service = DocumentService()
+        results = await service.search(user=user_a, query="django")
+
+        assert len(results) == 2
+        assert results[0].chunk_content == "python django web project"
+        assert results[0].score == 0.95
+        assert results[1].chunk_content == "python flask app"
+        assert results[1].score == 0.45
+
+        mock_reranker_service.rerank.assert_called_once_with(
+            query="django", texts=["python flask app", "python django web project"]
+        )
+
+    async def test_search_with_reranker_fallback_on_failure(
+        self, user_a, mock_embedding_service, mock_reranker_service, settings
+    ):
+        settings.RERANK_ENABLED = True
+        settings.RERANK_POOL_SIZE = 50
+        settings.RAG_TOP_K = 2
+
+        mock_embedding_service.embed_query.return_value = _make_embedding(1.0)
+
+        doc = await Document.objects.acreate(
+            user=user_a,
+            filename="test.txt",
+            content_type="text/plain",
+            raw_text="doc",
+        )
+        await DocumentChunk.objects.acreate(
+            document=doc,
+            content="python flask app",
+            chunk_index=0,
+            embedding=_make_embedding(1.0),
+        )
+        await DocumentChunk.objects.acreate(
+            document=doc,
+            content="python django web project",
+            chunk_index=1,
+            embedding=_make_embedding(0.5),
+        )
+
+        mock_reranker_service.rerank.side_effect = Exception("TEI service down")
+
+        service = DocumentService()
+        results = await service.search(user=user_a, query="django")
+
+        assert len(results) == 2
+        assert results[0].chunk_content == "python flask app"
+        assert results[1].chunk_content == "python django web project"
