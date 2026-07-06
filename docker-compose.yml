@@ -1,3 +1,4 @@
 include:
-  - backend/docker-compose.yml
-  - get-docs/docker-compose.yml
+    - backend/docker-compose.yml
+    - get-docs/docker-compose.yml
+    - frontend/docker-compose.yml

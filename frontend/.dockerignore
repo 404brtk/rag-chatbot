@@ -1,0 +1,12 @@
+node_modules
+dist
+.git
+.gitignore
+*.env
+*.env.*
+.prettierignore
+.prettierrc
+eslint.config.js
+.idea/
+.vscode/
+*.log

@@ -32,6 +32,62 @@ services:
         ports:
             - "6380:6379"
 
+    backend:
+        build:
+            context: .
+            dockerfile: Dockerfile
+        image: backend-app
+        container_name: backend-rag-chatbot
+        restart: unless-stopped
+        command: uvicorn config.asgi:application --host 0.0.0.0 --port 8000 --reload
+        volumes:
+            - .:/app
+            - /app/.venv
+        ports:
+            - "8000:8000"
+        env_file:
+            - .env
+        environment:
+            - DATABASE_URL=postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB}
+            - CELERY_BROKER_URL=redis://redis:6379/0
+            - CELERY_RESULT_BACKEND=redis://redis:6379/0
+            - GETDOCS_BASE_URL=http://get-docs:8001
+            - TEI_EMBEDDING_URL=http://embedding-model
+            - TEI_RERANKER_URL=http://reranker-model
+            - LLAMACPP_BASE_URL=http://host.docker.internal:8080
+        depends_on:
+            db:
+                condition: service_healthy
+            redis:
+                condition: service_started
+
+    celery-worker:
+        image: backend-app
+        container_name: celery-worker-rag-chatbot
+        restart: unless-stopped
+        command: celery -A config worker --loglevel=info --pool=threads
+        volumes:
+            - .:/app
+            - /app/.venv
+        env_file:
+            - .env
+        environment:
+            - DATABASE_URL=postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB}
+            - CELERY_BROKER_URL=redis://redis:6379/0
+            - CELERY_RESULT_BACKEND=redis://redis:6379/0
+            - GETDOCS_BASE_URL=http://get-docs:8001
+            - TEI_EMBEDDING_URL=http://embedding-model
+            - TEI_RERANKER_URL=http://reranker-model
+            - LLAMACPP_BASE_URL=http://host.docker.internal:8080
+
+        depends_on:
+            db:
+                condition: service_healthy
+            redis:
+                condition: service_started
+            backend:
+                condition: service_started
+
     # NOTE: This 'embedding-model' service is assigned to the 'nvidia' profile, meaning it will NOT start by default.
     # It is pre-configured for Windows/Linux with an NVIDIA GPU (RTX 50x0 series). To run it, you must explicitly pass the profile:
     # 'docker compose --profile nvidia up -d'

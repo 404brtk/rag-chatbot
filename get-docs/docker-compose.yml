@@ -1,5 +1,24 @@
 services:
-  redis-get-docs:
-    image: redis:8.6-alpine
-    ports:
-      - "6379:6379"
+    redis-get-docs:
+        image: redis:8.6-alpine
+        container_name: redis-get-docs-rag-chatbot
+        ports:
+            - "6379:6379"
+
+    get-docs:
+        build:
+            context: .
+            dockerfile: Dockerfile
+        image: get-docs-app
+        container_name: get-docs-rag-chatbot
+        command: uvicorn src.main:app --host 0.0.0.0 --port 8001 --reload
+        volumes:
+            - .:/app
+            - /app/.venv
+        ports:
+            - "8001:8001"
+        environment:
+            - GETDOCS_REDIS_URL=redis://redis-get-docs:6379/0
+
+        depends_on:
+            - redis-get-docs

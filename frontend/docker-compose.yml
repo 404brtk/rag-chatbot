@@ -1,0 +1,13 @@
+services:
+  frontend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: dev
+    image: frontend-app-dev
+    container_name: frontend-rag-chatbot
+    ports:
+      - '5173:5173'
+    volumes:
+      - .:/app
+      - /app/node_modules
