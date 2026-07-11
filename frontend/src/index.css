@@ -38,9 +38,9 @@
   --radius-sm: 6px;
   --radius-xs: 4px;
 
-  --font-sans: 'Geist', -apple-system, BlinkMacSystemFont, sans-serif;
-  --font-mono: 'Geist Mono', ui-monospace, monospace;
-  --font-serif: 'Gelasio', serif;
+  --font-sans: 'Geist Variable', 'Geist', -apple-system, BlinkMacSystemFont, sans-serif;
+  --font-mono: 'Geist Mono Variable', 'Geist Mono', ui-monospace, monospace;
+  --font-serif: 'Gelasio Variable', 'Gelasio', serif;
 
   --font-weight-regular: 400;
   --font-weight-medium: 500;
