@@ -172,8 +172,22 @@ async def fetch_llms_txt(
                 if not text:
                     continue
 
-                result = parse_llms_txt(text, source_url=url, is_full=is_full)
-                if not result.is_full and is_llms_txt_full(result):
+                resolved_is_full = is_full
+                final_url_str = str(resp.url).lower()
+                if is_full and (
+                    final_url_str.endswith("/llms.txt")
+                    or final_url_str.endswith("llms.txt")
+                ):
+                    resolved_is_full = False
+
+                result = parse_llms_txt(text, source_url=url, is_full=resolved_is_full)
+                if result.is_full:
+                    if len(result.links) > 0 and not is_llms_txt_full(result):
+                        logger.info(
+                            f"Heuristic check: {url} (resolved to {resp.url}) does not appear to be a full documentation file. Downgrading to index."
+                        )
+                        result.is_full = False
+                elif is_llms_txt_full(result):
                     logger.info(
                         f"Content heuristic: {url} detected as full documentation"
                     )

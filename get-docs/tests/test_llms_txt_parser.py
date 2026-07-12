@@ -1,3 +1,4 @@
+import httpx
 import pytest
 
 from src.core.llms_txt_parser import fetch_llms_txt, is_llms_txt_full, parse_llms_txt
@@ -707,3 +708,57 @@ class TestFetchDetectsFullContent:
 
         assert result is not None
         assert result.is_full is True
+
+    @pytest.mark.asyncio
+    async def test_llms_full_txt_redirects_to_llms_txt_downgrades_to_index(
+        self, mocker
+    ):
+        robots = RobotsParser("User-agent: *\nAllow: /")
+        index_content = "# Index\n## Docs\n- [Link](https://example.com/link)\n"
+
+        def side_effect(url, **kw):
+            if url.endswith("llms-full.txt"):
+                return httpx.Response(
+                    status_code=200,
+                    text=index_content,
+                    headers={"content-type": "text/plain"},
+                    request=httpx.Request("GET", "https://example.com/llms.txt"),
+                )
+            return mock_response(status_code=404)
+
+        client, inner = mock_http_client(mocker)
+        inner.get = mocker.AsyncMock(side_effect=side_effect)
+
+        result = await fetch_llms_txt("https://example.com", client, robots=robots)
+
+        assert result is not None
+        assert result.is_full is False
+
+    @pytest.mark.asyncio
+    async def test_llms_full_txt_with_index_content_downgrades_to_index(self, mocker):
+        robots = RobotsParser("User-agent: *\nAllow: /")
+        index_lines = ["# Index\n", "> Summary\n"]
+        for i in range(50):
+            index_lines.append(
+                f"- [Link {i}](https://example.com/link-{i}): description {i}\n"
+            )
+        index_content = "".join(index_lines)
+
+        def side_effect(url, **kw):
+            if url.endswith("llms-full.txt"):
+                return httpx.Response(
+                    status_code=200,
+                    text=index_content,
+                    headers={"content-type": "text/plain"},
+                    request=httpx.Request("GET", "https://example.com/llms-full.txt"),
+                )
+            return mock_response(status_code=404)
+
+        client, inner = mock_http_client(mocker)
+        inner.get = mocker.AsyncMock(side_effect=side_effect)
+
+        result = await fetch_llms_txt("https://example.com", client, robots=robots)
+
+        assert result is not None
+        assert result.is_full is False
+        assert len(result.links) == 50
