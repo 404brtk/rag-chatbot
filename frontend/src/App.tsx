@@ -69,12 +69,28 @@ function App() {
   const prevFirstMessageId = useRef<string | null>(null);
   const prevScrollHeight = useRef<number>(0);
   const prevMessagesLength = useRef<number>(0);
+  const prevActiveChatId = useRef<string | null>(null);
 
   useLayoutEffect(() => {
     const container = scrollRef.current;
     if (!container) return;
 
+    const chatChanged = activeChatId !== prevActiveChatId.current;
+    prevActiveChatId.current = activeChatId;
+
     const firstMsgId = messages[0]?.id || null;
+
+    if (chatChanged) {
+      container.scrollTo({
+        top: container.scrollHeight,
+        behavior: 'auto',
+      });
+      prevFirstMessageId.current = firstMsgId;
+      prevScrollHeight.current = container.scrollHeight;
+      prevMessagesLength.current = messages.length;
+      return;
+    }
+
     const isPrepended =
       prevFirstMessageId.current !== null &&
       firstMsgId !== prevFirstMessageId.current &&
@@ -86,10 +102,18 @@ function App() {
     } else {
       const isChat = location.pathname === '/' || location.pathname.startsWith('/chat/');
       if (isChat) {
-        container.scrollTo({
-          top: container.scrollHeight,
-          behavior: prevFirstMessageId.current === null ? 'auto' : 'smooth',
-        });
+        const lastMessage = messages[messages.length - 1];
+        const isUserSent = lastMessage && lastMessage.role === 'user';
+
+        const wasAtBottom =
+          container.scrollTop + container.clientHeight >= prevScrollHeight.current - 12;
+
+        if (isUserSent || wasAtBottom) {
+          container.scrollTo({
+            top: container.scrollHeight,
+            behavior: isTyping ? 'auto' : prevFirstMessageId.current === null ? 'auto' : 'smooth',
+          });
+        }
       }
     }
 
