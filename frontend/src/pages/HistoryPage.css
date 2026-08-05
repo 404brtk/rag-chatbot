@@ -194,11 +194,6 @@
   font-weight: var(--font-weight-semibold);
 }
 
-.history-page-item-meta {
-  color: var(--color-text-tertiary);
-  font-size: var(--text-xs);
-}
-
 .history-page-item-time {
   grid-area: time;
   color: var(--color-text-tertiary);

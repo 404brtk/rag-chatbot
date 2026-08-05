@@ -11,10 +11,6 @@ const DATE_FORMATTER = new Intl.DateTimeFormat(undefined, {
   timeStyle: 'short',
 });
 
-function formatMessageCount(count: number) {
-  return `${count} message${count === 1 ? '' : 's'}`;
-}
-
 export function HistoryPage() {
   const navigate = useNavigate();
   const sessions = useChatStore((s) => s.sessions);
@@ -196,9 +192,6 @@ export function HistoryPage() {
                   <>
                     <div className="history-page-item-main">
                       <span className="history-page-item-title">{session.title}</span>
-                      <span className="history-page-item-meta">
-                        {formatMessageCount(session.messages.length)}
-                      </span>
                     </div>
 
                     <time
