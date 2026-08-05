@@ -55,37 +55,3 @@ export interface CursorPaginated<T> {
   next?: string | null;
   count?: number;
 }
-
-export interface AppRouteContext {
-  sessions: ChatSession[];
-  activeChatId: string | null;
-  messages: ChatMessage[];
-  mode: ChatMode;
-  isTyping: boolean;
-  handleSend: (
-    message: string,
-    attachments?: MessageAttachment[],
-    selectedDocIds?: string[]
-  ) => void;
-  handleStop: () => void;
-  handleNewChat: () => void;
-  handleSelectChat: (id: string) => void;
-  handleDeleteChat: (id: string) => void;
-  handleRenameChat: (id: string, title: string) => void;
-  provider: string;
-  model: string;
-  setProvider: (provider: string) => void;
-  setModel: (model: string) => void;
-  models: Record<string, string[]>;
-  isAuthenticated: boolean;
-  ragEnabled: boolean;
-  setRagEnabled: (enabled: boolean) => void;
-  compactionEnabled: boolean;
-  setCompactionEnabled: (enabled: boolean) => void;
-  openAuthDialog: (tab?: 'login' | 'register') => void;
-  userEmail: string | null;
-  selectedDocIds: string[];
-  setSelectedDocIds: (ids: string[]) => void;
-  loadMoreConversations: () => Promise<void>;
-  totalConversationsCount: number;
-}

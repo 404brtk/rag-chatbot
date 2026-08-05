@@ -14,11 +14,7 @@ import { formatProviderName, formatCapitalized } from '../utils/format';
 import { CustomDropdown } from './CustomDropdown';
 import { Modal } from './Modal';
 
-interface SettingsDialogProps {
-  isOpen: boolean;
-  onClose: () => void;
-  defaultTab?: TabType;
-}
+import { useUIStore } from '../stores/useUIStore';
 
 interface ApiKey {
   id: string;
@@ -41,7 +37,15 @@ interface GetDocsJobData {
 
 type TabType = 'keys' | 'docs' | 'get-docs';
 
-export function SettingsDialog({ isOpen, onClose, defaultTab = 'keys' }: SettingsDialogProps) {
+export function SettingsDialog() {
+  const isOpenStore = useUIStore((s) => s.settingsDialogOpen);
+  const onCloseStore = useUIStore((s) => s.closeSettings);
+  const defaultTabStore = useUIStore((s) => s.settingsDialogTab);
+
+  const isOpen = isOpenStore;
+  const onClose = onCloseStore;
+  const defaultTab = defaultTabStore;
+
   const [activeTab, setActiveTab] = useState<TabType>(defaultTab);
 
   useEffect(() => {

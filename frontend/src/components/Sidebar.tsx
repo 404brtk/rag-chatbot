@@ -1,12 +1,16 @@
 import { useState, useRef, useEffect, useMemo } from 'react';
-import { NavLink, useLocation } from 'react-router';
+import { NavLink, useLocation, useNavigate } from 'react-router';
 import { createPortal } from 'react-dom';
 import { Icon } from './Icon';
 import { SessionOptionsMenu } from './SessionOptionsMenu';
-import './Sidebar.css';
 import { useSessionActions } from '../hooks/useSessionActions';
+import { useMediaQuery } from '../hooks/useMediaQuery';
 import { APP_ROUTES } from '../routes';
-import type { ChatSession } from '../types';
+import { useChatStore } from '../stores/useChatStore';
+import { useUIStore } from '../stores/useUIStore';
+import './Sidebar.css';
+
+const COMPACT_LAYOUT_QUERY = '(max-width: 1024px)';
 
 interface TooltipProps {
   text: string;
@@ -57,36 +61,31 @@ function Tooltip({ text, disabled, children }: TooltipProps) {
   );
 }
 
-interface SidebarProps {
-  isExpanded: boolean;
-  isCompact?: boolean;
-  onToggle: () => void;
-  onDismiss?: () => void;
-  onNewChat: () => void;
-  history: ChatSession[];
-  activeChatId: string | null;
-  onSelectChat: (id: string) => void;
-  onDeleteChat: (id: string) => void;
-  onRenameChat: (id: string, title: string) => void;
-  onOpenSettings: (tab?: 'keys' | 'docs' | 'get-docs') => void;
-  loadMoreConversations: () => Promise<void>;
-}
-
-export function Sidebar({
-  isExpanded,
-  isCompact = false,
-  onToggle,
-  onDismiss,
-  onNewChat,
-  history,
-  activeChatId,
-  onSelectChat,
-  onDeleteChat,
-  onRenameChat,
-  onOpenSettings,
-  loadMoreConversations,
-}: SidebarProps) {
+export function Sidebar() {
   const location = useLocation();
+  const navigate = useNavigate();
+  const isCompact = useMediaQuery(COMPACT_LAYOUT_QUERY);
+
+  const isExpandedState = useUIStore((s) => s.isExpanded);
+  const isMobileSidebarOpen = useUIStore((s) => s.isMobileSidebarOpen);
+  const toggleSidebar = useUIStore((s) => s.toggleSidebar);
+  const closeMobileSidebar = useUIStore((s) => s.closeMobileSidebar);
+  const openSettings = useUIStore((s) => s.openSettings);
+
+  const isExpanded = isCompact ? isMobileSidebarOpen : isExpandedState;
+
+  const history = useChatStore((s) => s.sessions);
+  const activeChatId = useChatStore((s) => s.activeChatId);
+  const selectChat = useChatStore((s) => s.selectChat);
+  const newChat = useChatStore((s) => s.newChat);
+  const deleteChat = useChatStore((s) => s.deleteChat);
+  const renameChat = useChatStore((s) => s.renameChat);
+  const loadMoreConversations = useChatStore((s) => s.loadMoreConversations);
+
+  const handleRenameWrapper = (id: string, title: string) => {
+    void renameChat(id, title);
+  };
+
   const {
     editingId,
     editValue,
@@ -98,7 +97,7 @@ export function Sidebar({
     handleRenameKeyDown,
     toggleOptionsMenu,
     closeOptionsMenu,
-  } = useSessionActions(onRenameChat);
+  } = useSessionActions(handleRenameWrapper);
 
   const dialogRef = useRef<HTMLDialogElement>(null);
 
@@ -119,18 +118,18 @@ export function Sidebar({
   }, [isCompact, isExpanded]);
 
   const handleDismiss = () => {
-    if (onDismiss) {
-      onDismiss();
+    if (isCompact) {
+      closeMobileSidebar();
       return;
     }
-    onToggle();
+    toggleSidebar(isCompact);
   };
 
   const toggleLabel = isCompact && isExpanded ? 'Close sidebar' : 'Open sidebar';
 
   const handleHistoryNavClick = () => {
-    if (isCompact && onDismiss) {
-      onDismiss();
+    if (isCompact) {
+      closeMobileSidebar();
     }
   };
 
@@ -143,8 +142,26 @@ export function Sidebar({
   const handleSidebarScroll = (e: React.UIEvent<HTMLDivElement>) => {
     const target = e.currentTarget;
     if (target.scrollHeight - target.scrollTop - target.clientHeight <= 30) {
-      loadMoreConversations();
+      void loadMoreConversations();
     }
+  };
+
+  const handleNewChatClick = () => {
+    newChat(navigate);
+    if (isCompact) {
+      closeMobileSidebar();
+    }
+  };
+
+  const handleSelectChatClick = (id: string) => {
+    selectChat(id, navigate);
+    if (isCompact) {
+      closeMobileSidebar();
+    }
+  };
+
+  const handleDeleteChatClick = (id: string) => {
+    void deleteChat(id, navigate);
   };
 
   const sidebarContent = (
@@ -155,8 +172,9 @@ export function Sidebar({
         <Tooltip text="Open sidebar" disabled={isExpanded || isCompact}>
           <button
             className="sidebar-icon-btn toggle-btn"
-            onClick={isCompact ? handleDismiss : onToggle}
+            onClick={() => toggleSidebar(isCompact)}
             aria-label={toggleLabel}
+            type="button"
           >
             <Icon name="sidebar" />
           </button>
@@ -165,8 +183,9 @@ export function Sidebar({
         <Tooltip text="New Chat" disabled={isExpanded || isCompact}>
           <button
             className="sidebar-icon-btn action-btn primary-action-btn"
-            onClick={onNewChat}
+            onClick={handleNewChatClick}
             aria-label="New chat"
+            type="button"
           >
             <div className="icon-wrapper">
               <Icon name="plus" />
@@ -215,6 +234,7 @@ export function Sidebar({
                     />
                     <button
                       className="inline-action-btn"
+                      type="button"
                       onMouseDown={(e) => e.preventDefault()}
                       onClick={saveRename}
                     >
@@ -227,11 +247,11 @@ export function Sidebar({
                     role="button"
                     tabIndex={0}
                     aria-label={`Conversation: ${session.title}`}
-                    onClick={() => onSelectChat(session.id)}
+                    onClick={() => handleSelectChatClick(session.id)}
                     onKeyDown={(e) => {
                       if (e.key === 'Enter' || e.key === ' ') {
                         e.preventDefault();
-                        onSelectChat(session.id);
+                        handleSelectChatClick(session.id);
                       }
                     }}
                   >
@@ -240,6 +260,7 @@ export function Sidebar({
                     <div className="history-actions" onClick={(e) => e.stopPropagation()}>
                       <button
                         className="inline-action-btn"
+                        type="button"
                         onClick={(e) => {
                           e.preventDefault();
                           const rect = e.currentTarget.getBoundingClientRect();
@@ -253,7 +274,7 @@ export function Sidebar({
                           rect={optionsMenu.rect}
                           onRename={() => startRename(session.id, session.title)}
                           onDelete={() => {
-                            onDeleteChat(session.id);
+                            handleDeleteChatClick(session.id);
                             closeOptionsMenu();
                           }}
                           onClose={closeOptionsMenu}
@@ -275,7 +296,11 @@ export function Sidebar({
           <button
             className="sidebar-icon-btn action-btn keys-btn"
             aria-label="Manage API keys"
-            onClick={() => onOpenSettings('keys')}
+            type="button"
+            onClick={() => {
+              openSettings('keys');
+              if (isCompact) closeMobileSidebar();
+            }}
           >
             <div className="icon-wrapper">
               <Icon name="pencil" />
@@ -288,7 +313,11 @@ export function Sidebar({
           <button
             className="sidebar-icon-btn action-btn docs-btn"
             aria-label="Manage documents"
-            onClick={() => onOpenSettings('docs')}
+            type="button"
+            onClick={() => {
+              openSettings('docs');
+              if (isCompact) closeMobileSidebar();
+            }}
           >
             <div className="icon-wrapper">
               <Icon name="file" />
@@ -301,7 +330,11 @@ export function Sidebar({
           <button
             className="sidebar-icon-btn action-btn scraper-btn"
             aria-label="Get Docs"
-            onClick={() => onOpenSettings('get-docs')}
+            type="button"
+            onClick={() => {
+              openSettings('get-docs');
+              if (isCompact) closeMobileSidebar();
+            }}
           >
             <div className="icon-wrapper">
               <Icon name="search" />

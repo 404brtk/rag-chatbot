@@ -7,7 +7,7 @@ import {
   type ClipboardEvent,
 } from 'react';
 import { Icon } from './Icon';
-import type { MessageAttachment, ChatMode } from '../types';
+import type { MessageAttachment } from '../types';
 import { formatProviderName } from '../utils/format';
 import {
   formatBytes,
@@ -21,28 +21,12 @@ import {
 import { api } from '../services/api';
 import { DocSelectionDialog } from './DocSelectionDialog';
 import { CustomDropdown } from './CustomDropdown';
+import { useAuthStore } from '../stores/useAuthStore';
+import { useChatStore, selectActiveMode } from '../stores/useChatStore';
 import './ChatInput.css';
 
 interface ChatInputProps {
   placeholder?: string;
-  onSend?: (message: string, attachments?: MessageAttachment[], selectedDocIds?: string[]) => void;
-  onStop?: () => void;
-  isTyping?: boolean;
-  disabled?: boolean;
-  onAuthRequired?: () => void;
-  provider?: string;
-  model?: string;
-  setProvider?: (p: string) => void;
-  setModel?: (m: string) => void;
-  models?: Record<string, string[]>;
-  ragEnabled?: boolean;
-  setRagEnabled?: (enabled: boolean) => void;
-  compactionEnabled?: boolean;
-  setCompactionEnabled?: (enabled: boolean) => void;
-  mode?: ChatMode;
-  selectedDocIds?: string[];
-  setSelectedDocIds: (ids: string[]) => void;
-  isAuthenticated?: boolean;
 }
 
 interface AttachmentComposerState {
@@ -52,27 +36,26 @@ interface AttachmentComposerState {
 
 const MAX_HEIGHT = 200;
 
-export function ChatInput({
-  placeholder = 'Message...',
-  onSend,
-  onStop,
-  isTyping = false,
-  disabled = false,
-  onAuthRequired,
-  provider = 'openai',
-  model = '',
-  setProvider,
-  setModel,
-  models = {},
-  ragEnabled = false,
-  setRagEnabled,
-  compactionEnabled = false,
-  setCompactionEnabled,
-  mode = 'direct',
-  selectedDocIds = [],
-  setSelectedDocIds,
-  isAuthenticated = false,
-}: ChatInputProps) {
+export function ChatInput({ placeholder = 'Message...' }: ChatInputProps) {
+  const isAuthenticated = useAuthStore((s) => s.isAuthenticated);
+  const openAuthDialog = useAuthStore((s) => s.openAuthDialog);
+
+  const provider = useChatStore((s) => s.provider);
+  const model = useChatStore((s) => s.model);
+  const models = useChatStore((s) => s.models);
+  const setProvider = useChatStore((s) => s.setProvider);
+  const setModel = useChatStore((s) => s.setModel);
+  const ragEnabled = useChatStore((s) => s.ragEnabled);
+  const setRagEnabled = useChatStore((s) => s.setRagEnabled);
+  const compactionEnabled = useChatStore((s) => s.compactionEnabled);
+  const setCompactionEnabled = useChatStore((s) => s.setCompactionEnabled);
+  const mode = useChatStore(selectActiveMode);
+  const selectedDocIds = useChatStore((s) => s.selectedDocIds);
+  const setSelectedDocIds = useChatStore((s) => s.setSelectedDocIds);
+  const isTyping = useChatStore((s) => s.isTyping);
+  const sendMessage = useChatStore((s) => s.sendMessage);
+  const stopStreaming = useChatStore((s) => s.stopStreaming);
+
   const [message, setMessage] = useState('');
   const [attachmentState, setAttachmentState] = useState<AttachmentComposerState>({
     attachments: [],
@@ -91,16 +74,16 @@ export function ChatInput({
   const availableModels = models[provider] || [];
 
   const handleProviderChange = (newProvider: string) => {
-    setProvider?.(newProvider);
+    setProvider(newProvider);
     const pModels = models[newProvider] || [];
     if (pModels.length > 0) {
-      setModel?.(pModels[0]);
+      setModel(pModels[0]);
     }
   };
 
   const hasMessage = message.trim().length > 0;
   const isUploading = attachments.some((att) => att.uploading);
-  const canSend = (hasMessage || attachments.length > 0) && !disabled && !isUploading;
+  const canSend = (hasMessage || attachments.length > 0) && !isTyping && !isUploading;
   const filePickerAccept = [...ACCEPTED_TEXT_EXTENSIONS, ...ACCEPTED_IMAGE_EXTENSIONS].join(',');
 
   const updateOverflow = (el: HTMLTextAreaElement) => {
@@ -135,7 +118,7 @@ export function ChatInput({
   };
 
   const handlePaste = (e: ClipboardEvent<HTMLTextAreaElement>) => {
-    if (disabled) {
+    if (isTyping) {
       return;
     }
 
@@ -149,12 +132,17 @@ export function ChatInput({
     }
 
     e.preventDefault();
-    addFiles(files);
+    void addFiles(files);
   };
 
   const handleSend = () => {
+    if (!isAuthenticated) {
+      openAuthDialog('login');
+      return;
+    }
     if (!canSend) return;
-    onSend?.(message.trim(), attachments, selectedDocIds);
+
+    void sendMessage(message.trim(), attachments, selectedDocIds);
     setMessage('');
     setAttachmentState({ attachments: [], error: null });
     resetTextarea();
@@ -162,14 +150,14 @@ export function ChatInput({
 
   const openAttachmentPicker = () => {
     if (!isAuthenticated) {
-      onAuthRequired?.();
+      openAuthDialog('login');
       return;
     }
     fileInputRef.current?.click();
   };
 
   const addFiles = async (files: File[]) => {
-    if (disabled) return;
+    if (isTyping) return;
 
     const validFiles: File[] = [];
     let validationError: string | null = null;
@@ -262,6 +250,7 @@ export function ChatInput({
       setAttachmentState((prev) => ({ ...prev, error: validationError }));
     }
   };
+
   const handleAttachmentChange = (e: ChangeEvent<HTMLInputElement>) => {
     const selectedFiles = e.target.files ? Array.from(e.target.files) : [];
     e.target.value = '';
@@ -270,13 +259,14 @@ export function ChatInput({
       return;
     }
 
-    addFiles(selectedFiles);
+    void addFiles(selectedFiles);
   };
+
   const handleDragEnter = (e: DragEvent<HTMLDivElement>) => {
     e.preventDefault();
-    if (disabled) return;
+    if (isTyping) return;
     if (!isAuthenticated) {
-      onAuthRequired?.();
+      openAuthDialog('login');
       return;
     }
     dragDepthRef.current += 1;
@@ -285,13 +275,13 @@ export function ChatInput({
 
   const handleDragOver = (e: DragEvent<HTMLDivElement>) => {
     e.preventDefault();
-    if (disabled) return;
+    if (isTyping) return;
     e.dataTransfer.dropEffect = 'copy';
   };
 
   const handleDragLeave = (e: DragEvent<HTMLDivElement>) => {
     e.preventDefault();
-    if (disabled) return;
+    if (isTyping) return;
     dragDepthRef.current = Math.max(0, dragDepthRef.current - 1);
     if (dragDepthRef.current === 0) {
       setIsDragActive(false);
@@ -300,18 +290,18 @@ export function ChatInput({
 
   const handleDrop = (e: DragEvent<HTMLDivElement>) => {
     e.preventDefault();
-    if (disabled) return;
+    if (isTyping) return;
     dragDepthRef.current = 0;
     setIsDragActive(false);
     if (!isAuthenticated) {
-      onAuthRequired?.();
+      openAuthDialog('login');
       return;
     }
     const droppedFiles = Array.from(e.dataTransfer.files ?? []);
     if (droppedFiles.length === 0) {
       return;
     }
-    addFiles(droppedFiles);
+    void addFiles(droppedFiles);
   };
 
   const removeAttachment = (id: string) => {
@@ -386,11 +376,13 @@ export function ChatInput({
           onKeyDown={handleKeyDown}
           onPaste={handlePaste}
           rows={1}
+          disabled={isTyping}
         />
 
         <input
           ref={fileInputRef}
           className="chat-attachment-input"
+          style={{ display: 'none' }}
           type="file"
           accept={filePickerAccept}
           multiple
@@ -405,7 +397,7 @@ export function ChatInput({
               type="button"
               aria-label="Attach file"
               onClick={openAttachmentPicker}
-              disabled={disabled}
+              disabled={isTyping}
             >
               <Icon name="plus" size={20} />
             </button>
@@ -417,7 +409,7 @@ export function ChatInput({
                   options={providers.length > 0 ? providers : [provider]}
                   onChange={handleProviderChange}
                   labelFormatter={formatProviderName}
-                  disabled={providers.length === 0}
+                  disabled={providers.length === 0 || isTyping}
                 />
 
                 <CustomDropdown
@@ -425,8 +417,8 @@ export function ChatInput({
                   options={
                     availableModels.length > 0 ? availableModels : model ? [model] : ['Loading...']
                   }
-                  onChange={(val) => setModel?.(val)}
-                  disabled={providers.length === 0}
+                  onChange={(val) => setModel(val)}
+                  disabled={providers.length === 0 || isTyping}
                 />
 
                 {mode === 'side-by-side' ? (
@@ -445,7 +437,8 @@ export function ChatInput({
                     <input
                       type="checkbox"
                       checked={ragEnabled}
-                      onChange={(e) => setRagEnabled?.(e.target.checked)}
+                      onChange={(e) => setRagEnabled(e.target.checked)}
+                      disabled={isTyping}
                     />
                     <span className="rag-status-dot" />
                     <span className="rag-label-content">RAG</span>
@@ -459,6 +452,7 @@ export function ChatInput({
                       className={`chat-input-doc-select-btn pill-control ${selectedDocIds.length > 0 ? 'active' : ''}`}
                       type="button"
                       onClick={() => setIsDocDialogOpen(true)}
+                      disabled={isTyping}
                     >
                       {selectedDocIds.length === 0
                         ? 'All Documents'
@@ -481,7 +475,8 @@ export function ChatInput({
                     <input
                       type="checkbox"
                       checked={compactionEnabled}
-                      onChange={(e) => setCompactionEnabled?.(e.target.checked)}
+                      onChange={(e) => setCompactionEnabled(e.target.checked)}
+                      disabled={isTyping}
                     />
                     <span className="compaction-status-dot" />
                     <span className="compaction-label-content">Compaction</span>
@@ -497,7 +492,7 @@ export function ChatInput({
               className={`chat-input-icon-btn send-btn${canSend || isTyping ? ' active' : ''}`}
               type="button"
               aria-label={isTyping ? 'Stop generation' : 'Send message'}
-              onClick={isTyping ? onStop : handleSend}
+              onClick={isTyping ? stopStreaming : handleSend}
               disabled={!(canSend || isTyping)}
             >
               <Icon name={isTyping ? 'stop' : 'arrow-up'} size={20} />

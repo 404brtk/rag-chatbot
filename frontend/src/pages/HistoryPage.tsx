@@ -1,8 +1,9 @@
 import { useMemo, useRef, useState } from 'react';
+import { useNavigate } from 'react-router';
 import { Icon } from '../components/Icon';
 import { SessionOptionsMenu } from '../components/SessionOptionsMenu';
-import { useAppRouteContext } from '../hooks/useAppRouteContext';
 import { useSessionActions } from '../hooks/useSessionActions';
+import { useChatStore } from '../stores/useChatStore';
 import './HistoryPage.css';
 
 const DATE_FORMATTER = new Intl.DateTimeFormat(undefined, {
@@ -15,16 +16,21 @@ function formatMessageCount(count: number) {
 }
 
 export function HistoryPage() {
-  const {
-    sessions,
-    handleSelectChat,
-    handleDeleteChat,
-    handleRenameChat,
-    handleNewChat,
-    totalConversationsCount,
-  } = useAppRouteContext();
+  const navigate = useNavigate();
+  const sessions = useChatStore((s) => s.sessions);
+  const selectChat = useChatStore((s) => s.selectChat);
+  const deleteChat = useChatStore((s) => s.deleteChat);
+  const renameChat = useChatStore((s) => s.renameChat);
+  const newChat = useChatStore((s) => s.newChat);
+  const totalConversationsCount = useChatStore((s) => s.totalConversationsCount);
+
   const [searchQuery, setSearchQuery] = useState('');
   const searchInputRef = useRef<HTMLInputElement>(null);
+
+  const handleRenameWrapper = (id: string, title: string) => {
+    void renameChat(id, title);
+  };
+
   const {
     editingId,
     editValue,
@@ -36,7 +42,7 @@ export function HistoryPage() {
     handleRenameKeyDown,
     toggleOptionsMenu,
     closeOptionsMenu,
-  } = useSessionActions(handleRenameChat);
+  } = useSessionActions(handleRenameWrapper);
 
   const normalizedQuery = searchQuery.trim().toLowerCase();
 
@@ -64,6 +70,18 @@ export function HistoryPage() {
       ? `${totalConversationsCount} conversation${totalConversationsCount === 1 ? '' : 's'}`
       : `${visibleSessions.length} matching conversation${visibleSessions.length === 1 ? '' : 's'}`;
 
+  const handleSelect = (id: string) => {
+    selectChat(id, navigate);
+  };
+
+  const handleDelete = (id: string) => {
+    void deleteChat(id, navigate);
+  };
+
+  const handleNew = () => {
+    newChat(navigate);
+  };
+
   return (
     <section className="history-page">
       <header className="history-page-header">
@@ -72,7 +90,7 @@ export function HistoryPage() {
           <p className="history-page-subtitle">{historyCountLabel}</p>
         </div>
 
-        <button className="history-page-new-chat" type="button" onClick={handleNewChat}>
+        <button className="history-page-new-chat" type="button" onClick={handleNew}>
           <Icon name="plus" size={14} />
           New Chat
         </button>
@@ -119,7 +137,7 @@ export function HistoryPage() {
               <p className="history-page-empty-description">
                 Start a conversation and it will appear in your history.
               </p>
-              <button className="history-page-empty-cta" type="button" onClick={handleNewChat}>
+              <button className="history-page-empty-cta" type="button" onClick={handleNew}>
                 Start chatting
               </button>
             </>
@@ -137,7 +155,7 @@ export function HistoryPage() {
                 className={`history-page-item ${isEditing ? 'editing' : 'interactive'}`}
                 tabIndex={isEditing ? undefined : 0}
                 aria-label={isEditing ? undefined : `Open conversation: ${session.title}`}
-                onClick={isEditing ? undefined : () => handleSelectChat(session.id)}
+                onClick={isEditing ? undefined : () => handleSelect(session.id)}
                 onKeyDown={
                   isEditing
                     ? undefined
@@ -148,7 +166,7 @@ export function HistoryPage() {
 
                         if (e.key === 'Enter') {
                           e.preventDefault();
-                          handleSelectChat(session.id);
+                          handleSelect(session.id);
                         }
                       }
                 }
@@ -208,7 +226,7 @@ export function HistoryPage() {
                           rect={optionsMenu.rect}
                           onRename={() => startRename(session.id, session.title)}
                           onDelete={() => {
-                            handleDeleteChat(session.id);
+                            handleDelete(session.id);
                             closeOptionsMenu();
                           }}
                           onClose={closeOptionsMenu}

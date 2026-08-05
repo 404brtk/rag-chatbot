@@ -1,35 +1,33 @@
 import { useState, useEffect, useRef } from 'react';
-import './TopNav.css';
+import { useLocation, useNavigate } from 'react-router';
 import type { ChatMode } from '../types';
 import { Icon } from './Icon';
+import { useMediaQuery } from '../hooks/useMediaQuery';
+import { useAuthStore } from '../stores/useAuthStore';
+import { useChatStore, selectActiveMode } from '../stores/useChatStore';
+import { useUIStore } from '../stores/useUIStore';
+import './TopNav.css';
 
-interface TopNavProps {
-  mode: ChatMode;
-  onModeChange: (mode: ChatMode) => void;
-  showModeSelector?: boolean;
-  isCompactLayout?: boolean;
-  isSidebarOpen?: boolean;
-  onToggleSidebar?: () => void;
-  isAuthenticated: boolean;
-  userEmail: string | null;
-  onOpenLogin: () => void;
-  onOpenRegister: () => void;
-  onLogout: () => void;
-}
+const COMPACT_LAYOUT_QUERY = '(max-width: 1024px)';
 
-export function TopNav({
-  mode,
-  onModeChange,
-  showModeSelector = true,
-  isCompactLayout = false,
-  isSidebarOpen = false,
-  onToggleSidebar,
-  isAuthenticated,
-  userEmail,
-  onOpenLogin,
-  onOpenRegister,
-  onLogout,
-}: TopNavProps) {
+export function TopNav() {
+  const location = useLocation();
+  const navigate = useNavigate();
+  const isCompactLayout = useMediaQuery(COMPACT_LAYOUT_QUERY);
+  const showModeSelector = location.pathname === '/' || location.pathname.startsWith('/chat/');
+
+  const mode = useChatStore(selectActiveMode);
+  const setMode = useChatStore((s) => s.setMode);
+  const newChat = useChatStore((s) => s.newChat);
+
+  const isAuthenticated = useAuthStore((s) => s.isAuthenticated);
+  const userEmail = useAuthStore((s) => s.userEmail);
+  const openAuthDialog = useAuthStore((s) => s.openAuthDialog);
+  const logout = useAuthStore((s) => s.logout);
+
+  const isSidebarOpen = useUIStore((s) => s.isMobileSidebarOpen);
+  const toggleSidebar = useUIStore((s) => s.toggleSidebar);
+
   const [isDropdownOpen, setIsDropdownOpen] = useState(false);
   const dropdownRef = useRef<HTMLDivElement>(null);
 
@@ -46,8 +44,13 @@ export function TopNav({
   const toggleDropdown = () => setIsDropdownOpen(!isDropdownOpen);
 
   const handleSelectMode = (newMode: ChatMode) => {
-    onModeChange(newMode);
+    setMode(newMode, navigate);
     setIsDropdownOpen(false);
+  };
+
+  const handleLogout = () => {
+    logout();
+    newChat(navigate);
   };
 
   return (
@@ -56,7 +59,7 @@ export function TopNav({
         {isCompactLayout && (
           <button
             className={`sidebar-mobile-toggle${isSidebarOpen ? ' open' : ''}`}
-            onClick={onToggleSidebar}
+            onClick={() => toggleSidebar(true)}
             aria-expanded={isSidebarOpen}
             aria-label={isSidebarOpen ? 'Close sidebar' : 'Open sidebar'}
             type="button"
@@ -102,7 +105,7 @@ export function TopNav({
         {isAuthenticated ? (
           <>
             <span className="user-email-label">{userEmail}</span>
-            <button className="btn-secondary" type="button" onClick={onLogout}>
+            <button className="btn-secondary" type="button" onClick={handleLogout}>
               Logout
             </button>
           </>
@@ -111,11 +114,15 @@ export function TopNav({
             <button
               className="btn-secondary compact-register"
               type="button"
-              onClick={onOpenRegister}
+              onClick={() => openAuthDialog('register')}
             >
               Register
             </button>
-            <button className="btn-primary btn-login-nav" type="button" onClick={onOpenLogin}>
+            <button
+              className="btn-primary btn-login-nav"
+              type="button"
+              onClick={() => openAuthDialog('login')}
+            >
               Login
             </button>
           </>

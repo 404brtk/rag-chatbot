@@ -1,30 +1,29 @@
-import { useState, useEffect, type SubmitEvent } from 'react';
+import { useState, type SubmitEvent } from 'react';
 import { api, auth } from '../services/api';
 import './AuthDialog.css';
 import { Icon } from './Icon';
 import { Modal } from './Modal';
+import { useAuthStore } from '../stores/useAuthStore';
 
-interface AuthDialogProps {
-  isOpen: boolean;
-  onClose: () => void;
-  defaultTab?: 'login' | 'register';
-}
+export function AuthDialog() {
+  const isOpen = useAuthStore((s) => s.authDialogOpen);
+  const onClose = useAuthStore((s) => s.closeAuthDialog);
+  const tab = useAuthStore((s) => s.authDialogTab);
+  const setTab = useAuthStore((s) => s.setAuthDialogTab);
 
-export function AuthDialog({ isOpen, onClose, defaultTab = 'login' }: AuthDialogProps) {
-  const [tab, setTab] = useState<'login' | 'register'>(defaultTab);
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [passwordConfirm, setPasswordConfirm] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
 
-  useEffect(() => {
-    setTab(defaultTab);
+  const handleClose = () => {
     setError(null);
     setEmail('');
     setPassword('');
     setPasswordConfirm('');
-  }, [defaultTab, isOpen]);
+    onClose();
+  };
 
   const handleSubmit = async (e: SubmitEvent) => {
     e.preventDefault();
@@ -59,7 +58,7 @@ export function AuthDialog({ isOpen, onClose, defaultTab = 'login' }: AuthDialog
       });
 
       auth.setTokens(tokenData.access, tokenData.refresh, cleanEmail);
-      onClose();
+      handleClose();
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : 'Authentication failed.');
     } finally {
@@ -68,7 +67,7 @@ export function AuthDialog({ isOpen, onClose, defaultTab = 'login' }: AuthDialog
   };
 
   return (
-    <Modal isOpen={isOpen} onClose={onClose} id="auth-popover" className="auth-dialog">
+    <Modal isOpen={isOpen} onClose={handleClose} id="auth-popover" className="auth-dialog">
       <div className="auth-dialog-wrapper">
         <div className="auth-dialog-header modal-header">
           <div className="auth-dialog-tabs">
@@ -97,7 +96,7 @@ export function AuthDialog({ isOpen, onClose, defaultTab = 'login' }: AuthDialog
             type="button"
             className="modal-close-btn"
             aria-label="Close authentication dialog"
-            onClick={onClose}
+            onClick={handleClose}
           >
             <Icon name="x" size={16} />
           </button>

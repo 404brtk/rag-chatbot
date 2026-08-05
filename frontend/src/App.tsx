@@ -1,70 +1,58 @@
-import { useState, useRef, useEffect, useLayoutEffect } from 'react';
-import { Outlet, useLocation } from 'react-router';
+import { useRef, useEffect, useLayoutEffect } from 'react';
+import { Outlet, useLocation, useParams } from 'react-router';
 import './App.css';
 import { Sidebar } from './components/Sidebar';
 import { TopNav } from './components/TopNav';
 import { AuthDialog } from './components/AuthDialog';
 import { SettingsDialog } from './components/SettingsDialog';
-import { useChatSessions } from './hooks/useChatSessions';
-import { useAuth } from './hooks/useAuth';
 import { useMediaQuery } from './hooks/useMediaQuery';
-import type { AppRouteContext } from './types';
+import { useAuthStore } from './stores/useAuthStore';
+import { useChatStore, selectActiveMessages } from './stores/useChatStore';
+import { useUIStore } from './stores/useUIStore';
 
 const COMPACT_LAYOUT_QUERY = '(max-width: 1024px)';
 
 function App() {
-  const {
-    sessions,
-    activeChatId,
-    messages,
-    mode,
-    isTyping,
-    handleSend,
-    handleStop,
-    handleModeChange,
-    handleNewChat,
-    handleSelectChat,
-    handleDeleteChat,
-    handleRenameChat,
-    provider,
-    model,
-    setProvider,
-    setModel,
-    models,
-    ragEnabled,
-    setRagEnabled,
-    compactionEnabled,
-    setCompactionEnabled,
-    loadMoreMessages,
-    selectedDocIds,
-    setSelectedDocIds,
-    loadMoreConversations,
-    totalConversationsCount,
-  } = useChatSessions();
-  const [isExpanded, setIsExpanded] = useState<boolean>(() => {
-    const stored = localStorage.getItem('sidebar-expanded');
-    if (stored) return JSON.parse(stored);
-    return false;
-  });
-  const isCompactLayout = useMediaQuery(COMPACT_LAYOUT_QUERY);
-  const [isMobileSidebarOpen, setIsMobileSidebarOpen] = useState(false);
-  const [authDialogOpen, setAuthDialogOpen] = useState(false);
-  const [authDialogTab, setAuthDialogTab] = useState<'login' | 'register'>('login');
-  const [settingsDialogOpen, setSettingsDialogOpen] = useState(false);
-  const [settingsDialogTab, setSettingsDialogTab] = useState<'keys' | 'docs' | 'get-docs'>('keys');
-
-  const { isAuthenticated, userEmail, logout } = useAuth();
-
-  const scrollRef = useRef<HTMLElement>(null);
+  const { chatId } = useParams<{ chatId?: string }>();
   const location = useLocation();
+  const scrollRef = useRef<HTMLElement>(null);
+  const isCompactLayout = useMediaQuery(COMPACT_LAYOUT_QUERY);
+
+  const isAuthenticated = useAuthStore((s) => s.isAuthenticated);
+  const isMobileSidebarOpen = useUIStore((s) => s.isMobileSidebarOpen);
+  const closeMobileSidebar = useUIStore((s) => s.closeMobileSidebar);
+
+  const activeChatId = useChatStore((s) => s.activeChatId);
+  const setActiveChatId = useChatStore((s) => s.setActiveChatId);
+  const loadConversations = useChatStore((s) => s.loadConversations);
+  const loadMoreConversations = useChatStore((s) => s.loadMoreConversations);
+  const loadModels = useChatStore((s) => s.loadModels);
+  const loadMessages = useChatStore((s) => s.loadMessages);
+  const loadMoreMessages = useChatStore((s) => s.loadMoreMessages);
+  const sessions = useChatStore((s) => s.sessions);
+  const messages = useChatStore(selectActiveMessages);
+  const isTyping = useChatStore((s) => s.isTyping);
 
   useEffect(() => {
-    localStorage.setItem('sidebar-expanded', JSON.stringify(isExpanded));
-  }, [isExpanded]);
+    setActiveChatId(chatId || null);
+  }, [chatId, setActiveChatId]);
 
-  if (!isCompactLayout && isMobileSidebarOpen) {
-    setIsMobileSidebarOpen(false);
-  }
+  useEffect(() => {
+    void loadConversations(isAuthenticated);
+    void loadModels(isAuthenticated);
+  }, [isAuthenticated, loadConversations, loadModels]);
+
+  useEffect(() => {
+    if (activeChatId) {
+      void loadMessages(activeChatId);
+    }
+  }, [activeChatId, loadMessages]);
+
+  useEffect(() => {
+    if (!isCompactLayout && isMobileSidebarOpen) {
+      closeMobileSidebar();
+    }
+  }, [isCompactLayout, isMobileSidebarOpen, closeMobileSidebar]);
 
   const prevFirstMessageId = useRef<string | null>(null);
   const prevScrollHeight = useRef<number>(0);
@@ -104,7 +92,6 @@ function App() {
       if (isChat) {
         const lastMessage = messages[messages.length - 1];
         const isUserSent = lastMessage && lastMessage.role === 'user';
-
         const wasAtBottom =
           container.scrollTop + container.clientHeight >= prevScrollHeight.current - 12;
 
@@ -125,7 +112,7 @@ function App() {
     if (!isScrollable && activeChatId) {
       const activeSession = sessions.find((s) => s.id === activeChatId);
       if (activeSession && activeSession.nextCursor) {
-        loadMoreMessages();
+        void loadMoreMessages();
       }
     }
   }, [messages, location.pathname, isTyping, activeChatId, sessions, loadMoreMessages]);
@@ -137,140 +124,25 @@ function App() {
     if (isChat) {
       prevScrollHeight.current = target.scrollHeight;
       if (target.scrollTop <= 50) {
-        loadMoreMessages();
+        void loadMoreMessages();
       }
     } else if (location.pathname === '/history') {
       const isNearBottom = target.scrollHeight - target.scrollTop - target.clientHeight <= 100;
       if (isNearBottom) {
-        loadMoreConversations();
+        void loadMoreConversations();
       }
     }
   };
 
-  const toggleSidebar = () => {
-    if (isCompactLayout) {
-      setIsMobileSidebarOpen((prev) => !prev);
-      return;
-    }
-
-    setIsExpanded((prev) => !prev);
-  };
-
-  const closeMobileSidebar = () => {
-    if (isCompactLayout) {
-      setIsMobileSidebarOpen(false);
-    }
-  };
-
-  const handleNewChatAndCloseSidebar = () => {
-    handleNewChat();
-    closeMobileSidebar();
-  };
-
-  const handleSelectChatAndCloseSidebar = (id: string) => {
-    handleSelectChat(id);
-    closeMobileSidebar();
-  };
-
-  const handleLogout = () => {
-    logout();
-    handleNewChat();
-  };
-
-  const openAuthDialog = (tab: 'login' | 'register' = 'login') => {
-    setAuthDialogTab(tab);
-    setAuthDialogOpen(true);
-  };
-
-  const triggerSettings = (tab: 'keys' | 'docs' | 'get-docs' = 'keys') => {
-    setSettingsDialogTab(tab);
-    setSettingsDialogOpen(true);
-  };
-
-  const isChatRoute = location.pathname === '/' || location.pathname.startsWith('/chat/');
-  const isSidebarExpanded = isCompactLayout ? isMobileSidebarOpen : isExpanded;
-  const outletContext: AppRouteContext = {
-    sessions,
-    activeChatId,
-    messages,
-    mode,
-    isTyping,
-    handleSend,
-    handleStop,
-    handleNewChat,
-    handleSelectChat,
-    handleDeleteChat,
-    handleRenameChat,
-    provider,
-    model,
-    setProvider,
-    setModel,
-    models,
-    isAuthenticated,
-    ragEnabled,
-    setRagEnabled,
-    compactionEnabled,
-    setCompactionEnabled,
-    openAuthDialog,
-    userEmail,
-    selectedDocIds,
-    setSelectedDocIds,
-    loadMoreConversations,
-    totalConversationsCount,
-  };
-
   return (
     <div className="layout-wrapper">
-      <Sidebar
-        isExpanded={isSidebarExpanded}
-        isCompact={isCompactLayout}
-        onToggle={toggleSidebar}
-        onDismiss={closeMobileSidebar}
-        onNewChat={handleNewChatAndCloseSidebar}
-        history={sessions}
-        activeChatId={activeChatId}
-        onSelectChat={handleSelectChatAndCloseSidebar}
-        onDeleteChat={handleDeleteChat}
-        onRenameChat={handleRenameChat}
-        onOpenSettings={triggerSettings}
-        loadMoreConversations={loadMoreConversations}
-      />
+      <Sidebar />
       <main className="app-container" ref={scrollRef} onScroll={handleScroll}>
-        <TopNav
-          mode={mode}
-          onModeChange={handleModeChange}
-          showModeSelector={isChatRoute}
-          isCompactLayout={isCompactLayout}
-          isSidebarOpen={isMobileSidebarOpen}
-          onToggleSidebar={toggleSidebar}
-          isAuthenticated={isAuthenticated}
-          userEmail={userEmail}
-          onOpenLogin={() => {
-            setAuthDialogTab('login');
-            setAuthDialogOpen(true);
-          }}
-          onOpenRegister={() => {
-            setAuthDialogTab('register');
-            setAuthDialogOpen(true);
-          }}
-          onLogout={handleLogout}
-        />
-        <Outlet context={outletContext} />
+        <TopNav />
+        <Outlet />
       </main>
-      {authDialogOpen ? (
-        <AuthDialog
-          isOpen={authDialogOpen}
-          onClose={() => setAuthDialogOpen(false)}
-          defaultTab={authDialogTab}
-        />
-      ) : null}
-      {settingsDialogOpen ? (
-        <SettingsDialog
-          isOpen={settingsDialogOpen}
-          onClose={() => setSettingsDialogOpen(false)}
-          defaultTab={settingsDialogTab}
-        />
-      ) : null}
+      <AuthDialog />
+      <SettingsDialog />
     </div>
   );
 }
