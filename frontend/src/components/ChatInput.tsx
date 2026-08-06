@@ -172,7 +172,7 @@ export function ChatInput({ placeholder = 'Message...' }: ChatInputProps) {
       const isImg = isAllowedImageFile(file);
 
       if (!isText && !isImg) {
-        validationError = `File "${file.name}" is not supported. Only text, code, and image files are supported.`;
+        validationError = `File "${file.name}" is not supported. Only documents, code, text, and image files are supported.`;
         continue;
       }
 

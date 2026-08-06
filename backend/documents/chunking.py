@@ -4,8 +4,6 @@ import threading
 import tomllib
 from dataclasses import dataclass
 
-import pymupdf
-import pymupdf4llm
 import yaml
 from django.conf import settings
 
@@ -63,40 +61,10 @@ def get_token_count(text: str) -> int:
     return int(len(text.split()) * 1.33)
 
 
-SUPPORTED_CONTENT_TYPES = frozenset(
-    {
-        "text/plain",
-        "text/markdown",
-        "application/pdf",
-    }
-)
-
-
 @dataclass(frozen=True, slots=True)
 class Block:
     kind: str  # "h1".."h6", "code", "table", "list", "paragraph"
     content: str
-
-
-def extract_pdf_to_markdown(file_source: str | bytes) -> str:
-    if isinstance(file_source, bytes):
-        doc = pymupdf.open(stream=file_source, filetype="pdf")
-    else:
-        doc = pymupdf.open(file_source)
-    try:
-        return pymupdf4llm.to_markdown(doc, show_progress=False)
-    finally:
-        doc.close()
-
-
-def extract_text(file_bytes: bytes, content_type: str) -> str:
-    if content_type in ("text/plain", "text/markdown"):
-        return file_bytes.decode("utf-8")
-
-    if content_type == "application/pdf":
-        return extract_pdf_to_markdown(file_bytes)
-
-    raise ValueError(f"Unsupported content type: {content_type}")
 
 
 def _split_front_matter(text: str, delimiter: str, parser) -> tuple[dict, str]:

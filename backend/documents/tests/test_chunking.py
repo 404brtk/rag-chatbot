@@ -1,7 +1,3 @@
-from unittest.mock import patch
-
-import pytest
-
 from documents.chunking import (
     Block,
     ParentChunkData,
@@ -9,34 +5,8 @@ from documents.chunking import (
     chunk_markdown,
     chunk_text,
     extract_front_matter,
-    extract_text,
     get_token_count,
 )
-
-
-class TestExtractText:
-    def test_extracts_plain_text(self):
-        raw = "Hello world".encode("utf-8")
-        assert extract_text(raw, "text/plain") == "Hello world"
-
-    def test_extracts_markdown(self):
-        raw = "# Title\n\nBody text".encode("utf-8")
-        result = extract_text(raw, "text/markdown")
-        assert "Title" in result
-        assert "Body text" in result
-
-    def test_extracts_utf8_with_special_chars(self):
-        raw = "Café résumé naïve 🌍".encode("utf-8")
-        assert extract_text(raw, "text/plain") == "Café résumé naïve 🌍"
-
-    def test_rejects_unsupported_type(self):
-        with pytest.raises(ValueError, match="Unsupported content type"):
-            extract_text(b"data", "application/octet-stream")
-
-    @patch("documents.chunking.extract_pdf_to_markdown", return_value="PDF text")
-    def test_extracts_pdf(self, mock_extract):
-        assert extract_text(b"fake pdf bytes", "application/pdf") == "PDF text"
-        mock_extract.assert_called_once_with(b"fake pdf bytes")
 
 
 class TestChunkText:

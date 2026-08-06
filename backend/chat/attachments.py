@@ -1,3 +1,4 @@
+import logging
 import os
 import uuid
 import io
@@ -7,7 +8,9 @@ from django.core.files.uploadedfile import InMemoryUploadedFile
 from PIL import Image
 from rest_framework.exceptions import ValidationError
 
-from documents.chunking import extract_pdf_to_markdown
+from core.extractors import extract_text
+
+logger = logging.getLogger(__name__)
 
 
 def optimize_uploaded_image(
@@ -75,7 +78,7 @@ def is_safe_attachment_path(filename: str) -> bool:
     return True
 
 
-def load_text_attachment(filename: str) -> str:
+def load_text_attachment(filename: str, content_type: str = "") -> str:
     if not is_safe_attachment_path(filename):
         return ""
     local_path = os.path.join(settings.MEDIA_ROOT, "attachments", filename)
@@ -85,18 +88,10 @@ def load_text_attachment(filename: str) -> str:
     limit = 1024 * 100
 
     try:
-        if filename.lower().endswith(".pdf"):
-            markdown_text = extract_pdf_to_markdown(local_path)
-            if len(markdown_text) > limit:
-                return (
-                    markdown_text[:limit] + "\n[WARNING: File truncated to 100KB limit]"
-                )
-            return markdown_text
-        else:
-            with open(local_path, "r", encoding="utf-8", errors="ignore") as f:
-                content = f.read(limit)
-                if f.read(1):
-                    content += "\n[WARNING: File truncated to 100KB limit]"
-                return content
-    except Exception:
+        text = extract_text(local_path, content_type=content_type, filename=filename)
+        if len(text) > limit:
+            return text[:limit] + "\n[WARNING: File truncated to 100KB limit]"
+        return text
+    except Exception as e:
+        logger.warning("Failed to load text attachment '%s': %s", filename, e)
         return ""

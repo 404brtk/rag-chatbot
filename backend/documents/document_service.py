@@ -9,12 +9,11 @@ from django.db import connection
 from django.db.models import Avg, Count
 from pgvector.django import CosineDistance
 
+from core.extractors import SUPPORTED_CONTENT_TYPES, extract_text
 from .chunking import (
-    SUPPORTED_CONTENT_TYPES,
     ParentChunkData,
     chunk_markdown,
     chunk_text,
-    extract_text,
 )
 from .embeddings import EmbeddingService
 from .reranker import RerankerService
@@ -41,7 +40,7 @@ class DocumentService:
     def _chunk_for_content_type(
         self, raw_text: str, content_type: str
     ) -> tuple[list[ParentChunkData], dict]:
-        if content_type in ("text/markdown", "application/pdf"):
+        if content_type != "text/plain":
             return chunk_markdown(raw_text)
 
         child_texts = chunk_text(

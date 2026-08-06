@@ -89,31 +89,50 @@ def test_load_text_attachment_large_txt(temp_media_root):
     assert content == expected_content
 
 
-@patch("chat.attachments.extract_pdf_to_markdown")
-def test_load_text_attachment_pdf_small(mock_extract_pdf, temp_media_root):
+@patch("chat.attachments.extract_text")
+def test_load_text_attachment_pdf_small(mock_extract_text, temp_media_root):
     file_path = temp_media_root / "doc.pdf"
     file_path.write_bytes(b"dummy pdf bytes")
 
-    mock_extract_pdf.return_value = "# Header\nSome content"
+    mock_extract_text.return_value = "# Header\nSome content"
 
     content = load_text_attachment("doc.pdf")
 
-    mock_extract_pdf.assert_called_once_with(str(file_path))
+    mock_extract_text.assert_called_once_with(
+        str(file_path), content_type="", filename="doc.pdf"
+    )
     assert content == "# Header\nSome content"
 
 
-@patch("chat.attachments.extract_pdf_to_markdown")
-def test_load_text_attachment_pdf_large(mock_extract_pdf, temp_media_root):
+@patch("chat.attachments.extract_text")
+def test_load_text_attachment_docx_small(mock_extract_text, temp_media_root):
+    file_path = temp_media_root / "doc.docx"
+    file_path.write_bytes(b"dummy docx bytes")
+
+    mock_extract_text.return_value = "# Word Header\nWord content"
+
+    content = load_text_attachment("doc.docx")
+
+    mock_extract_text.assert_called_once_with(
+        str(file_path), content_type="", filename="doc.docx"
+    )
+    assert content == "# Word Header\nWord content"
+
+
+@patch("chat.attachments.extract_text")
+def test_load_text_attachment_pdf_large(mock_extract_text, temp_media_root):
     file_path = temp_media_root / "large.pdf"
     file_path.write_bytes(b"dummy pdf bytes")
 
     limit = 1024 * 100
     large_md = "# Header\n" + "x" * (limit + 100)
-    mock_extract_pdf.return_value = large_md
+    mock_extract_text.return_value = large_md
 
     content = load_text_attachment("large.pdf")
 
-    mock_extract_pdf.assert_called_once_with(str(file_path))
+    mock_extract_text.assert_called_once_with(
+        str(file_path), content_type="", filename="large.pdf"
+    )
 
     expected_content = large_md[:limit] + "\n[WARNING: File truncated to 100KB limit]"
     assert content == expected_content

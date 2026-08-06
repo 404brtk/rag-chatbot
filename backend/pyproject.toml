@@ -12,6 +12,7 @@ dependencies = [
     "django-environ>=0.13.0",
     "djangorestframework>=3.17.1",
     "djangorestframework-simplejwt>=5.5.1",
+    "firecrawl-anydoc>=0.1.6",
     "google-genai>=2.8.0",
     "httpx>=0.28.1",
     "openai>=2.34.0",
@@ -31,7 +32,7 @@ default-groups = ["dev"]
 
 [tool.pytest.ini_options]
 DJANGO_SETTINGS_MODULE = "config.settings"
-testpaths = ["accounts/tests", "chat/tests", "documents/tests"]
+testpaths = ["accounts/tests", "chat/tests", "documents/tests", "core/tests"]
 python_files = ["tests.py", "test_*.py", "*_tests.py"]
 asyncio_mode = "auto"
 filterwarnings = [

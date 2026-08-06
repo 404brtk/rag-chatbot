@@ -15,6 +15,7 @@ import { CustomDropdown } from './CustomDropdown';
 import { Modal } from './Modal';
 
 import { useUIStore } from '../stores/useUIStore';
+import { ACCEPTED_DOCUMENT_EXTENSIONS } from '../utils/file';
 
 interface ApiKey {
   id: string;
@@ -473,7 +474,7 @@ export function SettingsDialog() {
                     ref={fileInputRef}
                     id="doc-file-upload"
                     type="file"
-                    accept=".pdf,.txt,.md,.docx"
+                    accept={ACCEPTED_DOCUMENT_EXTENSIONS.join(',')}
                     style={{ display: 'none' }}
                     onChange={handleFileUpload}
                   />

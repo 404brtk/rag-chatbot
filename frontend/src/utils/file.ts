@@ -1,9 +1,25 @@
 export const MAX_ATTACHMENT_SIZE_BYTES = 5 * 1024 * 1024; // 5 MB
 
-export const ACCEPTED_TEXT_EXTENSIONS = [
+export const ACCEPTED_DOCUMENT_EXTENSIONS = [
+  '.pdf',
   '.txt',
   '.md',
   '.markdown',
+  '.docx',
+  '.doc',
+  '.pptx',
+  '.ppt',
+  '.xlsx',
+  '.xls',
+  '.csv',
+  '.rtf',
+  '.epub',
+  '.odt',
+  '.ods',
+  '.odp',
+];
+
+export const ACCEPTED_CODE_EXTENSIONS = [
   '.json',
   '.js',
   '.ts',
@@ -25,7 +41,11 @@ export const ACCEPTED_TEXT_EXTENSIONS = [
   '.conf',
   '.env',
   '.sql',
-  '.pdf',
+];
+
+export const ACCEPTED_TEXT_EXTENSIONS = [
+  ...ACCEPTED_DOCUMENT_EXTENSIONS,
+  ...ACCEPTED_CODE_EXTENSIONS,
 ];
 
 export const ACCEPTED_IMAGE_EXTENSIONS = ['.png', '.jpg', '.jpeg', '.gif', '.webp'];
