@@ -642,6 +642,7 @@ export const useChatStore = create<ChatState>((set, get) => {
     },
 
     newChat: (navigate) => {
+      set({ activeChatId: null });
       if (navigate) {
         navigate('/');
       }
