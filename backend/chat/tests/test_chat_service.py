@@ -73,17 +73,14 @@ class TestChatServiceStatic:
         assert ChatService._compute_title("  Hello  ") == "Hello"
 
     @patch("chat.chat_service.ProviderGateway.discover_llamacpp_models")
-    async def test_returns_all_providers(self, mock_discover):
+    async def test_returns_discovered_models(self, mock_discover):
         mock_discover.return_value = [
             {"id": "local-model", "object": "model", "owned_by": "llamacpp"}
         ]
 
         models = await ChatService.get_available_models()
 
-        assert "openai" in models
         assert "llamacpp" in models
-        assert "openrouter" in models
-        assert "gemini" in models
         assert models["llamacpp"] == ["local-model"]
 
     @patch("chat.chat_service.ProviderGateway.discover_llamacpp_models")
@@ -92,8 +89,8 @@ class TestChatServiceStatic:
 
         models = await ChatService.get_available_models()
 
-        assert "openai" in models
         assert "llamacpp" not in models
+        assert models == {}
 
 
 class TestChatServiceGenerateReply:
