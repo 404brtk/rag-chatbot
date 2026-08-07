@@ -188,13 +188,6 @@ OPENROUTER_BASE_URL = env.str(
     "OPENROUTER_BASE_URL", default="https://openrouter.ai/api/v1"
 )
 
-OPENAI_MODELS = env.list("OPENAI_MODELS", default=["gpt-5.4-mini"])
-OPENROUTER_MODELS = env.list(
-    "OPENROUTER_MODELS", default=["cohere/north-mini-code:free"]
-)
-GEMINI_MODELS = env.list(
-    "GEMINI_MODELS", default=["gemini-3.1-flash-lite", "gemini-3-flash-preview"]
-)
 
 CORS_ALLOWED_ORIGINS = env.list("CORS_ALLOWED_ORIGINS", default=[])
 CORS_ALLOW_ALL_ORIGINS = DEBUG

@@ -74,6 +74,7 @@ function getStored<T>(key: string, defaultValue: T): T {
 }
 
 function setStored<T>(key: string, value: T): void {
+  if (!key || key.trim() === '') return;
   try {
     localStorage.setItem(key, JSON.stringify(value));
   } catch (err) {
@@ -93,12 +94,15 @@ interface ChatState {
   selectedDocIds: string[];
   provider: string;
   model: string;
+  savedModels: Record<string, string[]>;
   models: Record<string, string[]>;
 
   setActiveChatId: (id: string | null) => void;
   loadModels: (isAuthenticated: boolean) => Promise<void>;
   setProvider: (provider: string) => void;
   setModel: (model: string) => void;
+  saveModelHistory: (model?: string) => void;
+  removeSavedModel: (provider: string, modelToRemove: string) => void;
   setRagEnabled: (enabled: boolean) => void;
   setCompactionEnabled: (enabled: boolean) => void;
   setSelectedDocIds: (ids: string[]) => void;
@@ -125,6 +129,15 @@ let isLoadingMoreConversations = false;
 let isLoadingMoreMessages = false;
 
 export const useChatStore = create<ChatState>((set, get) => {
+  const initialProvider = getStored<string>('chat_provider', 'openai');
+  const rawSavedModels = getStored<Record<string, string[]>>('chat_saved_models', {
+    openai: [],
+    openrouter: [],
+    gemini: [],
+  });
+  delete rawSavedModels.llamacpp;
+  const initialSavedModels = rawSavedModels;
+
   const refreshActiveChat = async (targetId: string) => {
     try {
       const res = await api.get<CursorPaginated<BackendMessage>>(
@@ -158,8 +171,9 @@ export const useChatStore = create<ChatState>((set, get) => {
     ragEnabled: getStored<boolean>('chat_rag_enabled', false),
     compactionEnabled: getStored<boolean>('chat_compaction_enabled', false),
     selectedDocIds: getStored<string[]>('chat_selected_doc_ids', []),
-    provider: getStored<string>('chat_provider', 'openai'),
-    model: getStored<string>('chat_model', ''),
+    provider: initialProvider,
+    savedModels: initialSavedModels,
+    model: initialProvider === 'llamacpp' ? '' : initialSavedModels[initialProvider]?.[0] || '',
     models: {},
 
     setActiveChatId: (id) => {
@@ -176,36 +190,18 @@ export const useChatStore = create<ChatState>((set, get) => {
       }
       try {
         const data = await api.get<Record<string, string[]>>('/models/');
-        const providers = Object.keys(data);
-        if (providers.length === 0) {
-          set({ models: data });
-          return;
-        }
-
         const currentProvider = get().provider;
-        const currentModel = get().model;
 
-        const nextProvider =
-          currentProvider && providers.includes(currentProvider)
-            ? currentProvider
-            : providers.includes('openai')
-              ? 'openai'
-              : providers[0];
-
-        const allowedModels = data[nextProvider] || [];
-        const nextModel =
-          currentProvider === nextProvider && currentModel && allowedModels.includes(currentModel)
+        if (currentProvider === 'llamacpp') {
+          const llamacppList = data.llamacpp || [];
+          const currentModel = get().model;
+          const nextModel = llamacppList.includes(currentModel)
             ? currentModel
-            : allowedModels[0] || '';
-
-        setStored('chat_provider', nextProvider);
-        setStored('chat_model', nextModel);
-
-        set({
-          models: data,
-          provider: nextProvider,
-          model: nextModel,
-        });
+            : llamacppList[0] || '';
+          set({ models: data, model: nextModel });
+        } else {
+          set({ models: data });
+        }
       } catch (err) {
         console.error('Failed to load models:', err);
       }
@@ -213,12 +209,52 @@ export const useChatStore = create<ChatState>((set, get) => {
 
     setProvider: (provider) => {
       setStored('chat_provider', provider);
-      set({ provider });
+      const currentSaved = get().savedModels;
+      const discoveredLlama = get().models.llamacpp || [];
+      const modelForProvider =
+        provider === 'llamacpp' ? discoveredLlama[0] || '' : currentSaved[provider]?.[0] || '';
+      set({ provider, model: modelForProvider });
     },
 
-    setModel: (model) => {
-      setStored('chat_model', model);
+    setModel: (model: string) => {
       set({ model });
+    },
+
+    saveModelHistory: (modelToSave) => {
+      const provider = get().provider;
+      if (provider === 'llamacpp') return;
+
+      const target = (modelToSave !== undefined ? modelToSave : get().model).trim();
+      if (!target) return;
+
+      const currentList = get().savedModels[provider] || [];
+      const updatedList = [target, ...currentList.filter((m) => m !== target)];
+
+      const updatedSavedModels = {
+        ...get().savedModels,
+        [provider]: updatedList,
+      };
+      delete updatedSavedModels.llamacpp;
+      setStored('chat_saved_models', updatedSavedModels);
+      set({ model: target, savedModels: updatedSavedModels });
+    },
+
+    removeSavedModel: (provider, modelToRemove) => {
+      const currentList = get().savedModels[provider] || [];
+      const updatedList = currentList.filter((m) => m !== modelToRemove);
+      const updatedSavedModels = {
+        ...get().savedModels,
+        [provider]: updatedList,
+      };
+      setStored('chat_saved_models', updatedSavedModels);
+
+      const activeModel = get().model;
+      const nextModel =
+        get().provider === provider && activeModel === modelToRemove
+          ? updatedList[0] || ''
+          : activeModel;
+
+      set({ savedModels: updatedSavedModels, model: nextModel });
     },
 
     setRagEnabled: (ragEnabled) => {
@@ -361,6 +397,10 @@ export const useChatStore = create<ChatState>((set, get) => {
         compactionEnabled,
         selectedDocIds,
       } = get();
+
+      if (model.trim()) {
+        get().saveModelHistory(model);
+      }
 
       let currentChatId = activeChatId;
       const currentMode = selectActiveMode(get());

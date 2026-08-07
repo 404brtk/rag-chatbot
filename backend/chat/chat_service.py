@@ -4,7 +4,6 @@ from dataclasses import dataclass, replace
 from typing import Any, Literal
 from pydantic import BaseModel, Field, ConfigDict
 
-from django.conf import settings
 from django.utils import timezone
 from django.core.files.storage import default_storage
 
@@ -880,22 +879,11 @@ Follow these strict guidelines for refinement:
     @staticmethod
     async def get_available_models() -> dict[str, list[str]]:
         models: dict[str, list[str]] = {}
-
-        openai_models = list(getattr(settings, "OPENAI_MODELS", []))
-        if openai_models:
-            models["openai"] = openai_models
-
-        openrouter_models = list(getattr(settings, "OPENROUTER_MODELS", []))
-        if openrouter_models:
-            models["openrouter"] = openrouter_models
-
-        gemini_models = list(getattr(settings, "GEMINI_MODELS", []))
-        if gemini_models:
-            models["gemini"] = gemini_models
-
         try:
             raw = await ProviderGateway.discover_llamacpp_models()
-            llamacpp_models = [m["id"] for m in raw]
+            llamacpp_models = [
+                m["id"] for m in raw if isinstance(m, dict) and "id" in m
+            ]
             if llamacpp_models:
                 models["llamacpp"] = llamacpp_models
         except Exception:

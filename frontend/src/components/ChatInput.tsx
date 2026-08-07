@@ -20,6 +20,7 @@ import {
 } from '../utils/file';
 import { api } from '../services/api';
 import { DocSelectionDialog } from './DocSelectionDialog';
+import { Combobox } from './Combobox';
 import { CustomDropdown } from './CustomDropdown';
 import { useAuthStore } from '../stores/useAuthStore';
 import { useChatStore, selectActiveMode } from '../stores/useChatStore';
@@ -42,9 +43,13 @@ export function ChatInput({ placeholder = 'Message...' }: ChatInputProps) {
 
   const provider = useChatStore((s) => s.provider);
   const model = useChatStore((s) => s.model);
+  const savedModels = useChatStore((s) => s.savedModels);
   const models = useChatStore((s) => s.models);
+  const loadModels = useChatStore((s) => s.loadModels);
   const setProvider = useChatStore((s) => s.setProvider);
   const setModel = useChatStore((s) => s.setModel);
+  const saveModelHistory = useChatStore((s) => s.saveModelHistory);
+  const removeSavedModel = useChatStore((s) => s.removeSavedModel);
   const ragEnabled = useChatStore((s) => s.ragEnabled);
   const setRagEnabled = useChatStore((s) => s.setRagEnabled);
   const compactionEnabled = useChatStore((s) => s.compactionEnabled);
@@ -70,14 +75,14 @@ export function ChatInput({ placeholder = 'Message...' }: ChatInputProps) {
 
   const [isDocDialogOpen, setIsDocDialogOpen] = useState(false);
 
-  const providers = Object.keys(models);
-  const availableModels = models[provider] || [];
+  const providerSaved = savedModels[provider] || [];
+  const providerDiscovered = models[provider] || [];
+  const comboboxOptions = Array.from(new Set([...providerDiscovered, ...providerSaved]));
 
   const handleProviderChange = (newProvider: string) => {
     setProvider(newProvider);
-    const pModels = models[newProvider] || [];
-    if (pModels.length > 0) {
-      setModel(pModels[0]);
+    if (newProvider === 'llamacpp') {
+      void loadModels(isAuthenticated);
     }
   };
 
@@ -406,20 +411,39 @@ export function ChatInput({ placeholder = 'Message...' }: ChatInputProps) {
               <div className="chat-input-selectors">
                 <CustomDropdown
                   value={provider}
-                  options={providers.length > 0 ? providers : [provider]}
+                  options={['openai', 'openrouter', 'gemini', 'llamacpp']}
                   onChange={handleProviderChange}
                   labelFormatter={formatProviderName}
-                  disabled={providers.length === 0 || isTyping}
+                  disabled={isTyping}
                 />
 
-                <CustomDropdown
-                  value={model}
-                  options={
-                    availableModels.length > 0 ? availableModels : model ? [model] : ['Loading...']
-                  }
-                  onChange={(val) => setModel(val)}
-                  disabled={providers.length === 0 || isTyping}
-                />
+                {provider === 'llamacpp' ? (
+                  providerDiscovered.length > 0 ? (
+                    <CustomDropdown
+                      value={model || providerDiscovered[0]}
+                      options={providerDiscovered}
+                      onChange={(val) => setModel(val)}
+                      disabled={isTyping}
+                    />
+                  ) : (
+                    <CustomDropdown
+                      value="No local models"
+                      options={['No local models']}
+                      onChange={() => {}}
+                      disabled
+                    />
+                  )
+                ) : (
+                  <Combobox
+                    value={model}
+                    options={comboboxOptions}
+                    onChange={(val) => setModel(val)}
+                    onCommitOption={(opt) => saveModelHistory(opt)}
+                    onRemoveOption={(opt) => removeSavedModel(provider, opt)}
+                    disabled={isTyping}
+                    placeholder="Enter model..."
+                  />
+                )}
 
                 {mode === 'side-by-side' ? (
                   <div
