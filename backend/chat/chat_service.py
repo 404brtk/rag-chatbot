@@ -708,14 +708,39 @@ Follow these strict guidelines for refinement:
                             pass
                     raise
 
-            prep = await self._prepare_generation(
-                user=user,
-                session_id=session_id,
-                user_text=user_text,
-                config=config,
-                document_ids=document_ids,
-                attachments=attachments,
-            )
+            try:
+                prep = await self._prepare_generation(
+                    user=user,
+                    session_id=session_id,
+                    user_text=user_text,
+                    config=config,
+                    document_ids=document_ids,
+                    attachments=attachments,
+                )
+            except Exception as e:
+                if session and raw_user_text:
+                    try:
+                        await self.repository.append_message_pair(
+                            session_id=session_id,
+                            user_content=raw_user_text,
+                            assistant_content=f"*Error: {str(e)}*",
+                            provider=config.provider,
+                            model=config.model,
+                            usage={"prompt_tokens": 0, "completion_tokens": 0},
+                            user_raw_question=raw_user_text,
+                            user_attachments=attachments,
+                        )
+                        if not session.title:
+                            session.title = self._compute_title(raw_user_text)
+                            await session.asave(
+                                update_fields=["title", "last_message_at"]
+                            )
+                        else:
+                            session.last_message_at = timezone.now()
+                            await session.asave(update_fields=["last_message_at"])
+                    except Exception:
+                        pass
+                raise
 
             if prep.compaction_summary:
                 yield StreamEvent(
@@ -746,8 +771,34 @@ Follow these strict guidelines for refinement:
                         yield StreamEvent(type="token", content=chunk.text)
                     if chunk.usage:
                         usage_data = chunk.usage
-            except Exception:
-                await user_msg.adelete()
+            except Exception as e:
+                err_text = (
+                    assistant_text + f"\n\n*Error: {str(e)}*"
+                    if assistant_text
+                    else f"*Error: {str(e)}*"
+                )
+                if usage_data is None:
+                    usage_data = {"prompt_tokens": 0, "completion_tokens": 0}
+                try:
+                    await self.repository.append_message(
+                        session=session,
+                        role="assistant",
+                        content=err_text,
+                        provider=prep.config.provider,
+                        model=prep.config.model,
+                        usage=usage_data,
+                    )
+                    title = None
+                    if not session.title:
+                        title = self._compute_title(prep.raw_user_text)
+                        session.title = title
+                    session.last_message_at = timezone.now()
+                    fields = ["last_message_at"]
+                    if title:
+                        fields.append("title")
+                    await session.asave(update_fields=fields)
+                except Exception:
+                    pass
                 raise
 
             if usage_data is None:

@@ -926,7 +926,7 @@ class TestChatServiceGenerateReplyStream:
     @pytest.mark.django_db(transaction=True)
     @patch("chat.chat_service.ProviderGateway.generate_stream")
     @patch.object(ChatService, "_resolve_api_key", return_value="sk-chat")
-    async def test_deletes_user_message_on_stream_failure(
+    async def test_persists_user_and_assistant_error_message_on_stream_failure(
         self, mock_resolve, mock_stream, user_a
     ):
         async def gen():
@@ -937,7 +937,10 @@ class TestChatServiceGenerateReplyStream:
         conversation = await Conversation.objects.acreate(user=user_a)
 
         mock_user_msg = AsyncMock()
-        self.mock_repo.append_message = AsyncMock(return_value=mock_user_msg)
+        mock_assistant_msg = AsyncMock()
+        self.mock_repo.append_message = AsyncMock(
+            side_effect=[mock_user_msg, mock_assistant_msg]
+        )
 
         service = ChatService(repository=self.mock_repo)
         events = await self._collect_events(
@@ -950,7 +953,13 @@ class TestChatServiceGenerateReplyStream:
 
         assert len(events) == 1
         assert events[0].type == "error"
-        mock_user_msg.adelete.assert_called_once()
+        mock_user_msg.adelete.assert_not_called()
+        assert self.mock_repo.append_message.call_count == 2
+        user_call = self.mock_repo.append_message.call_args_list[0][1]
+        assert user_call["role"] == "user"
+        assistant_call = self.mock_repo.append_message.call_args_list[1][1]
+        assert assistant_call["role"] == "assistant"
+        assert "*Error: boom*" in assistant_call["content"]
 
     @pytest.mark.django_db(transaction=True)
     @patch.object(ChatService, "_prepare_generation")

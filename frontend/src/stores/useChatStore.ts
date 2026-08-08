@@ -624,6 +624,9 @@ export const useChatStore = create<ChatState>((set, get) => {
                 : s
             ),
           }));
+          if (currentChatId) {
+            void refreshActiveChat(currentChatId);
+          }
         },
         controller.signal
       );
