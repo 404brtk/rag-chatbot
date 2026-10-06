@@ -52,8 +52,8 @@ services:
             - CELERY_BROKER_URL=redis://redis:6379/0
             - CELERY_RESULT_BACKEND=redis://redis:6379/0
             - GETDOCS_BASE_URL=http://get-docs:8001
-            - TEI_EMBEDDING_URL=http://embedding-model
-            - TEI_RERANKER_URL=http://reranker-model
+            - TEI_EMBEDDING_URL=${TEI_EMBEDDING_URL:-http://embedding-model}
+            - TEI_RERANKER_URL=${TEI_RERANKER_URL:-http://reranker-model}
             - LLAMACPP_BASE_URL=http://host.docker.internal:8080
         depends_on:
             db:
@@ -76,8 +76,8 @@ services:
             - CELERY_BROKER_URL=redis://redis:6379/0
             - CELERY_RESULT_BACKEND=redis://redis:6379/0
             - GETDOCS_BASE_URL=http://get-docs:8001
-            - TEI_EMBEDDING_URL=http://embedding-model
-            - TEI_RERANKER_URL=http://reranker-model
+            - TEI_EMBEDDING_URL=${TEI_EMBEDDING_URL:-http://embedding-model}
+            - TEI_RERANKER_URL=${TEI_RERANKER_URL:-http://reranker-model}
             - LLAMACPP_BASE_URL=http://host.docker.internal:8080
 
         depends_on:
@@ -94,9 +94,10 @@ services:
     # If you have a different GPU architecture, check the latest compatible image tags at: https://github.com/huggingface/text-embeddings-inference
     #
     # MAC USERS: Apple Silicon doesn't support NVIDIA drivers. Instead of running this container,
-    # 1. Start the core infrastructure (database & cache) using: 'docker compose up -d'
+    # 1. In backend/.env, uncomment both Mac TEI URLs shown in .env.example.
     # 2. Install TEI locally via Homebrew: 'brew install text-embeddings-inference'
     # 3. Run the model with Metal acceleration: 'text-embeddings-router --model-id intfloat/multilingual-e5-base --port 8002'
+    # 4. Once both local TEI servers are running, start the app: 'docker compose up -d'
     embedding-model:
         image: ghcr.io/huggingface/text-embeddings-inference:120-1.9
         container_name: embedding-model-rag-chatbot
@@ -123,9 +124,10 @@ services:
     # If you have a different GPU architecture, check the latest compatible image tags at: https://github.com/huggingface/text-embeddings-inference
     #
     # MAC USERS: Apple Silicon doesn't support NVIDIA drivers. Instead of running this container,
-    # 1. Start the core infrastructure (database & cache) using: 'docker compose up -d'
+    # 1. In backend/.env, uncomment both Mac TEI URLs shown in .env.example.
     # 2. Install TEI locally via Homebrew: 'brew install text-embeddings-inference'
     # 3. Run the model with Metal acceleration: 'text-embeddings-router --model-id BAAI/bge-reranker-v2-m3 --port 8003'
+    # 4. Once both local TEI servers are running, start the app: 'docker compose up -d'
     reranker-model:
         image: ghcr.io/huggingface/text-embeddings-inference:120-1.9
         container_name: reranker-model-rag-chatbot
