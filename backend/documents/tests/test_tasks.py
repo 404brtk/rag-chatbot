@@ -207,7 +207,8 @@ class TestProcessDocumentEmbeddingTask:
             raw_text="Hello world",
         )
 
-        process_document_embedding_task(str(document.id))
+        with pytest.raises(TemporaryProviderError, match="Service offline"):
+            process_document_embedding_task(str(document.id))
 
         document.refresh_from_db()
         assert document.status == Document.Status.FAILED

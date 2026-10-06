@@ -231,3 +231,4 @@ def process_document_embedding_task(document_id: str) -> None:
             document.save(update_fields=["status", "error_message"])
         except Document.DoesNotExist:
             pass
+        raise
