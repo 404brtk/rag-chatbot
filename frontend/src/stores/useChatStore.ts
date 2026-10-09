@@ -170,7 +170,7 @@ export const useChatStore = create<ChatState>((set, get) => {
     isTyping: false,
     ragEnabled: getStored<boolean>('chat_rag_enabled', false),
     compactionEnabled: getStored<boolean>('chat_compaction_enabled', false),
-    selectedDocIds: getStored<string[]>('chat_selected_doc_ids', []),
+    selectedDocIds: [],
     provider: initialProvider,
     savedModels: initialSavedModels,
     model: initialProvider === 'llamacpp' ? '' : initialSavedModels[initialProvider]?.[0] || '',
@@ -268,7 +268,6 @@ export const useChatStore = create<ChatState>((set, get) => {
     },
 
     setSelectedDocIds: (selectedDocIds) => {
-      setStored('chat_selected_doc_ids', selectedDocIds);
       set({ selectedDocIds });
     },
 
