@@ -1,5 +1,7 @@
 import { create } from 'zustand';
 import { auth } from '../services/api';
+import { useChatStore } from './useChatStore';
+import { useUIStore } from './useUIStore';
 
 interface AuthState {
   isAuthenticated: boolean;
@@ -9,11 +11,15 @@ interface AuthState {
   openAuthDialog: (tab?: 'login' | 'register') => void;
   closeAuthDialog: () => void;
   setAuthDialogTab: (tab: 'login' | 'register') => void;
-  logout: () => void;
+  logout: () => Promise<void>;
 }
 
 export const useAuthStore = create<AuthState>((set) => {
   auth.subscribe(() => {
+    if (!auth.isAuthenticated()) {
+      useChatStore.getState().resetUserData();
+      useUIStore.getState().closeSettings();
+    }
     set({
       isAuthenticated: auth.isAuthenticated(),
       userEmail: auth.getUserEmail(),
@@ -42,8 +48,6 @@ export const useAuthStore = create<AuthState>((set) => {
         authDialogTab: tab,
       }),
 
-    logout: () => {
-      auth.clearTokens();
-    },
+    logout: () => auth.logout(),
   };
 });

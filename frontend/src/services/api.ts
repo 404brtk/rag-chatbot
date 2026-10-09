@@ -5,28 +5,10 @@ interface RefreshResponse {
   refresh: string;
 }
 
-interface RefreshSubscriber {
-  resolve: (accessToken: string) => void;
-  reject: (error: unknown) => void;
-}
-
-let isRefreshing = false;
-let refreshSubscribers: RefreshSubscriber[] = [];
+let refreshPromise: Promise<string> | null = null;
+let logoutInProgress = false;
+let sessionAbortController = new AbortController();
 let authStateListeners: (() => void)[] = [];
-
-function subscribeTokenRefresh(resolve: (token: string) => void, reject: (err: unknown) => void) {
-  refreshSubscribers.push({ resolve, reject });
-}
-
-function onTokenRefreshed(accessToken: string) {
-  refreshSubscribers.forEach((sub) => sub.resolve(accessToken));
-  refreshSubscribers = [];
-}
-
-function onTokenRefreshFailed(error: unknown) {
-  refreshSubscribers.forEach((sub) => sub.reject(error));
-  refreshSubscribers = [];
-}
 
 function notifyAuthStateListeners() {
   authStateListeners.forEach((listener) => listener());
@@ -55,10 +37,35 @@ export const auth = {
   },
 
   clearTokens() {
+    sessionAbortController.abort();
+    sessionAbortController = new AbortController();
     localStorage.removeItem('access_token');
     localStorage.removeItem('refresh_token');
     localStorage.removeItem('user_email');
     notifyAuthStateListeners();
+  },
+
+  async logout(): Promise<void> {
+    logoutInProgress = true;
+    try {
+      await refreshPromise?.catch(() => undefined);
+      const refresh = this.getRefreshToken();
+      if (refresh) {
+        const response = await fetch(`${API_BASE_URL}/token/blacklist/`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ refresh }),
+          signal: AbortSignal.timeout(10000),
+        });
+        if (!response.ok && response.status !== 401) {
+          const data = await response.json().catch(() => ({}));
+          throw new Error(extractErrorMessage(data, 'Logout failed. Please retry.'));
+        }
+      }
+      this.clearTokens();
+    } finally {
+      logoutInProgress = false;
+    }
   },
 
   isAuthenticated(): boolean {
@@ -83,11 +90,16 @@ async function forceRefreshToken(): Promise<string> {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ refresh }),
+    signal: AbortSignal.any([sessionAbortController.signal, AbortSignal.timeout(10000)]),
   });
 
   if (!response.ok) {
-    auth.clearTokens();
-    throw new Error('Session expired');
+    if (response.status === 401) {
+      auth.clearTokens();
+      throw new Error('Session expired');
+    }
+    const data = await response.json().catch(() => ({}));
+    throw new Error(extractErrorMessage(data, 'Could not refresh the session. Please retry.'));
   }
 
   const data: RefreshResponse = await response.json();
@@ -109,41 +121,20 @@ async function request(path: string, options: RequestInit = {}): Promise<Respons
     headers.set('Content-Type', 'application/json');
   }
 
-  const config = { ...options, headers };
+  const config = { ...options, headers, signal: options.signal ?? sessionAbortController.signal };
   const response = await fetch(url, config);
 
-  if (response.status === 401 && auth.getRefreshToken()) {
-    if (isRefreshing) {
-      return new Promise((resolve, reject) => {
-        subscribeTokenRefresh(
-          (newToken) => {
-            headers.set('Authorization', `Bearer ${newToken}`);
-            fetch(url, { ...options, headers })
-              .then(resolve)
-              .catch(reject);
-          },
-          (err) => {
-            reject(err);
-          }
-        );
+  if (response.status === 401 && auth.getRefreshToken() && !logoutInProgress) {
+    let newToken = auth.getAccessToken();
+    if (!newToken || newToken === token) {
+      refreshPromise ??= forceRefreshToken().finally(() => {
+        refreshPromise = null;
       });
+      newToken = await refreshPromise;
     }
-
-    isRefreshing = true;
-
-    try {
-      const newToken = await forceRefreshToken();
-      onTokenRefreshed(newToken);
-
-      headers.set('Authorization', `Bearer ${newToken}`);
-      const retryResponse = await fetch(url, { ...options, headers });
-      isRefreshing = false;
-      return retryResponse;
-    } catch (error) {
-      isRefreshing = false;
-      onTokenRefreshFailed(error);
-      throw error;
-    }
+    config.signal.throwIfAborted();
+    headers.set('Authorization', `Bearer ${newToken}`);
+    return fetch(url, config);
   }
 
   return response;

@@ -106,6 +106,7 @@ interface ChatState {
   setRagEnabled: (enabled: boolean) => void;
   setCompactionEnabled: (enabled: boolean) => void;
   setSelectedDocIds: (ids: string[]) => void;
+  resetUserData: () => void;
   loadConversations: (isAuthenticated: boolean) => Promise<void>;
   loadMoreConversations: () => Promise<void>;
   loadMessages: (chatId: string) => Promise<void>;
@@ -269,6 +270,20 @@ export const useChatStore = create<ChatState>((set, get) => {
 
     setSelectedDocIds: (selectedDocIds) => {
       set({ selectedDocIds });
+    },
+
+    resetUserData: () => {
+      activeAbortController?.abort();
+      activeAbortController = null;
+      set({
+        sessions: [],
+        activeChatId: null,
+        nextConversationsCursor: null,
+        totalConversationsCount: 0,
+        selectedDocIds: [],
+        models: {},
+        isTyping: false,
+      });
     },
 
     loadConversations: async (isAuthenticated) => {

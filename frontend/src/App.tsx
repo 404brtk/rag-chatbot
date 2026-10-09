@@ -19,6 +19,7 @@ function App() {
   const isCompactLayout = useMediaQuery(COMPACT_LAYOUT_QUERY);
 
   const isAuthenticated = useAuthStore((s) => s.isAuthenticated);
+  const sessionKey = isAuthenticated ? 'authenticated' : 'anonymous';
   const isMobileSidebarOpen = useUIStore((s) => s.isMobileSidebarOpen);
   const closeMobileSidebar = useUIStore((s) => s.closeMobileSidebar);
 
@@ -30,12 +31,15 @@ function App() {
   const loadMessages = useChatStore((s) => s.loadMessages);
   const loadMoreMessages = useChatStore((s) => s.loadMoreMessages);
   const sessions = useChatStore((s) => s.sessions);
+  const needsActiveMessages = sessions.some(
+    (session) => session.id === activeChatId && !session.loaded
+  );
   const messages = useChatStore(selectActiveMessages);
   const isTyping = useChatStore((s) => s.isTyping);
 
   useEffect(() => {
-    setActiveChatId(chatId || null);
-  }, [chatId, setActiveChatId]);
+    setActiveChatId(isAuthenticated ? chatId || null : null);
+  }, [chatId, isAuthenticated, setActiveChatId]);
 
   useEffect(() => {
     void loadConversations(isAuthenticated);
@@ -43,10 +47,10 @@ function App() {
   }, [isAuthenticated, loadConversations, loadModels]);
 
   useEffect(() => {
-    if (activeChatId) {
+    if (isAuthenticated && activeChatId && needsActiveMessages) {
       void loadMessages(activeChatId);
     }
-  }, [activeChatId, loadMessages]);
+  }, [isAuthenticated, activeChatId, needsActiveMessages, loadMessages]);
 
   useEffect(() => {
     if (!isCompactLayout && isMobileSidebarOpen) {
@@ -139,10 +143,10 @@ function App() {
       <Sidebar />
       <main className="app-container" ref={scrollRef} onScroll={handleScroll}>
         <TopNav />
-        <Outlet />
+        <Outlet key={sessionKey} />
       </main>
       <AuthDialog />
-      <SettingsDialog />
+      <SettingsDialog key={sessionKey} />
     </div>
   );
 }

@@ -29,6 +29,8 @@ export function TopNav() {
   const toggleSidebar = useUIStore((s) => s.toggleSidebar);
 
   const [isDropdownOpen, setIsDropdownOpen] = useState(false);
+  const [isLoggingOut, setIsLoggingOut] = useState(false);
+  const [logoutError, setLogoutError] = useState<string | null>(null);
   const dropdownRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -48,9 +50,17 @@ export function TopNav() {
     setIsDropdownOpen(false);
   };
 
-  const handleLogout = () => {
-    logout();
-    newChat(navigate);
+  const handleLogout = async () => {
+    setIsLoggingOut(true);
+    setLogoutError(null);
+    try {
+      await logout();
+      newChat(navigate);
+    } catch (err) {
+      setLogoutError(err instanceof Error ? err.message : 'Logout failed. Please retry.');
+    } finally {
+      setIsLoggingOut(false);
+    }
   };
 
   return (
@@ -105,8 +115,14 @@ export function TopNav() {
         {isAuthenticated ? (
           <>
             <span className="user-email-label">{userEmail}</span>
-            <button className="btn-secondary" type="button" onClick={handleLogout}>
-              Logout
+            {logoutError && <span role="alert">{logoutError}</span>}
+            <button
+              className="btn-secondary"
+              type="button"
+              onClick={handleLogout}
+              disabled={isLoggingOut}
+            >
+              {isLoggingOut ? 'Logging out...' : 'Logout'}
             </button>
           </>
         ) : (
